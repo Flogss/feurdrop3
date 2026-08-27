@@ -184,7 +184,7 @@ async function refreshAll() {
 }
 
 document.addEventListener("click", async (e) => {
-  const target = e.target.closest("[data-drop-id], [data-drop-sender], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-toggle-type], #drop-all-btn");
+  const target = e.target.closest("[data-drop-id], [data-drop-sender], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-toggle-type], .drop-all-btn");
   if (!target) return;
 
   const dropId = target.dataset.dropId;
@@ -221,7 +221,7 @@ document.addEventListener("click", async (e) => {
       body: JSON.stringify({ type: nextType }),
     });
     refreshAll();
-  } else if (target.id === "drop-all-btn") {
+  } else if (target.classList.contains("drop-all-btn")) {
     if (confirm("Marquer TOUS les colis en attente comme dropés ?")) {
       await fetchJSON("/api/colis/drop-all", { method: "POST" });
       refreshAll();

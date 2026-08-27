@@ -45,7 +45,7 @@
       <div class="panel">
         <div class="panel-head">
           <h2>Répartition par expéditeur</h2>
-          <button class="btn btn-ghost" id="drop-all-btn">Tout marquer dropé</button>
+          <button class="btn btn-ghost drop-all-btn">Tout marquer dropé</button>
         </div>
         <div id="sender-rows" class="rows"></div>
       </div>
@@ -55,36 +55,11 @@
       <div class="panel">
         <div class="panel-head">
           <h2>Colis en attente</h2>
+          <button class="btn btn-ghost drop-all-btn">Tout marquer dropé</button>
         </div>
         <div id="colis-rows" class="rows"></div>
       </div>
-    </section>
 
-    <section id="view-stats" class="view">
-      <div class="stat-grid stat-grid-single">
-        <div class="stat-card glow-magenta" id="best-day-card">
-          <div class="stat-label">Jour le plus rentable</div>
-          <div class="stat-value" id="stat-bestday-value">—</div>
-          <div class="stat-sub" id="stat-bestday-sub">Pas encore de données</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>7 derniers jours</h2>
-        </div>
-        <div class="chart-wrap" id="chart-week"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Semaine par semaine (ce mois)</h2>
-        </div>
-        <div class="chart-wrap" id="chart-month"></div>
-      </div>
-    </section>
-
-    <section id="view-settings" class="view">
       <div class="panel">
         <div class="panel-head">
           <h2>Prix colis LIT</h2>
@@ -111,6 +86,30 @@
         <p class="hint">Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit automatiquement le prix par défaut au premier colis reçu.</p>
       </div>
     </section>
+
+    <section id="view-stats" class="view">
+      <div class="stat-grid stat-grid-single">
+        <div class="stat-card glow-magenta" id="best-day-card">
+          <div class="stat-label">Jour le plus rentable</div>
+          <div class="stat-value" id="stat-bestday-value">—</div>
+          <div class="stat-sub" id="stat-bestday-sub">Pas encore de données</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>7 derniers jours</h2>
+        </div>
+        <div class="chart-wrap" id="chart-week"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Semaine par semaine (ce mois)</h2>
+        </div>
+        <div class="chart-wrap" id="chart-month"></div>
+      </div>
+    </section>
   </main>
 
   <nav class="tabbar">
@@ -125,10 +124,6 @@
     <button class="tab" data-view="stats">
       <svg viewBox="0 0 24 24"><path d="M4 19V10M12 19V5M20 19v-7"/></svg>
       <span>Stats</span>
-    </button>
-    <button class="tab" data-view="settings">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6V21a2 2 0 11-4 0v-.2a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.6-1H3a2 2 0 110-4h.2a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.6V3a2 2 0 114 0v.2a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.6 1H21a2 2 0 110 4h-.2a1.7 1.7 0 00-1.6 1z"/></svg>
-      <span>Settings</span>
     </button>
   </nav>
 </div>
