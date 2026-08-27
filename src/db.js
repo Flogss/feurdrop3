@@ -34,8 +34,10 @@ db.exec(`
     chat_id INTEGER,
     message_id INTEGER,
     batch_id INTEGER,
+    paid INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    dropped_at TEXT
+    dropped_at TEXT,
+    paid_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -54,6 +56,8 @@ if (!colisColumns.includes("type")) db.exec("ALTER TABLE colis ADD COLUMN type T
 if (!colisColumns.includes("chat_id")) db.exec("ALTER TABLE colis ADD COLUMN chat_id INTEGER");
 if (!colisColumns.includes("message_id")) db.exec("ALTER TABLE colis ADD COLUMN message_id INTEGER");
 if (!colisColumns.includes("batch_id")) db.exec("ALTER TABLE colis ADD COLUMN batch_id INTEGER");
+if (!colisColumns.includes("paid")) db.exec("ALTER TABLE colis ADD COLUMN paid INTEGER NOT NULL DEFAULT 0");
+if (!colisColumns.includes("paid_at")) db.exec("ALTER TABLE colis ADD COLUMN paid_at TEXT");
 
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
@@ -190,6 +194,23 @@ function getBestDay() {
     .get();
 }
 
+function getDebtsBySender() {
+  return db
+    .prepare(
+      `SELECT sender_name, SUM(price) AS owed, COUNT(*) AS count
+       FROM colis WHERE status = 'dropped' AND paid = 0
+       GROUP BY sender_name HAVING owed > 0 ORDER BY owed DESC`
+    )
+    .all();
+}
+
+function markSenderPaid(senderName) {
+  const info = db
+    .prepare("UPDATE colis SET paid = 1, paid_at = datetime('now') WHERE sender_name = ? AND status = 'dropped' AND paid = 0")
+    .run(senderName);
+  return info.changes;
+}
+
 function setBatchType(batchId, type) {
   const rows = db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
   const litPrice = getLitPrice();
@@ -218,6 +239,8 @@ module.exports = {
   getRevenueLast7Days,
   getRevenueWeeksThisMonth,
   getBestDay,
+  getDebtsBySender,
+  markSenderPaid,
   getLitPrice,
   setLitPrice,
   DEFAULT_PRICE,

@@ -11,6 +11,8 @@ const {
   getRevenueLast7Days,
   getRevenueWeeksThisMonth,
   getBestDay,
+  getDebtsBySender,
+  markSenderPaid,
 } = require("../db");
 
 const router = express.Router();
@@ -103,6 +105,15 @@ router.post("/colis/quick-remove/:sender", (req, res) => {
   const removed = quickRemoveColis(req.params.sender);
   if (!removed) return res.status(404).json({ error: "Aucun colis en attente pour cet expediteur" });
   res.json({ ok: true });
+});
+
+router.get("/debts", (req, res) => {
+  res.json(getDebtsBySender());
+});
+
+router.post("/debts/:sender/pay", (req, res) => {
+  const count = markSenderPaid(req.params.sender);
+  res.json({ ok: true, count });
 });
 
 router.get("/stats/revenue", (req, res) => {

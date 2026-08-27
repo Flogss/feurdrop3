@@ -61,28 +61,26 @@ async function loadStats() {
   }
 }
 
-async function loadColis() {
-  const rows = await fetchJSON("/api/colis?status=pending");
-  const container = document.getElementById("colis-rows");
+async function loadDebts() {
+  const rows = await fetchJSON("/api/debts");
+  const container = document.getElementById("debts-rows");
   container.innerHTML = "";
   if (rows.length === 0) {
-    container.innerHTML = `<div class="empty-row">Rien à dropper 🎉</div>`;
+    container.innerHTML = `<div class="empty-row">Personne ne vous doit rien 🎉</div>`;
   }
-  for (const c of rows) {
-    const isLit = c.type === "lit";
+  for (const d of rows) {
     const el = document.createElement("div");
     el.className = "row";
     el.innerHTML = `
       <div class="row-main">
-        <div class="row-title">#${c.id} · ${escapeHtml(c.sender_name)}</div>
-        <div class="row-sub">${new Date(c.created_at + "Z").toLocaleString("fr-FR")}</div>
+        <div class="row-title">${escapeHtml(d.sender_name)}</div>
+        <div class="row-sub">${d.count} colis dropés non payés</div>
       </div>
       <div class="row-stats">
-        <span class="badge ${isLit ? "badge-lit" : "badge-normal"}" data-toggle-type="${c.id}" data-current-type="${c.type}">${isLit ? "LIT" : "normal"}</span>
-        <div class="row-stat"><div class="n">${euro(c.price)}</div></div>
+        <div class="row-stat"><div class="n">${euro(d.owed)}</div><div class="l">doit</div></div>
       </div>
       <div class="row-actions">
-        <button class="btn btn-small btn-primary" data-drop-id="${c.id}">Dropé</button>
+        <button class="btn btn-small btn-primary" data-mark-paid="${escapeAttr(d.sender_name)}">Payé</button>
       </div>
     `;
     container.appendChild(el);
@@ -180,22 +178,21 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadColis(), loadSenders(), loadConfig(), loadRevenueStats()]);
+  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadConfig(), loadRevenueStats()]);
 }
 
 document.addEventListener("click", async (e) => {
-  const target = e.target.closest("[data-drop-id], [data-drop-sender], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-toggle-type], .drop-all-btn");
+  const target = e.target.closest("[data-drop-sender], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn");
   if (!target) return;
 
-  const dropId = target.dataset.dropId;
   const dropSender = target.dataset.dropSender;
   const deleteSender = target.dataset.deleteSender;
   const quickAdd = target.dataset.quickAdd;
   const quickRemove = target.dataset.quickRemove;
-  const toggleType = target.dataset.toggleType;
+  const markPaid = target.dataset.markPaid;
 
-  if (dropId) {
-    await fetchJSON(`/api/colis/${dropId}/drop`, { method: "POST" });
+  if (markPaid) {
+    await fetchJSON(`/api/debts/${encodeURIComponent(markPaid)}/pay`, { method: "POST" });
     refreshAll();
   } else if (dropSender) {
     await fetchJSON(`/api/colis/drop-sender/${encodeURIComponent(dropSender)}`, { method: "POST" });
@@ -212,14 +209,6 @@ document.addEventListener("click", async (e) => {
     try {
       await fetchJSON(`/api/colis/quick-remove/${encodeURIComponent(quickRemove)}`, { method: "POST" });
     } catch (err) { /* nothing pending to remove */ }
-    refreshAll();
-  } else if (toggleType) {
-    const nextType = target.dataset.currentType === "lit" ? "normal" : "lit";
-    await fetchJSON(`/api/colis/${toggleType}/type`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: nextType }),
-    });
     refreshAll();
   } else if (target.classList.contains("drop-all-btn")) {
     if (confirm("Marquer TOUS les colis en attente comme dropés ?")) {

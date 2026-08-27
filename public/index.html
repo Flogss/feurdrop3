@@ -9,6 +9,16 @@
 <body>
 <div class="bg-grid"></div>
 <div class="bg-glow"></div>
+<div class="bg-particles">
+  <span style="left:8%; bottom:-20px; width:5px; height:5px; background:#38f7ff; --p-dx:20px; --p-dy:-70vh; --p-op:0.4; animation-duration:22s; animation-delay:0s;"></span>
+  <span style="left:22%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:-30px; --p-dy:-60vh; --p-op:0.3; animation-duration:18s; animation-delay:3s;"></span>
+  <span style="left:38%; bottom:-20px; width:4px; height:4px; background:#b6ff3e; --p-dx:15px; --p-dy:-80vh; --p-op:0.25; animation-duration:26s; animation-delay:1s;"></span>
+  <span style="left:55%; bottom:-20px; width:6px; height:6px; background:#38f7ff; --p-dx:-25px; --p-dy:-65vh; --p-op:0.3; animation-duration:20s; animation-delay:7s;"></span>
+  <span style="left:70%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:20px; --p-dy:-75vh; --p-op:0.35; animation-duration:24s; animation-delay:4s;"></span>
+  <span style="left:84%; bottom:-20px; width:4px; height:4px; background:#38f7ff; --p-dx:-15px; --p-dy:-70vh; --p-op:0.25; animation-duration:19s; animation-delay:9s;"></span>
+  <span style="left:92%; bottom:-20px; width:3px; height:3px; background:#b6ff3e; --p-dx:10px; --p-dy:-60vh; --p-op:0.3; animation-duration:23s; animation-delay:12s;"></span>
+  <span style="left:14%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:-10px; --p-dy:-85vh; --p-op:0.2; animation-duration:28s; animation-delay:15s;"></span>
+</div>
 
 <div class="app">
   <header class="topbar">
@@ -54,10 +64,9 @@
     <section id="view-colis" class="view">
       <div class="panel">
         <div class="panel-head">
-          <h2>Colis en attente</h2>
-          <button class="btn btn-ghost drop-all-btn">Tout marquer dropé</button>
+          <h2>Ce qu'on nous doit</h2>
         </div>
-        <div id="colis-rows" class="rows"></div>
+        <div id="debts-rows" class="rows"></div>
       </div>
 
       <div class="panel">

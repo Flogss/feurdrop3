@@ -53,6 +53,28 @@ html, body {
   to { transform: translateX(-45%) translateY(30px); }
 }
 
+/* subtle floating background particles */
+.bg-particles {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.bg-particles span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(1px);
+  opacity: 0;
+  animation: floatParticle linear infinite;
+}
+@keyframes floatParticle {
+  0% { transform: translate(0, 0); opacity: 0; }
+  10% { opacity: var(--p-op, 0.35); }
+  90% { opacity: var(--p-op, 0.35); }
+  100% { transform: translate(var(--p-dx, 30px), var(--p-dy, -140px)); opacity: 0; }
+}
+
 .app {
   position: relative;
   z-index: 1;
@@ -142,8 +164,8 @@ main { margin-top: 16px; }
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
   margin-bottom: 16px;
 }
 .stat-grid-single { grid-template-columns: 1fr; }
@@ -151,26 +173,35 @@ main { margin-top: 16px; }
 .stat-card {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 12px 10px;
   background: var(--panel);
   position: relative;
   overflow: hidden;
-  animation: fadein 0.4s ease backwards;
+  animation: fadein 0.4s ease backwards, ledPulse 4s ease-in-out infinite;
 }
-.stat-grid .stat-card:nth-child(1) { animation-delay: 0.02s; }
-.stat-grid .stat-card:nth-child(2) { animation-delay: 0.08s; }
-.stat-grid .stat-card:nth-child(3) { animation-delay: 0.14s; }
+.stat-grid .stat-card:nth-child(1) { animation-delay: 0.02s, 0s; }
+.stat-grid .stat-card:nth-child(2) { animation-delay: 0.08s, 0.6s; }
+.stat-grid .stat-card:nth-child(3) { animation-delay: 0.14s, 1.2s; }
 
 .glow-cyan { box-shadow: 0 0 24px -10px rgba(56, 247, 255, 0.5); border-color: rgba(56,247,255,0.25); }
 .glow-magenta { box-shadow: 0 0 24px -10px rgba(255, 62, 203, 0.5); border-color: rgba(255,62,203,0.25); }
 .glow-lime { box-shadow: 0 0 24px -10px rgba(182, 255, 62, 0.5); border-color: rgba(182,255,62,0.25); }
 
-.stat-label { font-size: 10.5px; color: var(--text-dim); letter-spacing: 1.3px; text-transform: uppercase; }
-.stat-value { font-size: 26px; font-weight: 700; margin-top: 6px; transition: opacity 0.2s ease; }
+@keyframes ledPulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.18); }
+}
+
+.stat-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.8px; text-transform: uppercase; }
+.stat-value { font-size: 19px; font-weight: 700; margin-top: 5px; transition: opacity 0.2s ease; white-space: nowrap; }
 .glow-cyan .stat-value { color: var(--cyan); text-shadow: 0 0 16px rgba(56,247,255,0.4); }
 .glow-magenta .stat-value { color: var(--magenta); text-shadow: 0 0 16px rgba(255,62,203,0.4); }
 .glow-lime .stat-value { color: var(--lime); text-shadow: 0 0 16px rgba(182,255,62,0.4); }
-.stat-sub { font-size: 11px; color: var(--text-dim); margin-top: 5px; }
+.stat-sub { font-size: 9px; color: var(--text-dim); margin-top: 4px; line-height: 1.35; }
+.stat-grid-single .stat-card { padding: 14px 16px; }
+.stat-grid-single .stat-label { font-size: 10.5px; letter-spacing: 1.3px; }
+.stat-grid-single .stat-value { font-size: 26px; white-space: normal; }
+.stat-grid-single .stat-sub { font-size: 11px; }
 
 .panel {
   border: 1px solid var(--panel-border);
@@ -303,8 +334,17 @@ main { margin-top: 16px; }
 .chart-value-label { fill: var(--text); font-size: 10.5px; font-weight: 700; font-family: inherit; }
 .chart-empty { text-align: center; color: var(--text-dim); font-size: 12.5px; padding: 30px 0; }
 
+@media (prefers-reduced-motion: reduce) {
+  .bg-particles, .bg-glow, .stat-card, .brand-dot, .pulse { animation: none !important; }
+}
+
 @media (min-width: 640px) {
   .app { max-width: 900px; padding: 24px 20px 40px; }
+  .stat-grid { gap: 12px; }
+  .stat-card { padding: 16px 18px; }
+  .stat-label { font-size: 11px; letter-spacing: 1.3px; }
+  .stat-value { font-size: 28px; }
+  .stat-sub { font-size: 11.5px; }
   .tabbar {
     position: static;
     justify-content: flex-start;
