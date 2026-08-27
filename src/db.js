@@ -2,7 +2,11 @@ const path = require("path");
 const fs = require("fs");
 const { DatabaseSync } = require("node:sqlite");
 
-const DB_PATH = process.env.DB_PATH || "./data/drop.db";
+const DB_PATH =
+  process.env.DB_PATH ||
+  (process.env.RAILWAY_VOLUME_MOUNT_PATH
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, "drop.db")
+    : "./data/drop.db");
 const DEFAULT_PRICE = Number(process.env.DEFAULT_PRICE || 4);
 const DEFAULT_LIT_PRICE = Number(process.env.DEFAULT_LIT_PRICE || 5.5);
 

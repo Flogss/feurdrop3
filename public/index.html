@@ -63,22 +63,19 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel stock-panel">
         <div class="panel-head">
           <h2>Stock restant</h2>
         </div>
         <div class="stock-row">
+          <button class="btn btn-round btn-ghost" id="stock-minus1" title="-1">−</button>
           <div class="stock-value" id="stock-value">0</div>
-          <div class="stock-actions">
-            <button class="btn btn-round btn-ghost" id="stock-minus1" title="-1">−</button>
-            <button class="btn btn-round btn-primary" id="stock-plus1" title="+1">+</button>
-          </div>
+          <button class="btn btn-round btn-primary" id="stock-plus1" title="+1">+</button>
+          <form id="stock-custom-form" class="stock-custom-form">
+            <input type="number" id="stock-custom-amount" placeholder="± quantité" step="1" required />
+            <button type="button" class="btn btn-primary btn-small" id="stock-custom-add">Ajouter</button>
+          </form>
         </div>
-        <form id="stock-custom-form" class="add-form">
-          <input type="number" id="stock-custom-amount" placeholder="Quantité (ex: 20)" min="0" step="1" required />
-          <button type="button" class="btn btn-primary" id="stock-custom-add">Ajouter</button>
-          <button type="button" class="btn btn-ghost" id="stock-custom-remove">Retirer</button>
-        </form>
       </div>
 
       <div class="panel">

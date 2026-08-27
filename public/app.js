@@ -48,14 +48,16 @@ async function loadStats() {
         <div class="row-title">${escapeHtml(row.sender_name)}</div>
         <div class="row-sub">${row.dropped_count} dropés · ${euro(row.dropped_value)} gagné</div>
       </div>
-      <div class="row-stats">
-        <div class="row-stat"><div class="n">${row.pending_count}</div><div class="l">en attente</div></div>
-        <div class="row-stat"><div class="n">${euro(row.pending_value)}</div><div class="l">valeur</div></div>
-      </div>
-      <div class="row-actions">
-        <button class="btn btn-round btn-ghost" data-quick-remove="${escapeAttr(row.sender_name)}" title="-1 colis">−</button>
-        <button class="btn btn-round btn-primary" data-quick-add="${escapeAttr(row.sender_name)}" title="+1 colis">+</button>
-        ${row.pending_count > 0 ? `<button class="btn btn-small btn-ghost" data-drop-sender="${escapeAttr(row.sender_name)}">Dropper</button>` : ""}
+      <div class="row-right">
+        <div class="row-stats">
+          <div class="row-stat"><div class="n">${row.pending_count}</div><div class="l">en attente</div></div>
+          <div class="row-stat"><div class="n">${euro(row.pending_value)}</div><div class="l">valeur</div></div>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-round btn-ghost" data-quick-remove="${escapeAttr(row.sender_name)}" title="-1 colis">−</button>
+          <button class="btn btn-round btn-primary" data-quick-add="${escapeAttr(row.sender_name)}" title="+1 colis">+</button>
+          ${row.pending_count > 0 ? `<button class="btn btn-small btn-ghost" data-drop-sender="${escapeAttr(row.sender_name)}">Dropper</button>` : ""}
+        </div>
       </div>
     `;
     container.appendChild(el);
@@ -133,11 +135,13 @@ async function loadDebts() {
         <div class="row-title">${escapeHtml(d.sender_name)}</div>
         <div class="row-sub">${d.count} colis dropés non payés</div>
       </div>
-      <div class="row-stats">
-        <div class="row-stat"><div class="n">${euro(d.owed)}</div><div class="l">doit</div></div>
-      </div>
-      <div class="row-actions">
-        <button class="btn btn-small btn-primary" data-mark-paid="${escapeAttr(d.sender_name)}">Payé</button>
+      <div class="row-right">
+        <div class="row-stats">
+          <div class="row-stat"><div class="n">${euro(d.owed)}</div><div class="l">doit</div></div>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-small btn-primary" data-mark-paid="${escapeAttr(d.sender_name)}">Payé</button>
+        </div>
       </div>
     `;
     container.appendChild(el);
@@ -314,13 +318,7 @@ document.getElementById("stock-minus1").addEventListener("click", () => adjustSt
 document.getElementById("stock-custom-add").addEventListener("click", () => {
   const n = Number(document.getElementById("stock-custom-amount").value);
   if (!n) return;
-  adjustStock(Math.abs(n));
-  document.getElementById("stock-custom-amount").value = "";
-});
-document.getElementById("stock-custom-remove").addEventListener("click", () => {
-  const n = Number(document.getElementById("stock-custom-amount").value);
-  if (!n) return;
-  adjustStock(-Math.abs(n));
+  adjustStock(n);
   document.getElementById("stock-custom-amount").value = "";
 });
 
