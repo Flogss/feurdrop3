@@ -129,6 +129,67 @@ function setColisType(id, type) {
   return { ...colis, type, price };
 }
 
+function quickAddColis(senderName) {
+  return addColis(senderName);
+}
+
+function quickRemoveColis(senderName) {
+  const colis = db
+    .prepare("SELECT id FROM colis WHERE sender_name = ? AND status = 'pending' ORDER BY id DESC LIMIT 1")
+    .get(senderName);
+  if (!colis) return false;
+  db.prepare("DELETE FROM colis WHERE id = ?").run(colis.id);
+  return true;
+}
+
+function getRevenueLast7Days() {
+  const rows = db
+    .prepare(
+      `SELECT date(dropped_at) AS d, SUM(price) AS value, COUNT(*) AS count
+       FROM colis WHERE status = 'dropped' AND dropped_at >= datetime('now', '-6 days', 'start of day')
+       GROUP BY d`
+    )
+    .all();
+  const byDate = new Map(rows.map((r) => [r.d, r]));
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const row = byDate.get(key);
+    days.push({ date: key, value: row ? row.value : 0, count: row ? row.count : 0 });
+  }
+  return days;
+}
+
+function getRevenueWeeksThisMonth() {
+  const rows = db
+    .prepare(
+      `SELECT CAST((CAST(strftime('%d', dropped_at) AS INTEGER) - 1) / 7 AS INTEGER) AS week_index,
+              SUM(price) AS value, COUNT(*) AS count
+       FROM colis
+       WHERE status = 'dropped' AND strftime('%Y-%m', dropped_at) = strftime('%Y-%m', 'now')
+       GROUP BY week_index ORDER BY week_index ASC`
+    )
+    .all();
+  const byWeek = new Map(rows.map((r) => [r.week_index, r]));
+  const weeks = [];
+  for (let i = 0; i <= 4; i++) {
+    const row = byWeek.get(i);
+    weeks.push({ label: `Semaine ${i + 1}`, value: row ? row.value : 0, count: row ? row.count : 0 });
+  }
+  return weeks;
+}
+
+function getBestDay() {
+  return db
+    .prepare(
+      `SELECT date(dropped_at) AS date, SUM(price) AS value, COUNT(*) AS count
+       FROM colis WHERE status = 'dropped' GROUP BY date ORDER BY value DESC LIMIT 1`
+    )
+    .get();
+}
+
 function setBatchType(batchId, type) {
   const rows = db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
   const litPrice = getLitPrice();
@@ -152,6 +213,11 @@ module.exports = {
   getLatestBatchId,
   setColisType,
   setBatchType,
+  quickAddColis,
+  quickRemoveColis,
+  getRevenueLast7Days,
+  getRevenueWeeksThisMonth,
+  getBestDay,
   getLitPrice,
   setLitPrice,
   DEFAULT_PRICE,

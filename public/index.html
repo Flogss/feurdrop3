@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>DROP // Control Center</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
@@ -16,11 +16,6 @@
       <span class="brand-dot"></span>
       <span class="brand-text">DROP<span class="brand-accent">.ctrl</span></span>
     </div>
-    <nav class="tabs">
-      <button class="tab active" data-view="dashboard">Dashboard</button>
-      <button class="tab" data-view="colis">Colis</button>
-      <button class="tab" data-view="settings">Settings</button>
-    </nav>
     <div class="status">
       <span class="pulse"></span>
       <span>bot en ligne</span>
@@ -33,7 +28,7 @@
         <div class="stat-card glow-cyan">
           <div class="stat-label">Gagné (total)</div>
           <div class="stat-value" id="stat-earned">0.00 €</div>
-          <div class="stat-sub" id="stat-earned-count">0 colis drops</div>
+          <div class="stat-sub" id="stat-earned-count">0 colis dropés</div>
         </div>
         <div class="stat-card glow-magenta">
           <div class="stat-label">À dropper</div>
@@ -52,21 +47,7 @@
           <h2>Répartition par expéditeur</h2>
           <button class="btn btn-ghost" id="drop-all-btn">Tout marquer dropé</button>
         </div>
-        <div class="table-wrap">
-          <table class="ledger" id="sender-table">
-            <thead>
-              <tr>
-                <th>Expéditeur</th>
-                <th>En attente</th>
-                <th>Valeur en attente</th>
-                <th>Dropés</th>
-                <th>Gagné</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div id="sender-rows" class="rows"></div>
       </div>
     </section>
 
@@ -75,21 +56,31 @@
         <div class="panel-head">
           <h2>Colis en attente</h2>
         </div>
-        <div class="table-wrap">
-          <table class="ledger" id="colis-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Expéditeur</th>
-                <th>Type</th>
-                <th>Prix</th>
-                <th>Reçu le</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div id="colis-rows" class="rows"></div>
+      </div>
+    </section>
+
+    <section id="view-stats" class="view">
+      <div class="stat-grid stat-grid-single">
+        <div class="stat-card glow-magenta" id="best-day-card">
+          <div class="stat-label">Jour le plus rentable</div>
+          <div class="stat-value" id="stat-bestday-value">—</div>
+          <div class="stat-sub" id="stat-bestday-sub">Pas encore de données</div>
         </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>7 derniers jours</h2>
+        </div>
+        <div class="chart-wrap" id="chart-week"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Semaine par semaine (ce mois)</h2>
+        </div>
+        <div class="chart-wrap" id="chart-month"></div>
       </div>
     </section>
 
@@ -111,18 +102,7 @@
         <div class="panel-head">
           <h2>Prix par expéditeur</h2>
         </div>
-        <div class="table-wrap">
-          <table class="ledger" id="settings-table">
-            <thead>
-              <tr>
-                <th>Expéditeur</th>
-                <th>Prix / colis</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div id="settings-rows" class="rows"></div>
         <form id="add-sender-form" class="add-form">
           <input type="text" id="new-sender-name" placeholder="Nom exact de l'expéditeur" required />
           <input type="number" id="new-sender-price" placeholder="Prix €" step="0.5" min="0" required />
@@ -132,6 +112,25 @@
       </div>
     </section>
   </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-view="dashboard">
+      <svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="tab" data-view="colis">
+      <svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/></svg>
+      <span>Colis</span>
+    </button>
+    <button class="tab" data-view="stats">
+      <svg viewBox="0 0 24 24"><path d="M4 19V10M12 19V5M20 19v-7"/></svg>
+      <span>Stats</span>
+    </button>
+    <button class="tab" data-view="settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6V21a2 2 0 11-4 0v-.2a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.6-1H3a2 2 0 110-4h.2a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.6V3a2 2 0 114 0v.2a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.6 1H21a2 2 0 110 4h-.2a1.7 1.7 0 00-1.6 1z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
 </div>
 
 <script src="app.js"></script>

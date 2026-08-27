@@ -1,5 +1,17 @@
 const express = require("express");
-const { db, DEFAULT_PRICE, updateSenderPrice, getLitPrice, setLitPrice, setColisType } = require("../db");
+const {
+  db,
+  DEFAULT_PRICE,
+  updateSenderPrice,
+  getLitPrice,
+  setLitPrice,
+  setColisType,
+  quickAddColis,
+  quickRemoveColis,
+  getRevenueLast7Days,
+  getRevenueWeeksThisMonth,
+  getBestDay,
+} = require("../db");
 
 const router = express.Router();
 
@@ -80,6 +92,25 @@ router.post("/colis/drop-sender/:name", (req, res) => {
     )
     .run(req.params.name);
   res.json({ ok: true, count: info.changes });
+});
+
+router.post("/colis/quick-add/:sender", (req, res) => {
+  const colis = quickAddColis(req.params.sender);
+  res.json(colis);
+});
+
+router.post("/colis/quick-remove/:sender", (req, res) => {
+  const removed = quickRemoveColis(req.params.sender);
+  if (!removed) return res.status(404).json({ error: "Aucun colis en attente pour cet expediteur" });
+  res.json({ ok: true });
+});
+
+router.get("/stats/revenue", (req, res) => {
+  res.json({
+    last7Days: getRevenueLast7Days(),
+    weeksThisMonth: getRevenueWeeksThisMonth(),
+    bestDay: getBestDay() || null,
+  });
 });
 
 router.get("/senders", (req, res) => {
