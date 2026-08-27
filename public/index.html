@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DROP // Control Center</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="brand-text">DROP<span class="brand-accent">.ctrl</span></span>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-view="dashboard">Dashboard</button>
+      <button class="tab" data-view="colis">Colis</button>
+      <button class="tab" data-view="settings">Settings</button>
+    </nav>
+    <div class="status">
+      <span class="pulse"></span>
+      <span>bot en ligne</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-dashboard" class="view active">
+      <div class="stat-grid">
+        <div class="stat-card glow-cyan">
+          <div class="stat-label">Gagné (total)</div>
+          <div class="stat-value" id="stat-earned">0.00 €</div>
+          <div class="stat-sub" id="stat-earned-count">0 colis drops</div>
+        </div>
+        <div class="stat-card glow-magenta">
+          <div class="stat-label">À dropper</div>
+          <div class="stat-value" id="stat-pending">0</div>
+          <div class="stat-sub" id="stat-pending-value">≈ 0.00 € potentiels</div>
+        </div>
+        <div class="stat-card glow-lime">
+          <div class="stat-label">Gagné aujourd'hui</div>
+          <div class="stat-value" id="stat-today">0.00 €</div>
+          <div class="stat-sub" id="stat-today-count">0 colis dropés</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Répartition par expéditeur</h2>
+          <button class="btn btn-ghost" id="drop-all-btn">Tout marquer dropé</button>
+        </div>
+        <div class="table-wrap">
+          <table class="ledger" id="sender-table">
+            <thead>
+              <tr>
+                <th>Expéditeur</th>
+                <th>En attente</th>
+                <th>Valeur en attente</th>
+                <th>Dropés</th>
+                <th>Gagné</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-colis" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Colis en attente</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="ledger" id="colis-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Expéditeur</th>
+                <th>Prix</th>
+                <th>Reçu le</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Prix par expéditeur</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="ledger" id="settings-table">
+            <thead>
+              <tr>
+                <th>Expéditeur</th>
+                <th>Prix / colis</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <form id="add-sender-form" class="add-form">
+          <input type="text" id="new-sender-name" placeholder="Nom exact de l'expéditeur" required />
+          <input type="number" id="new-sender-price" placeholder="Prix €" step="0.5" min="0" required />
+          <button type="submit" class="btn btn-primary">Ajouter</button>
+        </form>
+        <p class="hint">Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit automatiquement le prix par défaut au premier colis reçu.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

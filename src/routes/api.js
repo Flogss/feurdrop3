@@ -1,0 +1,108 @@
+const express = require("express");
+const { db, DEFAULT_PRICE } = require("../db");
+
+const router = express.Router();
+
+router.get("/stats", (req, res) => {
+  const pending = db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'")
+    .get();
+  const dropped = db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'dropped'")
+    .get();
+  const today = db
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis
+       WHERE status = 'dropped' AND date(dropped_at) = date('now')`
+    )
+    .get();
+  const bySender = db
+    .prepare(
+      `SELECT sender_name,
+              SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+              SUM(CASE WHEN status = 'pending' THEN price ELSE 0 END) AS pending_value,
+              SUM(CASE WHEN status = 'dropped' THEN 1 ELSE 0 END) AS dropped_count,
+              SUM(CASE WHEN status = 'dropped' THEN price ELSE 0 END) AS dropped_value
+       FROM colis GROUP BY sender_name ORDER BY pending_count DESC`
+    )
+    .all();
+
+  res.json({
+    pendingCount: pending.count,
+    pendingValue: pending.value,
+    droppedCount: dropped.count,
+    droppedValue: dropped.value,
+    todayCount: today.count,
+    todayValue: today.value,
+    bySender,
+  });
+});
+
+router.get("/colis", (req, res) => {
+  const status = req.query.status === "dropped" ? "dropped" : "pending";
+  const rows = db
+    .prepare("SELECT * FROM colis WHERE status = ? ORDER BY created_at DESC LIMIT 500")
+    .all(status);
+  res.json(rows);
+});
+
+router.post("/colis/:id/drop", (req, res) => {
+  const info = db
+    .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE id = ? AND status = 'pending'")
+    .run(req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Colis introuvable ou deja drope" });
+  res.json({ ok: true });
+});
+
+router.post("/colis/drop-all", (req, res) => {
+  const info = db
+    .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'")
+    .run();
+  res.json({ ok: true, count: info.changes });
+});
+
+router.post("/colis/drop-sender/:name", (req, res) => {
+  const info = db
+    .prepare(
+      "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND sender_name = ?"
+    )
+    .run(req.params.name);
+  res.json({ ok: true, count: info.changes });
+});
+
+router.get("/senders", (req, res) => {
+  res.json(db.prepare("SELECT * FROM senders ORDER BY name ASC").all());
+});
+
+router.post("/senders", (req, res) => {
+  const name = (req.body.name || "").trim();
+  const price = Number(req.body.price);
+  if (!name || Number.isNaN(price) || price < 0) {
+    return res.status(400).json({ error: "Nom ou prix invalide" });
+  }
+  try {
+    db.prepare("INSERT INTO senders (name, price) VALUES (?, ?)").run(name, price);
+  } catch (err) {
+    return res.status(400).json({ error: "Cet expediteur existe deja" });
+  }
+  res.json(db.prepare("SELECT * FROM senders WHERE name = ?").get(name));
+});
+
+router.put("/senders/:id", (req, res) => {
+  const price = Number(req.body.price);
+  if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
+  const info = db.prepare("UPDATE senders SET price = ? WHERE id = ?").run(price, req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Expediteur introuvable" });
+  res.json(db.prepare("SELECT * FROM senders WHERE id = ?").get(req.params.id));
+});
+
+router.delete("/senders/:id", (req, res) => {
+  db.prepare("DELETE FROM senders WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+router.get("/config", (req, res) => {
+  res.json({ defaultPrice: DEFAULT_PRICE });
+});
+
+module.exports = router;
