@@ -13,6 +13,8 @@ const {
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
+  getStock,
+  adjustStock,
 } = require("../db");
 
 const router = express.Router();
@@ -84,7 +86,8 @@ router.post("/colis/drop-all", (req, res) => {
   const info = db
     .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'")
     .run();
-  res.json({ ok: true, count: info.changes });
+  if (info.changes > 0) adjustStock(-info.changes);
+  res.json({ ok: true, count: info.changes, stock: getStock() });
 });
 
 router.post("/colis/drop-sender/:name", (req, res) => {
@@ -93,7 +96,8 @@ router.post("/colis/drop-sender/:name", (req, res) => {
       "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND sender_name = ?"
     )
     .run(req.params.name);
-  res.json({ ok: true, count: info.changes });
+  if (info.changes > 0) adjustStock(-info.changes);
+  res.json({ ok: true, count: info.changes, stock: getStock() });
 });
 
 router.post("/colis/quick-add/:sender", (req, res) => {
@@ -105,6 +109,16 @@ router.post("/colis/quick-remove/:sender", (req, res) => {
   const removed = quickRemoveColis(req.params.sender);
   if (!removed) return res.status(404).json({ error: "Aucun colis en attente pour cet expediteur" });
   res.json({ ok: true });
+});
+
+router.get("/stock", (req, res) => {
+  res.json({ stock: getStock() });
+});
+
+router.post("/stock/adjust", (req, res) => {
+  const delta = Number(req.body.delta);
+  if (Number.isNaN(delta)) return res.status(400).json({ error: "Quantite invalide" });
+  res.json({ stock: adjustStock(delta) });
 });
 
 router.get("/debts", (req, res) => {

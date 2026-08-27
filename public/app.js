@@ -1,5 +1,6 @@
 const euro = (n) => `${Number(n || 0).toFixed(2)} €`;
 const DAY_LABELS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff", "#ff6b6b", "#5ad1ff", "#ff8ad1"];
 
 function switchView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
@@ -59,6 +60,62 @@ async function loadStats() {
     `;
     container.appendChild(el);
   }
+
+  renderDonut(s.bySender);
+}
+
+function donutSVG(items) {
+  const total = items.reduce((sum, it) => sum + it.value, 0);
+  if (total <= 0) return `<div class="chart-empty">Pas encore de données</div>`;
+
+  const size = 200, cx = size / 2, cy = size / 2, r = 78, strokeWidth = 26;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  const segments = items.map((it, i) => {
+    const frac = it.value / total;
+    const len = frac * circumference;
+    const gap = items.length > 1 ? 2 : 0;
+    const dash = `${Math.max(len - gap, 0)} ${circumference - len + gap}`;
+    const seg = `<circle class="donut-seg" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
+      stroke-width="${strokeWidth}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
+      <title>${it.sender_name}: ${euro(it.value)} (${Math.round(frac * 100)}%)</title>
+    </circle>`;
+    offset += len;
+    return seg;
+  }).join("");
+
+  return `
+    <svg viewBox="0 0 ${size} ${size}" class="donut-svg">
+      ${segments}
+      <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="donut-total-value">${euro(total)}</text>
+      <text x="${cx}" y="${cy + 16}" text-anchor="middle" class="donut-total-label">total</text>
+    </svg>
+  `;
+}
+
+function donutLegend(items) {
+  const total = items.reduce((sum, it) => sum + it.value, 0) || 1;
+  return `<div class="donut-legend">${items.map((it, i) => `
+    <div class="donut-legend-item">
+      <span class="donut-swatch" style="background:${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"></span>
+      <span class="donut-legend-name">${escapeHtml(it.sender_name)}</span>
+      <span class="donut-legend-value">${euro(it.value)} · ${Math.round((it.value / total) * 100)}%</span>
+    </div>
+  `).join("")}</div>`;
+}
+
+function renderDonut(bySender) {
+  const items = bySender
+    .map((s) => ({ sender_name: s.sender_name, value: s.dropped_value }))
+    .filter((s) => s.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const el = document.getElementById("donut-sender");
+  if (!el) return;
+  if (items.length === 0) {
+    el.innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="donut-layout">${donutSVG(items)}${donutLegend(items)}</div>`;
 }
 
 async function loadDebts() {
@@ -105,6 +162,20 @@ async function loadSenders() {
     `;
     container.appendChild(el);
   }
+}
+
+async function loadStock() {
+  const { stock } = await fetchJSON("/api/stock");
+  animateValue(document.getElementById("stock-value"), String(stock));
+}
+
+async function adjustStock(delta) {
+  await fetchJSON("/api/stock/adjust", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ delta }),
+  });
+  refreshAll();
 }
 
 async function loadConfig() {
@@ -178,7 +249,7 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadConfig(), loadRevenueStats()]);
+  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadConfig(), loadRevenueStats(), loadStock()]);
 }
 
 document.addEventListener("click", async (e) => {
@@ -235,6 +306,22 @@ document.addEventListener("change", async (e) => {
     });
     refreshAll();
   }
+});
+
+document.getElementById("stock-custom-form").addEventListener("submit", (e) => e.preventDefault());
+document.getElementById("stock-plus1").addEventListener("click", () => adjustStock(1));
+document.getElementById("stock-minus1").addEventListener("click", () => adjustStock(-1));
+document.getElementById("stock-custom-add").addEventListener("click", () => {
+  const n = Number(document.getElementById("stock-custom-amount").value);
+  if (!n) return;
+  adjustStock(Math.abs(n));
+  document.getElementById("stock-custom-amount").value = "";
+});
+document.getElementById("stock-custom-remove").addEventListener("click", () => {
+  const n = Number(document.getElementById("stock-custom-amount").value);
+  if (!n) return;
+  adjustStock(-Math.abs(n));
+  document.getElementById("stock-custom-amount").value = "";
 });
 
 document.getElementById("add-sender-form").addEventListener("submit", async (e) => {

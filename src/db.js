@@ -79,6 +79,16 @@ function setLitPrice(price) {
   db.prepare("UPDATE colis SET price = ? WHERE status = 'pending' AND type = 'lit'").run(price);
 }
 
+function getStock() {
+  return Number(getSetting("stock", 0));
+}
+
+function adjustStock(delta) {
+  const next = getStock() + Number(delta);
+  setSetting("stock", next);
+  return next;
+}
+
 function getOrCreateSender(name) {
   const clean = (name || "Inconnu").trim().slice(0, 120) || "Inconnu";
   const existing = db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
@@ -243,6 +253,8 @@ module.exports = {
   markSenderPaid,
   getLitPrice,
   setLitPrice,
+  getStock,
+  adjustStock,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
 };
