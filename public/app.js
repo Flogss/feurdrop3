@@ -11,6 +11,8 @@ document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => switchView(tab.dataset.view));
 });
 
+document.getElementById("brand-home").addEventListener("click", () => switchView("dashboard"));
+
 async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
