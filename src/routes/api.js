@@ -1,5 +1,5 @@
 const express = require("express");
-const { db, DEFAULT_PRICE } = require("../db");
+const { db, DEFAULT_PRICE, updateSenderPrice, getLitPrice, setLitPrice, setColisType } = require("../db");
 
 const router = express.Router();
 
@@ -26,6 +26,9 @@ router.get("/stats", (req, res) => {
        FROM colis GROUP BY sender_name ORDER BY pending_count DESC`
     )
     .all();
+  const litPending = db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'lit'")
+    .get();
 
   res.json({
     pendingCount: pending.count,
@@ -34,6 +37,8 @@ router.get("/stats", (req, res) => {
     droppedValue: dropped.value,
     todayCount: today.count,
     todayValue: today.value,
+    litPendingCount: litPending.count,
+    litPendingValue: litPending.value,
     bySender,
   });
 });
@@ -52,6 +57,13 @@ router.post("/colis/:id/drop", (req, res) => {
     .run(req.params.id);
   if (info.changes === 0) return res.status(404).json({ error: "Colis introuvable ou deja drope" });
   res.json({ ok: true });
+});
+
+router.post("/colis/:id/type", (req, res) => {
+  const type = req.body.type === "lit" ? "lit" : "normal";
+  const updated = setColisType(req.params.id, type);
+  if (!updated) return res.status(404).json({ error: "Colis introuvable ou deja drope" });
+  res.json(updated);
 });
 
 router.post("/colis/drop-all", (req, res) => {
@@ -91,9 +103,9 @@ router.post("/senders", (req, res) => {
 router.put("/senders/:id", (req, res) => {
   const price = Number(req.body.price);
   if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
-  const info = db.prepare("UPDATE senders SET price = ? WHERE id = ?").run(price, req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: "Expediteur introuvable" });
-  res.json(db.prepare("SELECT * FROM senders WHERE id = ?").get(req.params.id));
+  const sender = updateSenderPrice(req.params.id, price);
+  if (!sender) return res.status(404).json({ error: "Expediteur introuvable" });
+  res.json(sender);
 });
 
 router.delete("/senders/:id", (req, res) => {
@@ -102,7 +114,14 @@ router.delete("/senders/:id", (req, res) => {
 });
 
 router.get("/config", (req, res) => {
-  res.json({ defaultPrice: DEFAULT_PRICE });
+  res.json({ defaultPrice: DEFAULT_PRICE, litPrice: getLitPrice() });
+});
+
+router.put("/config/lit-price", (req, res) => {
+  const price = Number(req.body.price);
+  if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
+  setLitPrice(price);
+  res.json({ litPrice: price });
 });
 
 module.exports = router;

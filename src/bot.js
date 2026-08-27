@@ -1,5 +1,12 @@
 const TelegramBot = require("node-telegram-bot-api");
-const { addColis } = require("./db");
+const {
+  addColis,
+  createBatch,
+  findColisByMessage,
+  getLatestBatchId,
+  setColisType,
+  setBatchType,
+} = require("./db");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
@@ -49,7 +56,7 @@ function startBot() {
   }
 
   const bot = new TelegramBot(TOKEN, { polling: true });
-  const batches = new Map(); // chatId -> { count, total, bySender: Map, timer }
+  const batches = new Map(); // chatId -> { batchId, count, total, bySender: Map, timer }
 
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
 
@@ -57,13 +64,24 @@ function startBot() {
     if (!isPdf(msg.document)) return;
 
     const senderName = extractSenderName(msg);
-    const colis = addColis(senderName);
 
     let batch = batches.get(msg.chat.id);
     if (!batch) {
-      batch = { count: 0, total: 0, bySender: new Map(), timer: null };
+      batch = {
+        batchId: createBatch(msg.chat.id),
+        count: 0,
+        total: 0,
+        bySender: new Map(),
+        timer: null,
+      };
       batches.set(msg.chat.id, batch);
     }
+
+    const colis = addColis(senderName, {
+      chatId: msg.chat.id,
+      messageId: msg.message_id,
+      batchId: batch.batchId,
+    });
 
     batch.count += 1;
     batch.total += colis.price;
@@ -76,12 +94,49 @@ function startBot() {
   bot.onText(/^\/start/, (msg) => {
     bot.sendMessage(
       msg.chat.id,
-      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard."
+      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\nRepond a un colis avec /lit ou /unlit pour changer son type. Utilise /litall ou /unlitall pour appliquer au dernier groupe de colis envoye."
     );
   });
 
+  bot.onText(/^\/lit(@\w+)?$/, (msg) => handleSingleType(bot, msg, "lit"));
+  bot.onText(/^\/unlit(@\w+)?$/, (msg) => handleSingleType(bot, msg, "normal"));
+
+  bot.onText(/^\/litall(@\w+)?$/, (msg) => handleBatchType(bot, msg, batches, "lit"));
+  bot.onText(/^\/unlitall(@\w+)?$/, (msg) => handleBatchType(bot, msg, batches, "normal"));
+
   console.log("[bot] demarre (polling)");
   return bot;
+}
+
+function handleSingleType(bot, msg, type) {
+  const reply = msg.reply_to_message;
+  if (!reply) {
+    bot.sendMessage(msg.chat.id, "Reponds a un message contenant un colis avec /lit ou /unlit.");
+    return;
+  }
+  const colis = findColisByMessage(msg.chat.id, reply.message_id);
+  if (!colis) {
+    bot.sendMessage(msg.chat.id, "Colis introuvable (deja drope ou pas un colis).");
+    return;
+  }
+  const updated = setColisType(colis.id, type);
+  const label = type === "lit" ? "LIT" : "normal";
+  bot.sendMessage(msg.chat.id, `Colis #${updated.id} (${updated.sender_name}) passe en ${label} (${updated.price.toFixed(2)} EUR).`);
+}
+
+function handleBatchType(bot, msg, batches, type) {
+  const batchId = getLatestBatchId(msg.chat.id);
+  if (!batchId) {
+    bot.sendMessage(msg.chat.id, "Aucun groupe de colis recent trouve.");
+    return;
+  }
+  const count = setBatchType(batchId, type);
+  const label = type === "lit" ? "LIT" : "normal";
+  if (count === 0) {
+    bot.sendMessage(msg.chat.id, "Aucun colis en attente dans le dernier groupe.");
+    return;
+  }
+  bot.sendMessage(msg.chat.id, `${count} colis passes en ${label}.`);
 }
 
 function flushBatch(bot, chatId, batches) {

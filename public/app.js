@@ -48,19 +48,27 @@ async function loadColis() {
   const tbody = document.querySelector("#colis-table tbody");
   tbody.innerHTML = "";
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">Rien à dropper 🎉</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">Rien à dropper 🎉</td></tr>`;
   }
   for (const c of rows) {
     const tr = document.createElement("tr");
+    const isLit = c.type === "lit";
     tr.innerHTML = `
       <td>#${c.id}</td>
       <td>${escapeHtml(c.sender_name)}</td>
+      <td><span class="badge ${isLit ? "badge-lit" : "badge-normal"}" data-toggle-type="${c.id}" data-current-type="${c.type}">${isLit ? "LIT" : "normal"}</span></td>
       <td>${euro(c.price)}</td>
       <td>${new Date(c.created_at + "Z").toLocaleString("fr-FR")}</td>
       <td><button class="btn btn-small btn-primary" data-drop-id="${c.id}">Dropé</button></td>
     `;
     tbody.appendChild(tr);
   }
+}
+
+async function loadConfig() {
+  const cfg = await fetchJSON("/api/config");
+  const input = document.getElementById("lit-price-input");
+  if (document.activeElement !== input) input.value = cfg.litPrice;
 }
 
 async function loadSenders() {
@@ -84,7 +92,7 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadColis(), loadSenders()]);
+  await Promise.all([loadStats(), loadColis(), loadSenders(), loadConfig()]);
 }
 
 document.addEventListener("click", async (e) => {
@@ -108,6 +116,15 @@ document.addEventListener("click", async (e) => {
       await fetchJSON("/api/colis/drop-all", { method: "POST" });
       refreshAll();
     }
+  } else if (e.target.dataset.toggleType) {
+    const id = e.target.dataset.toggleType;
+    const nextType = e.target.dataset.currentType === "lit" ? "normal" : "lit";
+    await fetchJSON(`/api/colis/${id}/type`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: nextType }),
+    });
+    refreshAll();
   }
 });
 
@@ -119,7 +136,14 @@ document.addEventListener("change", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ price: Number(e.target.value) }),
     });
-    loadStats();
+    refreshAll();
+  } else if (e.target.id === "lit-price-input") {
+    await fetchJSON("/api/config/lit-price", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price: Number(e.target.value) }),
+    });
+    refreshAll();
   }
 });
 
