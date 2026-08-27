@@ -1,7 +1,7 @@
 const TelegramBot = require("node-telegram-bot-api");
 const { addColis } = require("./db");
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
 
 function extractSenderName(msg) {
