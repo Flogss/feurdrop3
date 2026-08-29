@@ -19,13 +19,66 @@ async function fetchJSON(url, opts) {
   return res.json();
 }
 
+const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Empeche de reconstruire le DOM (et donc de rejouer les animations) quand le
+// rafraichissement periodique renvoie exactement les memes donnees.
+const renderCache = new Map();
+function hasChanged(key, data) {
+  const signature = JSON.stringify(data);
+  if (renderCache.get(key) === signature) return false;
+  renderCache.set(key, signature);
+  return true;
+}
+
+// Anime un nombre de sa valeur actuelle vers la nouvelle, en conservant le
+// format (suffixe " €", decimales) du texte cible.
 function animateValue(el, newText) {
   if (el.textContent === newText) return;
-  el.style.opacity = "0.3";
-  setTimeout(() => {
+
+  const target = parseFloat(String(newText).replace(/[^\d.-]/g, ""));
+  const start = parseFloat(String(el.textContent).replace(/[^\d.-]/g, ""));
+  const suffix = String(newText).replace(/^[\d.,\s-]+/, "");
+  const decimals = (String(newText).split(".")[1] || "").replace(/\D+$/, "").length;
+
+  if (prefersReducedMotion || Number.isNaN(target) || Number.isNaN(start) || start === target) {
     el.textContent = newText;
-    el.style.opacity = "1";
-  }, 120);
+    el.classList.remove("value-bump");
+    void el.offsetWidth;
+    el.classList.add("value-bump");
+    return;
+  }
+
+  const duration = 550;
+  const t0 = performance.now();
+  if (el._countRAF) cancelAnimationFrame(el._countRAF);
+
+  const step = (now) => {
+    const p = Math.min((now - t0) / duration, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    const current = start + (target - start) * eased;
+    el.textContent = `${current.toFixed(decimals)}${suffix}`;
+    if (p < 1) {
+      el._countRAF = requestAnimationFrame(step);
+    } else {
+      el.textContent = newText;
+      el._countRAF = null;
+    }
+  };
+  el._countRAF = requestAnimationFrame(step);
+
+  el.classList.remove("value-bump");
+  void el.offsetWidth;
+  el.classList.add("value-bump");
+}
+
+// Applique un delai croissant pour que les lignes apparaissent en cascade.
+function staggerIn(container) {
+  if (prefersReducedMotion) return;
+  [...container.children].forEach((child, i) => {
+    child.style.animationDelay = `${Math.min(i * 45, 360)}ms`;
+    child.classList.add("row-enter");
+  });
 }
 
 async function loadStats() {
@@ -36,6 +89,8 @@ async function loadStats() {
   document.getElementById("stat-pending-value").textContent = `≈ ${euro(s.pendingValue)}`;
   animateValue(document.getElementById("stat-today"), euro(s.todayValue));
   document.getElementById("stat-today-count").textContent = `${s.todayCount} colis dropés`;
+
+  if (!hasChanged("senders", s.bySender)) return;
 
   const container = document.getElementById("sender-rows");
   container.innerHTML = "";
@@ -48,10 +103,15 @@ async function loadStats() {
     el.innerHTML = `
       <div class="row-main">
         <div class="row-title">${escapeHtml(row.sender_name)}</div>
-        <div class="row-sub">${row.dropped_count} dropés · ${euro(row.dropped_value)}</div>
+        <div class="row-sub">
+          ${row.dropped_count} dropés · <span class="sub-earned">${euro(row.dropped_value)}</span>${
+            row.pending_count > 0
+              ? ` · <span class="sub-pending">${row.pending_count} à drop</span>`
+              : ""
+          }
+        </div>
       </div>
       <div class="row-actions">
-        ${row.pending_count > 0 ? `<span class="chip chip-pending">${row.pending_count} · ${euro(row.pending_value)}</span>` : ""}
         <button class="btn btn-round btn-ghost" data-quick-remove="${escapeAttr(row.sender_name)}" title="-1 colis">−</button>
         <button class="btn btn-round btn-primary" data-quick-add="${escapeAttr(row.sender_name)}" title="+1 colis">+</button>
         ${row.pending_count > 0 ? `<button class="btn btn-small btn-ghost" data-drop-sender="${escapeAttr(row.sender_name)}">Drop</button>` : ""}
@@ -59,6 +119,7 @@ async function loadStats() {
     `;
     container.appendChild(el);
   }
+  staggerIn(container);
 
   renderDonut(s.bySender);
 }
@@ -119,6 +180,8 @@ function renderDonut(bySender) {
 
 async function loadDebts() {
   const rows = await fetchJSON("/api/debts");
+  if (!hasChanged("debts", rows)) return;
+
   const container = document.getElementById("debts-rows");
   container.innerHTML = "";
   if (rows.length === 0) {
@@ -139,10 +202,13 @@ async function loadDebts() {
     `;
     container.appendChild(el);
   }
+  staggerIn(container);
 }
 
 async function loadSenders() {
   const rows = await fetchJSON("/api/senders");
+  if (!hasChanged("settings", rows)) return;
+
   const container = document.getElementById("settings-rows");
   container.innerHTML = "";
   for (const s of rows) {
@@ -159,6 +225,7 @@ async function loadSenders() {
     `;
     container.appendChild(el);
   }
+  staggerIn(container);
 }
 
 const LOW_STOCK_THRESHOLD = 5;
