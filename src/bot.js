@@ -84,9 +84,21 @@ function startBot() {
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
 
   bot.on("message", (msg) => {
+    if (msg.document) {
+      console.log("[bot] document recu", {
+        chatId: msg.chat.id,
+        chatType: msg.chat.type,
+        threadId: msg.message_thread_id,
+        fileName: msg.document.file_name,
+        mimeType: msg.document.mime_type,
+        isForward: !!(msg.forward_origin || msg.forward_from || msg.forward_sender_name),
+      });
+    }
+
     if (!isPdf(msg.document)) return;
 
     const forcedType = resolveForcedType(msg);
+    console.log("[bot] forcedType resolu", { forcedType, expectedChatId: AUTO_GROUP_CHAT_ID });
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
     const senderName = extractSenderName(msg);
