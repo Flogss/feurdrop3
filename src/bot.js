@@ -6,7 +6,11 @@ const {
   getLatestBatchId,
   setColisType,
   setBatchType,
+  getPendingSummary,
+  getStatsMessageId,
+  setStatsMessageId,
 } = require("./db");
+const { renderStatsImage } = require("./statsImage");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
@@ -16,6 +20,7 @@ const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
 const AUTO_GROUP_CHAT_ID = -1004349429422; // derive de l'id de canal 4349429422 (t.me/c/4349429422/...)
 const AUTO_LIT_TOPIC_IDS = [3];
 const AUTO_NORMAL_TOPIC_IDS = [2, 4];
+const AUTO_STATS_TOPIC_ID = 1;
 
 function extractSenderName(msg) {
   const origin = msg.forward_origin;
@@ -84,31 +89,9 @@ function startBot() {
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
 
   const handleIncoming = (msg) => {
-    console.log("[bot] message recu", {
-      chatId: msg.chat.id,
-      chatType: msg.chat.type,
-      chatTitle: msg.chat.title,
-      threadId: msg.message_thread_id,
-      isTopicMessage: msg.is_topic_message,
-      text: msg.text ? msg.text.slice(0, 30) : undefined,
-      hasDocument: !!msg.document,
-    });
-
-    if (msg.document) {
-      console.log("[bot] document recu", {
-        chatId: msg.chat.id,
-        chatType: msg.chat.type,
-        threadId: msg.message_thread_id,
-        fileName: msg.document.file_name,
-        mimeType: msg.document.mime_type,
-        isForward: !!(msg.forward_origin || msg.forward_from || msg.forward_sender_name),
-      });
-    }
-
     if (!isPdf(msg.document)) return;
 
     const forcedType = resolveForcedType(msg);
-    console.log("[bot] forcedType resolu", { forcedType, expectedChatId: AUTO_GROUP_CHAT_ID });
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
     const senderName = extractSenderName(msg);
@@ -147,10 +130,7 @@ function startBot() {
   bot.on("message", handleIncoming);
   // Si "4349429422" est un Channel Telegram (pas un supergroupe), les posts
   // arrivent comme channel_post et non comme message classique.
-  bot.on("channel_post", (msg) => {
-    console.log("[bot] channel_post recu", { chatId: msg.chat.id, threadId: msg.message_thread_id, hasDoc: !!msg.document });
-    handleIncoming(msg);
-  });
+  bot.on("channel_post", handleIncoming);
 
   bot.onText(/^\/start/, (msg) => {
     bot.sendMessage(
@@ -200,10 +180,41 @@ function handleBatchType(bot, msg, type) {
   bot.sendMessage(msg.chat.id, `${count} colis passes en ${label}.`);
 }
 
+async function updateGroupStatsPhoto(bot, addedCount) {
+  try {
+    const { count, value } = getPendingSummary();
+    const image = await renderStatsImage({ pendingCount: count, pendingValue: value, addedCount });
+
+    const prevId = getStatsMessageId("group");
+    if (prevId) {
+      try {
+        await bot.deleteMessage(AUTO_GROUP_CHAT_ID, prevId);
+      } catch (err) {
+        // message deja supprime ou trop vieux, on continue
+      }
+    }
+
+    const sent = await bot.sendPhoto(
+      AUTO_GROUP_CHAT_ID,
+      image,
+      { message_thread_id: AUTO_STATS_TOPIC_ID },
+      { filename: "stats.png", contentType: "image/png" }
+    );
+    setStatsMessageId("group", sent.message_id);
+  } catch (err) {
+    console.error("[bot] updateGroupStatsPhoto error", err.message);
+  }
+}
+
 function flushBatch(bot, key, batches) {
   const batch = batches.get(key);
   if (!batch) return;
   batches.delete(key);
+
+  if (batch.chatId === AUTO_GROUP_CHAT_ID) {
+    updateGroupStatsPhoto(bot, batch.count);
+    return;
+  }
 
   const detail = [...batch.bySender.entries()]
     .map(([name, count]) => `  • ${name}: +${count}`)

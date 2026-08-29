@@ -93,6 +93,22 @@ function adjustStock(delta) {
   return next;
 }
 
+function getPendingSummary() {
+  const row = db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'")
+    .get();
+  return { count: row.count, value: row.value };
+}
+
+function getStatsMessageId(key) {
+  const value = getSetting(`stats_msg_${key}`, null);
+  return value ? Number(value) : null;
+}
+
+function setStatsMessageId(key, messageId) {
+  setSetting(`stats_msg_${key}`, messageId);
+}
+
 function getOrCreateSender(name) {
   const clean = (name || "Inconnu").trim().slice(0, 120) || "Inconnu";
   const existing = db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
@@ -260,6 +276,9 @@ module.exports = {
   setLitPrice,
   getStock,
   adjustStock,
+  getPendingSummary,
+  getStatsMessageId,
+  setStatsMessageId,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
 };
