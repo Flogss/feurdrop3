@@ -358,9 +358,21 @@ main { margin-top: 16px; }
   font-weight: 700;
   color: var(--cyan);
   text-shadow: 0 0 18px rgba(56,247,255,0.4);
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease, color 0.2s ease;
   min-width: 2.5ch;
   text-align: center;
+}
+.stock-value.stock-low {
+  color: #ff3b3b;
+  text-shadow: 0 0 18px rgba(255,59,59,0.6);
+  animation: stockBlink 0.9s step-start infinite;
+}
+@keyframes stockBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stock-value.stock-low { animation: none; }
 }
 .stock-custom-form { display: flex; gap: 8px; align-items: center; margin-left: auto; flex: 1; min-width: 160px; max-width: 240px; }
 .stock-custom-form input {

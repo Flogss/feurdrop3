@@ -116,14 +116,15 @@ function createBatch(chatId) {
   return info.lastInsertRowid;
 }
 
-function addColis(senderName, { chatId, messageId, batchId } = {}) {
+function addColis(senderName, { chatId, messageId, batchId, type = "normal" } = {}) {
   const sender = getOrCreateSender(senderName);
+  const price = type === "lit" ? getLitPrice() : sender.price;
   const info = db
     .prepare(
-      "INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id) VALUES (?, 'normal', ?, 'pending', ?, ?, ?)"
+      "INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id) VALUES (?, ?, ?, 'pending', ?, ?, ?)"
     )
-    .run(sender.name, sender.price, chatId || null, messageId || null, batchId || null);
-  return { id: info.lastInsertRowid, sender_name: sender.name, price: sender.price };
+    .run(sender.name, type, price, chatId || null, messageId || null, batchId || null);
+  return { id: info.lastInsertRowid, sender_name: sender.name, price, type };
 }
 
 function findColisByMessage(chatId, messageId) {

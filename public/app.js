@@ -170,9 +170,13 @@ async function loadSenders() {
   }
 }
 
+const LOW_STOCK_THRESHOLD = 5;
+
 async function loadStock() {
   const { stock } = await fetchJSON("/api/stock");
-  animateValue(document.getElementById("stock-value"), String(stock));
+  const el = document.getElementById("stock-value");
+  animateValue(el, String(stock));
+  el.classList.toggle("stock-low", stock <= LOW_STOCK_THRESHOLD);
 }
 
 async function adjustStock(delta) {
