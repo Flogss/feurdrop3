@@ -84,6 +84,16 @@ function startBot() {
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
 
   const handleIncoming = (msg) => {
+    console.log("[bot] message recu", {
+      chatId: msg.chat.id,
+      chatType: msg.chat.type,
+      chatTitle: msg.chat.title,
+      threadId: msg.message_thread_id,
+      isTopicMessage: msg.is_topic_message,
+      text: msg.text ? msg.text.slice(0, 30) : undefined,
+      hasDocument: !!msg.document,
+    });
+
     if (msg.document) {
       console.log("[bot] document recu", {
         chatId: msg.chat.id,
