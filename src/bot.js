@@ -83,7 +83,7 @@ function startBot() {
 
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
 
-  bot.on("message", (msg) => {
+  const handleIncoming = (msg) => {
     if (msg.document) {
       console.log("[bot] document recu", {
         chatId: msg.chat.id,
@@ -132,6 +132,14 @@ function startBot() {
 
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = setTimeout(() => flushBatch(bot, key, batches), DEBOUNCE_MS);
+  };
+
+  bot.on("message", handleIncoming);
+  // Si "4349429422" est un Channel Telegram (pas un supergroupe), les posts
+  // arrivent comme channel_post et non comme message classique.
+  bot.on("channel_post", (msg) => {
+    console.log("[bot] channel_post recu", { chatId: msg.chat.id, threadId: msg.message_thread_id, hasDoc: !!msg.document });
+    handleIncoming(msg);
   });
 
   bot.onText(/^\/start/, (msg) => {
