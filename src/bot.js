@@ -20,7 +20,9 @@ const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
 const AUTO_GROUP_CHAT_ID = -1004349429422; // derive de l'id de canal 4349429422 (t.me/c/4349429422/...)
 const AUTO_LIT_TOPIC_IDS = [3];
 const AUTO_NORMAL_TOPIC_IDS = [2, 4];
-const AUTO_STATS_TOPIC_ID = 1;
+// Le topic "1" (t.me/c/.../1) correspond au topic General par defaut d'un
+// forum Telegram, qui n'a pas de vrai message_thread_id cote Bot API : il ne
+// faut pas en passer un pour y poster.
 
 function extractSenderName(msg) {
   const origin = msg.forward_origin;
@@ -197,7 +199,7 @@ async function updateGroupStatsPhoto(bot, addedCount) {
     const sent = await bot.sendPhoto(
       AUTO_GROUP_CHAT_ID,
       image,
-      { message_thread_id: AUTO_STATS_TOPIC_ID },
+      {},
       { filename: "stats.png", contentType: "image/png" }
     );
     setStatsMessageId("group", sent.message_id);
