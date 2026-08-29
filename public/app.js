@@ -33,7 +33,7 @@ async function loadStats() {
   animateValue(document.getElementById("stat-earned"), euro(s.droppedValue));
   document.getElementById("stat-earned-count").textContent = `${s.droppedCount} colis dropés`;
   animateValue(document.getElementById("stat-pending"), String(s.pendingCount));
-  document.getElementById("stat-pending-value").textContent = `≈ ${euro(s.pendingValue)} potentiels`;
+  document.getElementById("stat-pending-value").textContent = `≈ ${euro(s.pendingValue)}`;
   animateValue(document.getElementById("stat-today"), euro(s.todayValue));
   document.getElementById("stat-today-count").textContent = `${s.todayCount} colis dropés`;
 
@@ -48,18 +48,13 @@ async function loadStats() {
     el.innerHTML = `
       <div class="row-main">
         <div class="row-title">${escapeHtml(row.sender_name)}</div>
-        <div class="row-sub">${row.dropped_count} dropés · ${euro(row.dropped_value)} gagné</div>
+        <div class="row-sub">${row.dropped_count} dropés · ${euro(row.dropped_value)}</div>
       </div>
-      <div class="row-right">
-        <div class="row-stats">
-          <div class="row-stat"><div class="n">${row.pending_count}</div><div class="l">en attente</div></div>
-          <div class="row-stat"><div class="n">${euro(row.pending_value)}</div><div class="l">valeur</div></div>
-        </div>
-        <div class="row-actions">
-          <button class="btn btn-round btn-ghost" data-quick-remove="${escapeAttr(row.sender_name)}" title="-1 colis">−</button>
-          <button class="btn btn-round btn-primary" data-quick-add="${escapeAttr(row.sender_name)}" title="+1 colis">+</button>
-          ${row.pending_count > 0 ? `<button class="btn btn-small btn-ghost" data-drop-sender="${escapeAttr(row.sender_name)}">Dropper</button>` : ""}
-        </div>
+      <div class="row-actions">
+        ${row.pending_count > 0 ? `<span class="chip chip-pending">${row.pending_count} · ${euro(row.pending_value)}</span>` : ""}
+        <button class="btn btn-round btn-ghost" data-quick-remove="${escapeAttr(row.sender_name)}" title="-1 colis">−</button>
+        <button class="btn btn-round btn-primary" data-quick-add="${escapeAttr(row.sender_name)}" title="+1 colis">+</button>
+        ${row.pending_count > 0 ? `<button class="btn btn-small btn-ghost" data-drop-sender="${escapeAttr(row.sender_name)}">Drop</button>` : ""}
       </div>
     `;
     container.appendChild(el);
@@ -135,15 +130,11 @@ async function loadDebts() {
     el.innerHTML = `
       <div class="row-main">
         <div class="row-title">${escapeHtml(d.sender_name)}</div>
-        <div class="row-sub">${d.count} colis dropés non payés</div>
+        <div class="row-sub">${d.count} colis non payés</div>
       </div>
-      <div class="row-right">
-        <div class="row-stats">
-          <div class="row-stat"><div class="n">${euro(d.owed)}</div><div class="l">doit</div></div>
-        </div>
-        <div class="row-actions">
-          <button class="btn btn-small btn-primary" data-mark-paid="${escapeAttr(d.sender_name)}">Payé</button>
-        </div>
+      <div class="row-actions">
+        <span class="chip chip-owed">${euro(d.owed)}</span>
+        <button class="btn btn-small btn-primary" data-mark-paid="${escapeAttr(d.sender_name)}">Payé</button>
       </div>
     `;
     container.appendChild(el);
@@ -156,7 +147,7 @@ async function loadSenders() {
   container.innerHTML = "";
   for (const s of rows) {
     const el = document.createElement("div");
-    el.className = "row";
+    el.className = "row row-inline";
     el.innerHTML = `
       <div class="row-main">
         <div class="row-title">${escapeHtml(s.name)}</div>
