@@ -45,6 +45,9 @@ router.get("/stats", (req, res) => {
   const litPending = db
     .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'lit'")
     .get();
+  const bjPending = db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'bj'")
+    .get();
 
   res.json({
     pendingCount: pending.count,
@@ -55,6 +58,8 @@ router.get("/stats", (req, res) => {
     todayValue: today.value,
     litPendingCount: litPending.count,
     litPendingValue: litPending.value,
+    bjPendingCount: bjPending.count,
+    bjPendingValue: bjPending.value,
     bySender,
   });
 });

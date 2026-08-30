@@ -89,6 +89,8 @@ async function loadStats() {
   document.getElementById("stat-pending-value").textContent = `≈ ${euro(s.pendingValue)}`;
   animateValue(document.getElementById("stat-today"), euro(s.todayValue));
   document.getElementById("stat-today-count").textContent = `${s.todayCount} colis dropés`;
+  animateValue(document.getElementById("stat-bj"), String(s.bjPendingCount || 0));
+  document.getElementById("stat-bj-value").textContent = `≈ ${euro(s.bjPendingValue)}`;
 
   if (!hasChanged("senders", s.bySender)) return;
 
@@ -273,7 +275,10 @@ function barChartSVG(items, { highlightBest = false } = {}) {
     const h = max > 0 ? (it.value / max) * plotH : 0;
     const y = padTop + plotH - h;
     const isBest = highlightBest && i === bestIndex && it.value > 0;
-    const label = isBest ? `<text class="chart-value-label" x="${x + barW / 2}" y="${y - 8}" text-anchor="middle">${euro(it.value)}</text>` : "";
+    // le montant est affiche au-dessus de chaque barre, pas seulement la meilleure
+    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${
+      x + barW / 2
+    }" y="${y - 8}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
     return `
       <rect class="chart-bar ${isBest ? "best" : ""}" x="${x}" y="${y}" width="${barW}" height="${Math.max(h, 2)}" rx="4">
         <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>

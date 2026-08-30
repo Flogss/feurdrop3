@@ -20,6 +20,9 @@ const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
 const AUTO_GROUP_CHAT_ID = -1004349429422; // derive de l'id de canal 4349429422 (t.me/c/4349429422/...)
 const AUTO_LIT_TOPIC_IDS = [3];
 const AUTO_NORMAL_TOPIC_IDS = [2, 4];
+// Les colis BJ sont factures comme des colis normaux, ils sont juste
+// comptabilises a part pour le suivi.
+const AUTO_BJ_TOPIC_IDS = [5];
 // Le topic "1" (t.me/c/.../1) correspond au topic General par defaut d'un
 // forum Telegram, qui n'a pas de vrai message_thread_id cote Bot API : il ne
 // faut pas en passer un pour y poster.
@@ -72,6 +75,7 @@ function resolveForcedType(msg) {
   const threadId = msg.message_thread_id;
   if (AUTO_LIT_TOPIC_IDS.includes(threadId)) return "lit";
   if (AUTO_NORMAL_TOPIC_IDS.includes(threadId)) return "normal";
+  if (AUTO_BJ_TOPIC_IDS.includes(threadId)) return "bj";
   return null; // dans ce groupe mais hors des topics suivis : on ignore
 }
 

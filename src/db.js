@@ -122,7 +122,8 @@ function updateSenderPrice(id, price) {
   if (info.changes === 0) return null;
   const sender = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
   db.prepare(
-    "UPDATE colis SET price = ? WHERE status = 'pending' AND type = 'normal' AND sender_name = ?"
+    // les colis BJ suivent le meme tarif que les colis normaux
+    "UPDATE colis SET price = ? WHERE status = 'pending' AND type IN ('normal', 'bj') AND sender_name = ?"
   ).run(price, sender.name);
   return sender;
 }
