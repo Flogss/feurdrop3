@@ -2,9 +2,8 @@ const express = require("express");
 const {
   db,
   DEFAULT_PRICE,
-  updateSenderPrice,
-  getLitPrice,
-  setLitPrice,
+  DEFAULT_LIT_PRICE,
+  updateSenderPrices,
   setColisType,
   quickAddColis,
   quickRemoveColis,
@@ -150,11 +149,12 @@ router.get("/senders", (req, res) => {
 router.post("/senders", (req, res) => {
   const name = (req.body.name || "").trim();
   const price = Number(req.body.price);
-  if (!name || Number.isNaN(price) || price < 0) {
+  const litPrice = req.body.litPrice === undefined ? DEFAULT_LIT_PRICE : Number(req.body.litPrice);
+  if (!name || Number.isNaN(price) || price < 0 || Number.isNaN(litPrice) || litPrice < 0) {
     return res.status(400).json({ error: "Nom ou prix invalide" });
   }
   try {
-    db.prepare("INSERT INTO senders (name, price) VALUES (?, ?)").run(name, price);
+    db.prepare("INSERT INTO senders (name, price, lit_price) VALUES (?, ?, ?)").run(name, price, litPrice);
   } catch (err) {
     return res.status(400).json({ error: "Cet expediteur existe deja" });
   }
@@ -162,9 +162,18 @@ router.post("/senders", (req, res) => {
 });
 
 router.put("/senders/:id", (req, res) => {
-  const price = Number(req.body.price);
-  if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
-  const sender = updateSenderPrice(req.params.id, price);
+  const patch = {};
+  if (req.body.price !== undefined) {
+    const price = Number(req.body.price);
+    if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
+    patch.price = price;
+  }
+  if (req.body.litPrice !== undefined) {
+    const litPrice = Number(req.body.litPrice);
+    if (Number.isNaN(litPrice) || litPrice < 0) return res.status(400).json({ error: "Prix LIT invalide" });
+    patch.litPrice = litPrice;
+  }
+  const sender = updateSenderPrices(req.params.id, patch);
   if (!sender) return res.status(404).json({ error: "Expediteur introuvable" });
   res.json(sender);
 });
@@ -175,14 +184,7 @@ router.delete("/senders/:id", (req, res) => {
 });
 
 router.get("/config", (req, res) => {
-  res.json({ defaultPrice: DEFAULT_PRICE, litPrice: getLitPrice() });
-});
-
-router.put("/config/lit-price", (req, res) => {
-  const price = Number(req.body.price);
-  if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
-  setLitPrice(price);
-  res.json({ litPrice: price });
+  res.json({ defaultPrice: DEFAULT_PRICE, defaultLitPrice: DEFAULT_LIT_PRICE });
 });
 
 module.exports = router;

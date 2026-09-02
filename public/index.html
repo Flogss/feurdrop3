@@ -105,28 +105,17 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>Prix colis LIT</h2>
-        </div>
-        <div class="lit-price-row">
-          <span>Tout colis marqué LIT (via /lit, /litall) est facturé à ce prix, quel que soit l'expéditeur</span>
-          <div class="lit-price-input-wrap">
-            <input class="price-input" type="number" step="0.5" min="0" id="lit-price-input" />
-            <span class="unit">€</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
           <h2>Prix par expéditeur</h2>
+          <span class="price-legend"><span class="legend-normal">normal</span> / <span class="legend-lit">LIT</span></span>
         </div>
         <div id="settings-rows" class="rows"></div>
         <form id="add-sender-form" class="add-form">
           <input type="text" id="new-sender-name" placeholder="Nom exact de l'expéditeur" required />
-          <input type="number" id="new-sender-price" placeholder="Prix €" step="0.5" min="0" required />
+          <input type="number" id="new-sender-price" placeholder="Normal €" step="0.5" min="0" required />
+          <input type="number" id="new-sender-lit-price" placeholder="LIT €" step="0.5" min="0" required />
           <button type="submit" class="btn btn-primary">Ajouter</button>
         </form>
-        <p class="hint">Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit automatiquement le prix par défaut au premier colis reçu.</p>
+        <p class="hint">Chaque expéditeur a deux tarifs : le prix normal (aussi appliqué aux BJ) et le prix LIT. Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit les tarifs par défaut à son premier colis.</p>
       </div>
     </section>
 

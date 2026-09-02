@@ -221,7 +221,10 @@ async function loadSenders() {
         <div class="row-title">${escapeHtml(s.name)}</div>
       </div>
       <div class="row-actions">
-        <input class="price-input" type="number" step="0.5" min="0" value="${s.price}" data-sender-id="${s.id}" />
+        <input class="price-input price-normal" type="number" step="0.5" min="0" value="${s.price}"
+               data-sender-id="${s.id}" data-field="price" title="Prix normal (et BJ)" />
+        <input class="price-input price-lit" type="number" step="0.5" min="0" value="${s.lit_price}"
+               data-sender-id="${s.id}" data-field="litPrice" title="Prix LIT" />
         <button class="btn btn-small btn-ghost" data-delete-sender="${s.id}">Suppr.</button>
       </div>
     `;
@@ -248,11 +251,6 @@ async function adjustStock(delta) {
   refreshAll();
 }
 
-async function loadConfig() {
-  const cfg = await fetchJSON("/api/config");
-  const input = document.getElementById("lit-price-input");
-  if (document.activeElement !== input) input.value = cfg.litPrice;
-}
 
 function barChartSVG(items, { highlightBest = false } = {}) {
   if (items.every((i) => i.value === 0)) {
@@ -322,7 +320,7 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadConfig(), loadRevenueStats(), loadStock()]);
+  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadRevenueStats(), loadStock()]);
 }
 
 document.addEventListener("click", async (e) => {
@@ -364,21 +362,15 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("change", async (e) => {
   const senderId = e.target.dataset.senderId;
-  if (senderId) {
-    await fetchJSON(`/api/senders/${senderId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ price: Number(e.target.value) }),
-    });
-    refreshAll();
-  } else if (e.target.id === "lit-price-input") {
-    await fetchJSON("/api/config/lit-price", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ price: Number(e.target.value) }),
-    });
-    refreshAll();
-  }
+  if (!senderId) return;
+
+  const field = e.target.dataset.field === "litPrice" ? "litPrice" : "price";
+  await fetchJSON(`/api/senders/${senderId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ [field]: Number(e.target.value) }),
+  });
+  refreshAll();
 });
 
 document.getElementById("stock-custom-form").addEventListener("submit", (e) => e.preventDefault());
@@ -395,11 +387,12 @@ document.getElementById("add-sender-form").addEventListener("submit", async (e) 
   e.preventDefault();
   const name = document.getElementById("new-sender-name").value.trim();
   const price = Number(document.getElementById("new-sender-price").value);
+  const litPrice = Number(document.getElementById("new-sender-lit-price").value);
   try {
     await fetchJSON("/api/senders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, price }),
+      body: JSON.stringify({ name, price, litPrice }),
     });
     e.target.reset();
     refreshAll();

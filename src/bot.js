@@ -6,6 +6,8 @@ const {
   getLatestBatchId,
   setColisType,
   setBatchType,
+  setColisPrice,
+  setBatchPrice,
   getPendingSummary,
   getStatsMessageId,
   setStatsMessageId,
@@ -55,11 +57,10 @@ function extractSenderName(msg) {
   if (msg.forward_from_chat) {
     return msg.forward_from_chat.title || msg.forward_from_chat.username || "Chat inconnu";
   }
-  if (msg.from) {
-    return msg.from.username ? `@${msg.from.username}` : msg.from.first_name;
-  }
 
-  return "Non identifie";
+  // pas de trace de transfert : le PDF a ete poste directement, il vient donc
+  // de nous et non d'un expediteur tiers
+  return "Moi";
 }
 
 function isPdf(document) {
@@ -141,7 +142,7 @@ function startBot() {
   bot.onText(/^\/start/, (msg) => {
     bot.sendMessage(
       msg.chat.id,
-      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\nRepond a un colis avec /lit ou /unlit pour changer son type. Utilise /litall ou /unlitall pour appliquer au dernier groupe de colis envoye."
+      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)"
     );
   });
 
@@ -150,6 +151,10 @@ function startBot() {
 
   bot.onText(/^\/litall(@\w+)?$/, (msg) => handleBatchType(bot, msg, "lit"));
   bot.onText(/^\/unlitall(@\w+)?$/, (msg) => handleBatchType(bot, msg, "normal"));
+
+  bot.onText(/^\/prix(@\w+)?\s+(-?[\d]+(?:[.,][\d]+)?)/, (msg, match) =>
+    handlePrice(bot, msg, Number(String(match[2]).replace(",", ".")))
+  );
 
   console.log("[bot] demarre (polling)");
   return bot;
@@ -184,6 +189,41 @@ function handleBatchType(bot, msg, type) {
     return;
   }
   bot.sendMessage(msg.chat.id, `${count} colis passes en ${label}.`);
+}
+
+function handlePrice(bot, msg, price) {
+  if (Number.isNaN(price) || price < 0) {
+    bot.sendMessage(msg.chat.id, "Montant invalide. Exemple : /prix 7.5");
+    return;
+  }
+
+  const reply = msg.reply_to_message;
+  if (reply) {
+    const colis = findColisByMessage(msg.chat.id, reply.message_id);
+    if (!colis) {
+      bot.sendMessage(msg.chat.id, "Colis introuvable (deja drope ou pas un colis).");
+      return;
+    }
+    const updated = setColisPrice(colis.id, price);
+    bot.sendMessage(
+      msg.chat.id,
+      `Colis #${updated.id} (${updated.sender_name}) passe a ${price.toFixed(2)} EUR.`
+    );
+    return;
+  }
+
+  // sans reponse a un colis precis, on applique au dernier groupe recu
+  const batchId = getLatestBatchId(msg.chat.id);
+  if (!batchId) {
+    bot.sendMessage(msg.chat.id, "Aucun colis recent trouve.");
+    return;
+  }
+  const count = setBatchPrice(batchId, price);
+  if (count === 0) {
+    bot.sendMessage(msg.chat.id, "Aucun colis en attente dans le dernier groupe.");
+    return;
+  }
+  bot.sendMessage(msg.chat.id, `${count} colis passes a ${price.toFixed(2)} EUR.`);
 }
 
 async function updateGroupStatsPhoto(bot, addedCount) {

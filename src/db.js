@@ -20,6 +20,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     price REAL NOT NULL DEFAULT ${DEFAULT_PRICE},
+    lit_price REAL NOT NULL DEFAULT ${DEFAULT_LIT_PRICE},
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -62,6 +63,16 @@ if (!colisColumns.includes("message_id")) db.exec("ALTER TABLE colis ADD COLUMN 
 if (!colisColumns.includes("batch_id")) db.exec("ALTER TABLE colis ADD COLUMN batch_id INTEGER");
 if (!colisColumns.includes("paid")) db.exec("ALTER TABLE colis ADD COLUMN paid INTEGER NOT NULL DEFAULT 0");
 if (!colisColumns.includes("paid_at")) db.exec("ALTER TABLE colis ADD COLUMN paid_at TEXT");
+// prix fixe manuellement via /prix : ne doit pas etre ecrase par une mise a
+// jour du tarif de l'expediteur
+if (!colisColumns.includes("price_locked")) {
+  db.exec("ALTER TABLE colis ADD COLUMN price_locked INTEGER NOT NULL DEFAULT 0");
+}
+
+const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
+if (!senderColumns.includes("lit_price")) {
+  db.exec(`ALTER TABLE senders ADD COLUMN lit_price REAL NOT NULL DEFAULT ${DEFAULT_LIT_PRICE}`);
+}
 
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
@@ -74,13 +85,10 @@ function setSetting(key, value) {
   ).run(key, String(value));
 }
 
-function getLitPrice() {
-  return Number(getSetting("lit_price", DEFAULT_LIT_PRICE));
-}
-
-function setLitPrice(price) {
-  setSetting("lit_price", price);
-  db.prepare("UPDATE colis SET price = ? WHERE status = 'pending' AND type = 'lit'").run(price);
+// Prix applique a un colis selon son type : les LIT ont leur propre tarif par
+// expediteur, les BJ suivent le tarif normal.
+function priceForType(sender, type) {
+  return type === "lit" ? sender.lit_price : sender.price;
 }
 
 function getStock() {
@@ -113,19 +121,32 @@ function getOrCreateSender(name) {
   const clean = (name || "Inconnu").trim().slice(0, 120) || "Inconnu";
   const existing = db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
   if (existing) return existing;
-  db.prepare("INSERT INTO senders (name, price) VALUES (?, ?)").run(clean, DEFAULT_PRICE);
+  db.prepare("INSERT INTO senders (name, price, lit_price) VALUES (?, ?, ?)").run(
+    clean,
+    DEFAULT_PRICE,
+    DEFAULT_LIT_PRICE
+  );
   return db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
 }
 
-function updateSenderPrice(id, price) {
-  const info = db.prepare("UPDATE senders SET price = ? WHERE id = ?").run(price, id);
-  if (info.changes === 0) return null;
-  const sender = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
+function updateSenderPrices(id, { price, litPrice }) {
+  const current = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
+  if (!current) return null;
+
+  const nextPrice = price === undefined ? current.price : price;
+  const nextLitPrice = litPrice === undefined ? current.lit_price : litPrice;
+  db.prepare("UPDATE senders SET price = ?, lit_price = ? WHERE id = ?").run(nextPrice, nextLitPrice, id);
+
+  // les colis BJ suivent le meme tarif que les colis normaux ; les prix fixes
+  // manuellement via /prix ne sont pas ecrases
   db.prepare(
-    // les colis BJ suivent le meme tarif que les colis normaux
-    "UPDATE colis SET price = ? WHERE status = 'pending' AND type IN ('normal', 'bj') AND sender_name = ?"
-  ).run(price, sender.name);
-  return sender;
+    "UPDATE colis SET price = ? WHERE status = 'pending' AND price_locked = 0 AND type IN ('normal', 'bj') AND sender_name = ?"
+  ).run(nextPrice, current.name);
+  db.prepare(
+    "UPDATE colis SET price = ? WHERE status = 'pending' AND price_locked = 0 AND type = 'lit' AND sender_name = ?"
+  ).run(nextLitPrice, current.name);
+
+  return db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
 }
 
 function createBatch(chatId) {
@@ -135,7 +156,7 @@ function createBatch(chatId) {
 
 function addColis(senderName, { chatId, messageId, batchId, type = "normal" } = {}) {
   const sender = getOrCreateSender(senderName);
-  const price = type === "lit" ? getLitPrice() : sender.price;
+  const price = priceForType(sender, type);
   const info = db
     .prepare(
       "INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id) VALUES (?, ?, ?, 'pending', ?, ?, ?)"
@@ -160,9 +181,26 @@ function getLatestBatchId(chatId) {
 function setColisType(id, type) {
   const colis = db.prepare("SELECT * FROM colis WHERE id = ? AND status = 'pending'").get(id);
   if (!colis) return null;
-  const price = type === "lit" ? getLitPrice() : getOrCreateSender(colis.sender_name).price;
-  db.prepare("UPDATE colis SET type = ?, price = ? WHERE id = ?").run(type, price, id);
+  const price = priceForType(getOrCreateSender(colis.sender_name), type);
+  // changer de type reapplique le tarif de l'expediteur, meme si un prix avait
+  // ete fixe manuellement
+  db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?").run(type, price, id);
   return { ...colis, type, price };
+}
+
+function setColisPrice(id, price) {
+  const info = db
+    .prepare("UPDATE colis SET price = ?, price_locked = 1 WHERE id = ? AND status = 'pending'")
+    .run(price, id);
+  if (info.changes === 0) return null;
+  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+}
+
+function setBatchPrice(batchId, price) {
+  const info = db
+    .prepare("UPDATE colis SET price = ?, price_locked = 1 WHERE batch_id = ? AND status = 'pending'")
+    .run(price, batchId);
+  return info.changes;
 }
 
 function quickAddColis(senderName) {
@@ -245,11 +283,10 @@ function markSenderPaid(senderName) {
 
 function setBatchType(batchId, type) {
   const rows = db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
-  const litPrice = getLitPrice();
-  const update = db.prepare("UPDATE colis SET type = ?, price = ? WHERE id = ?");
+  const update = db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?");
   let count = 0;
   for (const c of rows) {
-    const price = type === "lit" ? litPrice : getOrCreateSender(c.sender_name).price;
+    const price = priceForType(getOrCreateSender(c.sender_name), type);
     update.run(type, price, c.id);
     count += 1;
   }
@@ -259,13 +296,15 @@ function setBatchType(batchId, type) {
 module.exports = {
   db,
   getOrCreateSender,
-  updateSenderPrice,
+  updateSenderPrices,
   addColis,
   createBatch,
   findColisByMessage,
   getLatestBatchId,
   setColisType,
   setBatchType,
+  setColisPrice,
+  setBatchPrice,
   quickAddColis,
   quickRemoveColis,
   getRevenueLast7Days,
@@ -273,8 +312,6 @@ module.exports = {
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
-  getLitPrice,
-  setLitPrice,
   getStock,
   adjustStock,
   getPendingSummary,
