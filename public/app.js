@@ -5,6 +5,17 @@ const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff
 function switchView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
+  // le panneau Stats est cache (display:none) tant qu'on n'y va pas : les
+  // graphiques n'ont donc pas pu se caler sur "aujourd'hui" a leur premier
+  // rendu (largeurs a zero). On les recale des que l'onglet devient visible.
+  if (view === "stats") {
+    requestAnimationFrame(() => {
+      ["chart-week", "chart-month"].forEach((id) => {
+        const c = document.getElementById(id);
+        if (c && c.dataset.userScrolled !== "1") c.scrollLeft = c.scrollWidth;
+      });
+    });
+  }
 }
 
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -282,24 +293,28 @@ function smoothPath(points) {
 }
 
 let curveChartUid = 0;
+const CHART_SPACING = 78; // distance en px entre deux points (echelle 1:1, pas de zoom SVG)
+const CHART_PAD = 40;
 
-function curveChartSVG(items, { highlightBest = false } = {}) {
-  const W = 700, H = 280, padTop = 62, padBottom = 44, padSide = 34;
+// SVG en taille reelle (pas de mise a l'echelle par viewBox) : plus large que
+// son conteneur, qui defile horizontalement en glisser libre.
+function scrollChartSVG(items, { highlightBest = false } = {}) {
+  const H = 260, padTop = 46, padBottom = 40;
   const plotH = H - padTop - padBottom;
   const baseY = H - padBottom;
+  const W = Math.max(CHART_PAD * 2 + (items.length - 1) * CHART_SPACING, 320);
   const max = Math.max(...items.map((i) => i.value), 1);
-  const stepX = items.length > 1 ? (W - padSide * 2) / (items.length - 1) : 0;
   const bestIndex = items.reduce((best, it, i) => (it.value > items[best].value ? i : best), 0);
   const uid = curveChartUid++;
 
   const points = items.map((it, i) => ({
-    x: padSide + i * stepX,
-    y: baseY - (it.value / max) * plotH * 0.86,
+    x: CHART_PAD + i * CHART_SPACING,
+    y: baseY - (it.value / max) * plotH * 0.82,
   }));
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
-    const y = padTop + plotH * (1 - f) * 0.86 + plotH * 0.14;
-    return `<line class="chart-grid-line" x1="${padSide}" y1="${y}" x2="${W - padSide}" y2="${y}" />`;
+    const y = padTop + plotH * (1 - f) * 0.82 + plotH * 0.18;
+    return `<line class="chart-grid-line" x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
   }).join("");
 
   const linePath = smoothPath(points);
@@ -308,18 +323,18 @@ function curveChartSVG(items, { highlightBest = false } = {}) {
   const dots = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
     const p = points[i];
-    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${p.x}" y="${p.y - 22}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
+    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${p.x}" y="${p.y - 16}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
     return `
-      <circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 11 : 8}">
+      <circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 7 : 5}">
         <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
       </circle>
       ${label}
-      <text class="chart-axis-label" x="${p.x}" y="${H - 8}" text-anchor="middle">${it.label}</text>
+      <text class="chart-axis-label" x="${p.x}" y="${H - 10}" text-anchor="middle">${it.label}</text>
     `;
   }).join("");
 
   return `
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
       <defs>
         <linearGradient id="curveFill${uid}" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#38f7ff" stop-opacity="0.35"/>
@@ -334,47 +349,108 @@ function curveChartSVG(items, { highlightBest = false } = {}) {
   `;
 }
 
-const chartState = {
-  week: { offset: 0 },
-  month: { offset: 0 },
-};
-
 function frenchDateShort(dateStr) {
-  return new Date(`${dateStr}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
 
-async function loadWeekChart() {
-  const offset = chartState.week.offset;
-  const r = await fetchJSON(`/api/stats/revenue/week?offset=${offset}`);
+// Determine les points actuellement visibles dans la zone de scroll pour
+// afficher un intitule de plage qui suit le glisser en temps reel.
+function visibleRange(container, n) {
+  const first = Math.max(0, Math.round((container.scrollLeft - CHART_PAD) / CHART_SPACING));
+  const last = Math.min(
+    n - 1,
+    Math.round((container.scrollLeft + container.clientWidth - CHART_PAD) / CHART_SPACING)
+  );
+  return [first, Math.max(first, last)];
+}
+
+function attachRangeFollower(container, items, rangeEl, formatRange) {
+  if (container.dataset.rangeBound) return;
+  container.dataset.rangeBound = "1";
+  let ticking = false;
+  container.addEventListener(
+    "scroll",
+    () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const [first, last] = visibleRange(container, container._items.length);
+        rangeEl.textContent = formatRange(container._items[first], container._items[last]);
+        ticking = false;
+      });
+    },
+    { passive: true }
+  );
+  // des que l'utilisateur touche au scroll lui-meme, on arrete de le recaler
+  // automatiquement sur "aujourd'hui" a chaque rafraichissement
+  const markUserScrolled = () => { container.dataset.userScrolled = "1"; };
+  container.addEventListener("pointerdown", markUserScrolled, { passive: true });
+  container.addEventListener("wheel", markUserScrolled, { passive: true });
+}
+
+async function loadDayScrollChart() {
+  const r = await fetchJSON("/api/stats/revenue/daily-series");
+  if (!hasChanged("dailySeries", r.days)) return;
+
+  const container = document.getElementById("chart-week");
+  const rangeEl = document.getElementById("week-range");
+  if (!r.days || r.days.length === 0) {
+    container.querySelector(".chart-track").innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
+    rangeEl.textContent = "—";
+    return;
+  }
+
   const items = r.days.map((d) => ({
-    label: DAY_LABELS[new Date(`${d.date}T12:00:00`).getDay()],
+    label: DAY_LABELS[new Date(`${d.date}T12:00:00Z`).getUTCDay()],
     value: d.value,
     count: d.count,
+    date: d.date,
   }));
-  document.getElementById("chart-week").innerHTML = curveChartSVG(items, { highlightBest: true });
-  document.getElementById("week-range").textContent = r.isCurrent
-    ? `Cette semaine · ${frenchDateShort(r.startDate)} - ${frenchDateShort(r.endDate)}`
-    : `${frenchDateShort(r.startDate)} - ${frenchDateShort(r.endDate)}`;
-  document.querySelector('.chart-nav-btn[data-nav="week"][data-dir="-1"]').disabled = r.isCurrent;
-  chartState.week.canGoBack = r.hasEarlierData;
-  document.querySelector('.chart-nav-btn[data-nav="week"][data-dir="1"]').disabled = !r.hasEarlierData;
+  container._items = items;
+  container.querySelector(".chart-track").innerHTML = scrollChartSVG(items, { highlightBest: true });
+
+  if (container.dataset.userScrolled !== "1") {
+    requestAnimationFrame(() => { container.scrollLeft = container.scrollWidth; });
+  }
+
+  const [first, last] = visibleRange(container, items.length);
+  rangeEl.textContent = `${frenchDateShort(items[first].date)} – ${frenchDateShort(items[last].date)}`;
+  attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.date)} – ${frenchDateShort(b.date)}`);
 }
 
-async function loadMonthChart() {
-  const offset = chartState.month.offset;
-  const r = await fetchJSON(`/api/stats/revenue/month?offset=${offset}`);
-  const items = r.weeks.map((w) => ({ label: w.label, value: w.value, count: w.count }));
-  document.getElementById("chart-month").innerHTML = curveChartSVG(items, { highlightBest: true });
-  const [y, m] = r.monthKey.split("-").map(Number);
-  const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-  document.getElementById("month-range").textContent = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
-  document.querySelector('.chart-nav-btn[data-nav="month"][data-dir="-1"]').disabled = r.isCurrent;
-  chartState.month.canGoBack = r.hasEarlierData;
-  document.querySelector('.chart-nav-btn[data-nav="month"][data-dir="1"]').disabled = !r.hasEarlierData;
+async function loadWeekScrollChart() {
+  const r = await fetchJSON("/api/stats/revenue/weekly-series");
+  if (!hasChanged("weeklySeries", r.weeks)) return;
+
+  const container = document.getElementById("chart-month");
+  const rangeEl = document.getElementById("month-range");
+  if (!r.weeks || r.weeks.length === 0) {
+    container.querySelector(".chart-track").innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
+    rangeEl.textContent = "—";
+    return;
+  }
+
+  const items = r.weeks.map((w) => ({
+    label: frenchDateShort(w.start),
+    value: w.value,
+    count: w.count,
+    start: w.start,
+    end: w.end,
+  }));
+  container._items = items;
+  container.querySelector(".chart-track").innerHTML = scrollChartSVG(items, { highlightBest: true });
+
+  if (container.dataset.userScrolled !== "1") {
+    requestAnimationFrame(() => { container.scrollLeft = container.scrollWidth; });
+  }
+
+  const [first, last] = visibleRange(container, items.length);
+  rangeEl.textContent = `${frenchDateShort(items[first].start)} – ${frenchDateShort(items[last].end)}`;
+  attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.start)} – ${frenchDateShort(b.end)}`);
 }
 
 async function loadRevenueStats() {
-  await Promise.all([loadWeekChart(), loadMonthChart()]);
+  await Promise.all([loadDayScrollChart(), loadWeekScrollChart()]);
 
   const r = await fetchJSON("/api/stats/revenue");
   const bestDayEl = document.getElementById("stat-bestday-value");
@@ -388,39 +464,6 @@ async function loadRevenueStats() {
     bestDaySub.textContent = "Pas encore de données";
   }
 }
-
-function navigateChart(kind, dir) {
-  const state = chartState[kind];
-  if (dir > 0 && state.canGoBack === false) return; // rien avant la premiere donnee
-  const next = state.offset + dir;
-  if (next < 0) return;
-  state.offset = next;
-  if (kind === "week") loadWeekChart();
-  else loadMonthChart();
-}
-
-document.querySelectorAll(".chart-nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => navigateChart(btn.dataset.nav, Number(btn.dataset.dir)));
-});
-
-// swipe gauche/droite sur les graphiques pour naviguer dans l'historique
-document.querySelectorAll(".chart-swipe").forEach((el) => {
-  const kind = el.id === "chart-week" ? "week" : "month";
-  let startX = null, dragging = false;
-
-  const onStart = (x) => { startX = x; dragging = true; };
-  const onEnd = (x) => {
-    if (!dragging || startX === null) return;
-    dragging = false;
-    const dx = x - startX;
-    if (Math.abs(dx) > 40) navigateChart(kind, dx < 0 ? 1 : -1);
-    startX = null;
-  };
-
-  el.addEventListener("pointerdown", (e) => onStart(e.clientX));
-  el.addEventListener("pointerup", (e) => onEnd(e.clientX));
-  el.addEventListener("pointerleave", () => { dragging = false; startX = null; });
-});
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

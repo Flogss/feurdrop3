@@ -216,70 +216,80 @@ function quickRemoveColis(senderName) {
   return true;
 }
 
-// Lundi (UTC) de la semaine courante moins `offsetWeeks` semaines. Les dates
-// sont calculees en UTC car dropped_at est stocke via datetime('now') (UTC).
-function mondayOfWeek(offsetWeeks) {
-  const now = new Date();
-  const utcDow = now.getUTCDay(); // 0=dim .. 6=sam
+// Lundi (UTC) de la semaine contenant `dateStr` (ou aujourd'hui si omis).
+function mondayOf(dateStr) {
+  const d = dateStr ? new Date(`${dateStr}T00:00:00Z`) : new Date();
+  const utcDow = d.getUTCDay(); // 0=dim .. 6=sam
   const isoDow = utcDow === 0 ? 7 : utcDow; // 1=lun .. 7=dim
-  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  monday.setUTCDate(monday.getUTCDate() - (isoDow - 1) - offsetWeeks * 7);
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - (isoDow - 1));
   return monday;
 }
 
-// Semaine lundi -> samedi (dimanche exclu), paginable via offset (0 = semaine
-// en cours, 1 = semaine precedente, etc.)
-function getWeekRevenue(offset = 0) {
-  const monday = mondayOfWeek(offset);
+function getEarliestDroppedDate() {
+  const row = db.prepare("SELECT MIN(date(dropped_at)) AS d FROM colis WHERE status = 'dropped'").get();
+  return row.d;
+}
+
+// Serie continue jour par jour (dimanche exclu) depuis le tout premier colis
+// drope jusqu'a aujourd'hui, pour un scroll/swipe libre cote client (pas de
+// pagination par semaine).
+function getDailySeries() {
+  const earliest = getEarliestDroppedDate();
+  const today = new Date();
+  const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const start = earliest ? new Date(`${earliest}T00:00:00Z`) : todayUTC;
+
   const dateKeys = [];
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(monday);
-    d.setUTCDate(monday.getUTCDate() + i);
+  for (let d = new Date(start); d <= todayUTC; d.setUTCDate(d.getUTCDate() + 1)) {
+    if (d.getUTCDay() === 0) continue; // dimanche exclu
     dateKeys.push(d.toISOString().slice(0, 10));
   }
+  const capped = dateKeys.slice(-420); // ~ un peu plus d'un an, garde-fou
+
+  if (capped.length === 0) return { days: [] };
   const rows = db
     .prepare(
       `SELECT date(dropped_at) AS d, SUM(price) AS value, COUNT(*) AS count
        FROM colis WHERE status = 'dropped' AND date(dropped_at) BETWEEN ? AND ?
        GROUP BY d`
     )
-    .all(dateKeys[0], dateKeys[5]);
+    .all(capped[0], capped[capped.length - 1]);
   const byDate = new Map(rows.map((r) => [r.d, r]));
-  const days = dateKeys.map((key) => {
+  const days = capped.map((key) => {
     const row = byDate.get(key);
     return { date: key, value: row ? row.value : 0, count: row ? row.count : 0 };
   });
-  const hasEarlierData = !!db
-    .prepare("SELECT 1 FROM colis WHERE status = 'dropped' AND date(dropped_at) < ? LIMIT 1")
-    .get(dateKeys[0]);
-  return { days, startDate: dateKeys[0], endDate: dateKeys[5], isCurrent: offset === 0, hasEarlierData };
+  return { days };
 }
 
-// Semaines (S1..S5, dimanche exclu) du mois courant moins `offsetMonths` mois.
-function getMonthRevenue(offset = 0) {
-  const now = new Date();
-  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1));
-  const monthStr = `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
+// Serie continue semaine par semaine (lundi -> samedi) depuis la semaine du
+// premier colis drope jusqu'a la semaine en cours.
+function getWeeklySeries() {
+  const earliest = getEarliestDroppedDate();
+  const currentMonday = mondayOf();
+  const startMonday = earliest ? mondayOf(earliest) : currentMonday;
 
-  const rows = db
-    .prepare(
-      `SELECT CAST((CAST(strftime('%d', dropped_at) AS INTEGER) - 1) / 7 AS INTEGER) AS week_index,
-              SUM(price) AS value, COUNT(*) AS count
-       FROM colis
-       WHERE status = 'dropped' AND strftime('%Y-%m', dropped_at) = ? AND strftime('%w', dropped_at) != '0'
-       GROUP BY week_index ORDER BY week_index ASC`
-    )
-    .all(monthStr);
-  const byWeek = new Map(rows.map((r) => [r.week_index, r]));
-  const weeks = [];
-  for (let i = 0; i <= 4; i++) {
-    const row = byWeek.get(i);
-    weeks.push({ label: `S${i + 1}`, value: row ? row.value : 0, count: row ? row.count : 0 });
+  const weekRanges = [];
+  for (let m = new Date(startMonday); m <= currentMonday; m.setUTCDate(m.getUTCDate() + 7)) {
+    const monday = new Date(m);
+    const saturday = new Date(m);
+    saturday.setUTCDate(saturday.getUTCDate() + 5);
+    weekRanges.push({ start: monday.toISOString().slice(0, 10), end: saturday.toISOString().slice(0, 10) });
   }
-  const hasEarlierData = !!db
-    .prepare("SELECT 1 FROM colis WHERE status = 'dropped' AND strftime('%Y-%m', dropped_at) < ? LIMIT 1")
-    .get(monthStr);
-  return { weeks, monthKey: monthStr, isCurrent: offset === 0, hasEarlierData };
+  const capped = weekRanges.slice(-104); // 2 ans, garde-fou
+
+  if (capped.length === 0) return { weeks: [] };
+  const weeks = capped.map((w) => {
+    const row = db
+      .prepare(
+        `SELECT SUM(price) AS value, COUNT(*) AS count FROM colis
+         WHERE status = 'dropped' AND date(dropped_at) BETWEEN ? AND ?`
+      )
+      .get(w.start, w.end);
+    return { start: w.start, end: w.end, value: row.value || 0, count: row.count || 0 };
+  });
+  return { weeks };
 }
 
 function getBestDay() {
@@ -334,8 +344,8 @@ module.exports = {
   setBatchPrice,
   quickAddColis,
   quickRemoveColis,
-  getWeekRevenue,
-  getMonthRevenue,
+  getDailySeries,
+  getWeeklySeries,
   getBestDay,
   getDebtsBySender,
   markSenderPaid,

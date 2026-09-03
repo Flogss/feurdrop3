@@ -7,8 +7,8 @@ const {
   setColisType,
   quickAddColis,
   quickRemoveColis,
-  getWeekRevenue,
-  getMonthRevenue,
+  getDailySeries,
+  getWeeklySeries,
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
@@ -138,14 +138,12 @@ router.get("/stats/revenue", (req, res) => {
   res.json({ bestDay: getBestDay() || null });
 });
 
-router.get("/stats/revenue/week", (req, res) => {
-  const offset = Math.max(0, Number(req.query.offset) || 0);
-  res.json(getWeekRevenue(offset));
+router.get("/stats/revenue/daily-series", (req, res) => {
+  res.json(getDailySeries());
 });
 
-router.get("/stats/revenue/month", (req, res) => {
-  const offset = Math.max(0, Number(req.query.offset) || 0);
-  res.json(getMonthRevenue(offset));
+router.get("/stats/revenue/weekly-series", (req, res) => {
+  res.json(getWeeklySeries());
 });
 
 router.get("/senders", (req, res) => {
