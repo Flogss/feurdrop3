@@ -92,7 +92,39 @@ function staggerIn(container) {
   });
 }
 
-async function loadStats() {
+// La revelation animee de la page Stats (compteurs 0 -> valeur, courbes et
+// barres qui montent, camembert qui se construit) ne doit jouer qu'une seule
+// fois par vrai chargement de page. Variable en memoire : elle repart a
+// false a chaque F5/rechargement, et reste true tant que l'utilisateur
+// navigue dans l'app sans recharger (changement d'onglet, retour, etc.).
+let statsRevealed = false;
+
+// Anime le texte d'un element de 0 (ou de la valeur de depart) jusqu'a
+// `target`, en repassant par `format` a chaque frame. Utilise uniquement
+// lors de la revelation initiale : les mises a jour normales ecrivent le
+// texte final directement (pas de recomptage a chaque rafraichissement).
+function animateNumberText(el, target, format, duration = 1000, delay = 0) {
+  if (!el) return;
+  if (prefersReducedMotion) {
+    el.textContent = format(target);
+    return;
+  }
+  const start = () => {
+    const t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min((now - t0) / duration, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = format(target * eased);
+      if (p < 1) requestAnimationFrame(step);
+      else el.textContent = format(target);
+    };
+    requestAnimationFrame(step);
+  };
+  if (delay > 0) setTimeout(start, delay);
+  else start();
+}
+
+async function loadStats(animate) {
   const s = await fetchJSON("/api/stats");
   animateValue(document.getElementById("stat-earned"), euro(s.droppedValue));
   document.getElementById("stat-earned-count").textContent = `${s.droppedCount} colis dropés`;
@@ -134,22 +166,23 @@ async function loadStats() {
   }
   staggerIn(container);
 
-  renderDonut(s.bySender);
+  renderDonut(s.bySender, animate);
 }
 
-function donutSVG(items) {
+function donutSVG(items, animate) {
   const total = items.reduce((sum, it) => sum + it.value, 0);
   if (total <= 0) return `<div class="chart-empty">Pas encore de données</div>`;
 
   const size = 220, cx = size / 2, cy = size / 2, r = 84, strokeWidth = 22;
   const circumference = 2 * Math.PI * r;
+  const instant = animate ? "" : "instant";
   let offset = 0;
   const segments = items.map((it, i) => {
     const frac = it.value / total;
     const len = frac * circumference;
     const gap = items.length > 1 ? 3 : 0;
     const dash = `${Math.max(len - gap, 0)} ${circumference - len + gap}`;
-    const seg = `<circle class="donut-seg" style="animation-delay:${i * 0.09}s" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
+    const seg = `<circle class="donut-seg ${instant}" style="animation-delay:${i * 0.09}s" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
       stroke-width="${strokeWidth}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
       <title>${it.sender_name}: ${euro(it.value)} (${Math.round(frac * 100)}%)</title>
     </circle>`;
@@ -162,14 +195,15 @@ function donutSVG(items) {
       <circle class="donut-track" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke-width="${strokeWidth}"/>
       ${segments}
       <circle class="donut-center-ring" cx="${cx}" cy="${cy}" r="${r - strokeWidth / 2 - 8}" fill="none"/>
-      <text x="${cx}" y="${cy - 3}" text-anchor="middle" class="donut-total-value">${euro(total)}</text>
+      <text x="${cx}" y="${cy - 3}" text-anchor="middle" class="donut-total-value" id="donut-total-value">${animate ? euro(0) : euro(total)}</text>
       <text x="${cx}" y="${cy + 19}" text-anchor="middle" class="donut-total-label">total</text>
     </svg>
   `;
 }
 
-function donutLegend(items) {
+function donutLegend(items, animate) {
   const total = items.reduce((sum, it) => sum + it.value, 0) || 1;
+  const instant = animate ? "" : "instant";
   return `<div class="donut-legend">${items.map((it, i) => {
     const pct = Math.round((it.value / total) * 100);
     const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
@@ -179,16 +213,16 @@ function donutLegend(items) {
       <div class="donut-legend-main">
         <div class="donut-legend-top">
           <span class="donut-legend-name">${escapeHtml(it.sender_name)}</span>
-          <span class="donut-legend-value">${euro(it.value)}</span>
+          <span class="donut-legend-value" data-legend-value="${it.value}">${animate ? euro(0) : euro(it.value)}</span>
         </div>
-        <div class="donut-legend-bar"><div class="donut-legend-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+        <div class="donut-legend-bar"><div class="donut-legend-bar-fill ${instant}" style="width:${pct}%;background:${color};animation-delay:${i * 0.09}s"></div></div>
       </div>
-      <span class="donut-legend-pct">${pct}%</span>
+      <span class="donut-legend-pct" data-legend-pct="${pct}">${animate ? "0%" : `${pct}%`}</span>
     </div>`;
   }).join("")}</div>`;
 }
 
-function renderDonut(bySender) {
+function renderDonut(bySender, animate) {
   const items = bySender
     .map((s) => ({ sender_name: s.sender_name, value: s.dropped_value }))
     .filter((s) => s.value > 0)
@@ -199,7 +233,19 @@ function renderDonut(bySender) {
     el.innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
     return;
   }
-  el.innerHTML = `<div class="donut-layout">${donutSVG(items)}${donutLegend(items)}</div>`;
+  const total = items.reduce((sum, it) => sum + it.value, 0);
+  el.innerHTML = `<div class="donut-layout">${donutSVG(items, animate)}${donutLegend(items, animate)}</div>`;
+
+  if (animate) {
+    animateNumberText(document.getElementById("donut-total-value"), total, euro, 1000);
+    el.querySelectorAll("[data-legend-value]").forEach((span, i) => {
+      animateNumberText(span, Number(span.dataset.legendValue), euro, 900, i * 90);
+    });
+    el.querySelectorAll("[data-legend-pct]").forEach((span, i) => {
+      const target = Number(span.dataset.legendPct);
+      animateNumberText(span, target, (v) => `${Math.round(v)}%`, 900, i * 90);
+    });
+  }
 }
 
 async function loadDebts() {
@@ -332,14 +378,17 @@ const CHART_PAD = 40;
 
 // SVG en taille reelle (pas de mise a l'echelle par viewBox) : plus large que
 // son conteneur, qui defile horizontalement en glisser libre.
-function scrollChartSVG(items, { highlightBest = false } = {}) {
-  const H = 260, padTop = 46, padBottom = 40;
+const CHART_H = 260;
+
+function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) {
+  const H = CHART_H, padTop = 46, padBottom = 40;
   const plotH = H - padTop - padBottom;
   const baseY = H - padBottom;
   const W = Math.max(CHART_PAD * 2 + (items.length - 1) * CHART_SPACING, 320);
   const max = Math.max(...items.map((i) => i.value), 1);
   const bestIndex = items.reduce((best, it, i) => (it.value > items[best].value ? i : best), 0);
   const uid = curveChartUid++;
+  const instant = animate ? "" : "instant";
 
   const points = items.map((it, i) => ({
     x: CHART_PAD + i * CHART_SPACING,
@@ -354,15 +403,21 @@ function scrollChartSVG(items, { highlightBest = false } = {}) {
   const linePath = smoothPath(points);
   const areaPath = `${linePath} L ${points[points.length - 1].x} ${baseY} L ${points[0].x} ${baseY} Z`;
 
-  const dots = items.map((it, i) => {
+  const circles = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
     const p = points[i];
-    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${p.x}" y="${p.y - 16}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
+    const delay = animate ? Math.min(i * 0.035, 0.5) + 0.15 : 0;
+    return `<circle class="chart-dot ${isBest ? "best" : ""} ${instant}" style="transform-origin:${p.x}px ${p.y}px;animation-delay:${delay}s" cx="${p.x}" cy="${p.y}" r="${isBest ? 7 : 5}">
+      <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
+    </circle>`;
+  }).join("");
+
+  const labels = items.map((it, i) => {
+    const isBest = highlightBest && i === bestIndex && it.value > 0;
+    const p = points[i];
+    const startText = it.value > 0 ? (animate ? euro(0) : euro(it.value)) : "—";
     return `
-      <circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 7 : 5}">
-        <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
-      </circle>
-      ${label}
+      <text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" data-target="${it.value}" x="${p.x}" y="${p.y - 16}" text-anchor="middle">${startText}</text>
       <text class="chart-axis-label" x="${p.x}" y="${H - 10}" text-anchor="middle">${it.label}</text>
     `;
   }).join("");
@@ -376,11 +431,83 @@ function scrollChartSVG(items, { highlightBest = false } = {}) {
         </linearGradient>
       </defs>
       ${gridLines}
-      <path class="chart-area" d="${areaPath}" fill="url(#curveFill${uid})"/>
-      <path class="chart-line" d="${linePath}" fill="none"/>
-      ${dots}
+      <g class="chart-geo ${instant}" style="transform-origin:0px ${H}px">
+        <path class="chart-area" d="${areaPath}" fill="url(#curveFill${uid})"/>
+        <path class="chart-line" d="${linePath}" fill="none" vector-effect="non-scaling-stroke"/>
+      </g>
+      ${circles}
+      ${labels}
     </svg>
   `;
+}
+
+function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {}) {
+  const H = CHART_H, padTop = 46, padBottom = 40;
+  const plotH = H - padTop - padBottom;
+  const baseY = H - padBottom;
+  const barW = Math.min(CHART_SPACING * 0.5, 40);
+  const W = Math.max(CHART_PAD * 2 + (items.length - 1) * CHART_SPACING, 320);
+  const max = Math.max(...items.map((i) => i.value), 1);
+  const bestIndex = items.reduce((best, it, i) => (it.value > items[best].value ? i : best), 0);
+  const uid = curveChartUid++;
+  const instant = animate ? "" : "instant";
+
+  const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
+    const y = padTop + plotH * (1 - f) * 0.82 + plotH * 0.18;
+    return `<line class="chart-grid-line" x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
+  }).join("");
+
+  const bars = items.map((it, i) => {
+    const isBest = highlightBest && i === bestIndex && it.value > 0;
+    const cx = CHART_PAD + i * CHART_SPACING;
+    const h = Math.max((it.value / max) * plotH * 0.82, it.value > 0 ? 4 : 0);
+    const y = baseY - h;
+    const delay = animate ? i * 0.045 : 0;
+    return `
+      <g class="chart-bar-geo ${instant}" style="transform-origin:0px ${baseY}px;animation-delay:${delay}s">
+        <rect class="chart-bar ${isBest ? "best" : ""}" x="${cx - barW / 2}" y="${y}" width="${barW}" height="${Math.max(h, 1)}" rx="${barW * 0.32}" fill="url(#barFill${uid})">
+          <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
+        </rect>
+      </g>
+    `;
+  }).join("");
+
+  const labels = items.map((it, i) => {
+    const isBest = highlightBest && i === bestIndex && it.value > 0;
+    const cx = CHART_PAD + i * CHART_SPACING;
+    const h = Math.max((it.value / max) * plotH * 0.82, it.value > 0 ? 4 : 0);
+    const y = baseY - h;
+    const startText = it.value > 0 ? (animate ? euro(0) : euro(it.value)) : "—";
+    return `
+      <text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" data-target="${it.value}" x="${cx}" y="${y - 14}" text-anchor="middle">${startText}</text>
+      <text class="chart-axis-label" x="${cx}" y="${H - 10}" text-anchor="middle">${it.label}</text>
+    `;
+  }).join("");
+
+  return `
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+      <defs>
+        <linearGradient id="barFill${uid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38f7ff"/>
+          <stop offset="100%" stop-color="#1b8fa0"/>
+        </linearGradient>
+      </defs>
+      ${gridLines}
+      ${bars}
+      ${labels}
+    </svg>
+  `;
+}
+
+// Anime les compteurs [data-target] presents dans un graphique fraichement
+// insere (courbe ou barres), en cascade legere de gauche a droite.
+function animateChartLabels(container) {
+  const labels = container.querySelectorAll(".chart-value-label[data-target]");
+  labels.forEach((el, i) => {
+    const target = Number(el.dataset.target);
+    if (!target) return;
+    animateNumberText(el, target, euro, 850, Math.min(i * 35, 500));
+  });
 }
 
 function frenchDateShort(dateStr) {
@@ -430,12 +557,42 @@ function attachRangeFollower(container, items, rangeEl, formatRange) {
 // defiler la page, jamais le graphique.
 function attachHorizontalDrag(container, onDragStart) {
   let state = null;
+  let momentumRAF = null;
+
+  const stopMomentum = () => {
+    if (momentumRAF) cancelAnimationFrame(momentumRAF);
+    momentumRAF = null;
+  };
+
+  const runMomentum = (velocity) => {
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    let v = velocity;
+    const step = () => {
+      v *= 0.94; // friction : decroissance exponentielle, glisser naturel
+      if (Math.abs(v) < 0.05 || container.scrollLeft <= 0 || container.scrollLeft >= maxScroll) {
+        momentumRAF = null;
+        return;
+      }
+      container.scrollLeft -= v;
+      momentumRAF = requestAnimationFrame(step);
+    };
+    momentumRAF = requestAnimationFrame(step);
+  };
 
   container.addEventListener(
     "touchstart",
     (e) => {
+      stopMomentum();
       const t = e.touches[0];
-      state = { startX: t.clientX, startY: t.clientY, scrollStart: container.scrollLeft, lock: null };
+      state = {
+        startX: t.clientX,
+        startY: t.clientY,
+        scrollStart: container.scrollLeft,
+        lock: null,
+        lastX: t.clientX,
+        lastT: performance.now(),
+        velocity: 0,
+      };
     },
     { passive: true }
   );
@@ -457,18 +614,32 @@ function attachHorizontalDrag(container, onDragStart) {
       if (state.lock === "x") {
         e.preventDefault();
         container.scrollLeft = state.scrollStart - dx;
+
+        const now = performance.now();
+        const dt = now - state.lastT;
+        if (dt > 0) {
+          const instVelocity = (t.clientX - state.lastX) / dt; // px/ms
+          state.velocity = state.velocity * 0.7 + instVelocity * 0.3; // lissage
+        }
+        state.lastX = t.clientX;
+        state.lastT = now;
       }
       // lock === "y" : on ne touche a rien, la page defile normalement
     },
     { passive: false }
   );
 
-  const release = () => { state = null; };
+  const release = () => {
+    if (state && state.lock === "x" && Math.abs(state.velocity) > 0.02) {
+      runMomentum(state.velocity * 16.7); // conversion px/ms -> px/frame (~60fps)
+    }
+    state = null;
+  };
   container.addEventListener("touchend", release, { passive: true });
   container.addEventListener("touchcancel", release, { passive: true });
 }
 
-async function loadDayScrollChart() {
+async function loadDayScrollChart(animate) {
   const r = await fetchJSON("/api/stats/revenue/daily-series");
   if (!hasChanged("dailySeries", r.days)) return;
 
@@ -487,7 +658,9 @@ async function loadDayScrollChart() {
     date: d.date,
   }));
   container._items = items;
-  container.querySelector(".chart-track").innerHTML = scrollChartSVG(items, { highlightBest: true });
+  const track = container.querySelector(".chart-track");
+  track.innerHTML = scrollChartSVG(items, { highlightBest: true, animate });
+  if (animate) animateChartLabels(track);
 
   if (container.dataset.userScrolled !== "1") {
     requestAnimationFrame(() => { container.scrollLeft = container.scrollWidth; });
@@ -498,7 +671,7 @@ async function loadDayScrollChart() {
   attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.date)} – ${frenchDateShort(b.date)}`);
 }
 
-async function loadWeekScrollChart() {
+async function loadWeekScrollChart(animate) {
   const r = await fetchJSON("/api/stats/revenue/weekly-series");
   if (!hasChanged("weeklySeries", r.weeks)) return;
 
@@ -518,7 +691,9 @@ async function loadWeekScrollChart() {
     end: w.end,
   }));
   container._items = items;
-  container.querySelector(".chart-track").innerHTML = scrollChartSVG(items, { highlightBest: true });
+  const track = container.querySelector(".chart-track");
+  track.innerHTML = scrollBarChartSVG(items, { highlightBest: true, animate });
+  if (animate) animateChartLabels(track);
 
   if (container.dataset.userScrolled !== "1") {
     requestAnimationFrame(() => { container.scrollLeft = container.scrollWidth; });
@@ -529,14 +704,15 @@ async function loadWeekScrollChart() {
   attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.start)} – ${frenchDateShort(b.end)}`);
 }
 
-async function loadRevenueStats() {
-  await Promise.all([loadDayScrollChart(), loadWeekScrollChart()]);
+async function loadRevenueStats(animate) {
+  await Promise.all([loadDayScrollChart(animate), loadWeekScrollChart(animate)]);
 
   const r = await fetchJSON("/api/stats/revenue");
   const bestDayEl = document.getElementById("stat-bestday-value");
   const bestDaySub = document.getElementById("stat-bestday-sub");
   if (r.bestDay) {
-    bestDayEl.textContent = euro(r.bestDay.value);
+    if (animate) animateNumberText(bestDayEl, r.bestDay.value, euro, 1000);
+    else bestDayEl.textContent = euro(r.bestDay.value);
     const d = new Date(r.bestDay.date + "T12:00:00");
     bestDaySub.textContent = `${d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} · ${r.bestDay.count} colis`;
   } else {
@@ -551,7 +727,18 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadMergeCandidates(), loadRevenueStats(), loadStock()]);
+  // la revelation animee des stats (compteurs, courbes, barres, camembert)
+  // ne doit jouer qu'une fois par vrai chargement de page
+  const animateStats = !statsRevealed;
+  await Promise.all([
+    loadStats(animateStats),
+    loadDebts(),
+    loadSenders(),
+    loadMergeCandidates(),
+    loadRevenueStats(animateStats),
+    loadStock(),
+  ]);
+  if (animateStats) statsRevealed = true;
 }
 
 document.addEventListener("click", async (e) => {
