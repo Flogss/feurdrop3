@@ -255,6 +255,40 @@ async function loadSenders() {
   staggerIn(container);
 }
 
+async function loadMergeCandidates() {
+  const rows = await fetchJSON("/api/senders/merge-candidates");
+  if (!hasChanged("mergeCandidates", rows)) return;
+
+  const container = document.getElementById("merge-rows");
+  container.innerHTML = "";
+  if (rows.length === 0) {
+    container.innerHTML = `<div class="empty-row">Aucun expéditeur pour le moment</div>`;
+  }
+  for (const s of rows) {
+    const el = document.createElement("div");
+    el.className = "row";
+    el.innerHTML = `
+      <div class="row-main">
+        <label class="merge-check-label">
+          <input type="checkbox" class="merge-check" value="${s.id}" ${s.mergeable ? "" : "disabled"} />
+          <span class="row-title">${escapeHtml(s.name)}</span>
+        </label>
+        <div class="row-sub">${s.colisCount} colis · ${Math.round(s.pct * 100)}% du CA${s.mergeable ? "" : " · protégé"}</div>
+      </div>
+    `;
+    container.appendChild(el);
+  }
+  staggerIn(container);
+  updateMergeButtonState();
+}
+
+function updateMergeButtonState() {
+  const checked = document.querySelectorAll(".merge-check:checked").length;
+  const btn = document.getElementById("merge-to-other-btn");
+  btn.disabled = checked === 0;
+  btn.textContent = checked > 0 ? `Fusionner ${checked} expéditeur${checked > 1 ? "s" : ""} en "Autre"` : `Fusionner la sélection en "Autre"`;
+}
+
 const LOW_STOCK_THRESHOLD = 5;
 
 async function loadStock() {
@@ -386,6 +420,52 @@ function attachRangeFollower(container, items, rangeEl, formatRange) {
   const markUserScrolled = () => { container.dataset.userScrolled = "1"; };
   container.addEventListener("pointerdown", markUserScrolled, { passive: true });
   container.addEventListener("wheel", markUserScrolled, { passive: true });
+
+  attachHorizontalDrag(container, markUserScrolled);
+}
+
+// Glisser horizontal au toucher, sans jamais bloquer le scroll vertical de la
+// page : le sens du geste est verrouille des les premiers pixels de
+// mouvement (comme un carrousel natif), un swipe vers le bas fait toujours
+// defiler la page, jamais le graphique.
+function attachHorizontalDrag(container, onDragStart) {
+  let state = null;
+
+  container.addEventListener(
+    "touchstart",
+    (e) => {
+      const t = e.touches[0];
+      state = { startX: t.clientX, startY: t.clientY, scrollStart: container.scrollLeft, lock: null };
+    },
+    { passive: true }
+  );
+
+  container.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!state) return;
+      const t = e.touches[0];
+      const dx = t.clientX - state.startX;
+      const dy = t.clientY - state.startY;
+
+      if (state.lock === null) {
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        state.lock = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+        if (state.lock === "x") onDragStart();
+      }
+
+      if (state.lock === "x") {
+        e.preventDefault();
+        container.scrollLeft = state.scrollStart - dx;
+      }
+      // lock === "y" : on ne touche a rien, la page defile normalement
+    },
+    { passive: false }
+  );
+
+  const release = () => { state = null; };
+  container.addEventListener("touchend", release, { passive: true });
+  container.addEventListener("touchcancel", release, { passive: true });
 }
 
 async function loadDayScrollChart() {
@@ -471,7 +551,7 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadRevenueStats(), loadStock()]);
+  await Promise.all([loadStats(), loadDebts(), loadSenders(), loadMergeCandidates(), loadRevenueStats(), loadStock()]);
 }
 
 document.addEventListener("click", async (e) => {
@@ -512,6 +592,11 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("change", async (e) => {
+  if (e.target.classList.contains("merge-check")) {
+    updateMergeButtonState();
+    return;
+  }
+
   const senderId = e.target.dataset.senderId;
   if (!senderId) return;
 
@@ -520,6 +605,18 @@ document.addEventListener("change", async (e) => {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ [field]: Number(e.target.value) }),
+  });
+  refreshAll();
+});
+
+document.getElementById("merge-to-other-btn").addEventListener("click", async () => {
+  const senderIds = [...document.querySelectorAll(".merge-check:checked")].map((el) => Number(el.value));
+  if (senderIds.length === 0) return;
+  if (!confirm(`Fusionner ${senderIds.length} expéditeur(s) dans "Autre" ? Leur historique de colis sera regroupé, cette action est irréversible.`)) return;
+  await fetchJSON("/api/senders/merge-to-other", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ senderIds }),
   });
   refreshAll();
 });

@@ -408,6 +408,21 @@ main { margin-top: 16px; }
 .price-input.price-lit:focus { border-color: var(--magenta); box-shadow: 0 0 8px rgba(255,62,203,0.25); }
 
 .price-legend { font-size: 10px; letter-spacing: 0.5px; color: var(--text-dim); }
+
+/* .row-main utilise display:contents, donc c'est le label (et non
+   .row-title a l'interieur) qui devient l'enfant direct de la grille .row */
+.row-main .merge-check-label { grid-area: title; display: flex; align-items: center; gap: 8px; cursor: pointer; min-width: 0; }
+.merge-check-label .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-check {
+  width: 16px; height: 16px;
+  accent-color: var(--cyan);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.merge-check:disabled { accent-color: var(--text-dim); cursor: not-allowed; }
+#merge-rows .row-sub { margin-left: 24px; }
+#merge-to-other-btn { margin-top: 14px; width: 100%; }
+#merge-to-other-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .legend-normal { color: var(--cyan); font-weight: 700; }
 .legend-lit { color: var(--magenta); font-weight: 700; }
 
@@ -557,7 +572,7 @@ main { margin-top: 16px; }
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
+  touch-action: pan-y;
   cursor: grab;
   scrollbar-width: none;
   -ms-overflow-style: none;

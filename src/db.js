@@ -318,6 +318,56 @@ function markSenderPaid(senderName) {
   return info.changes;
 }
 
+const MERGE_SAFETY_THRESHOLD = 0.25; // un expediteur au-dessus de 25% du CA ne peut pas etre fusionne
+
+// Chiffre d'affaires total (colis drops) servant de reference pour le seuil
+// de securite des fusions vers "Autre".
+function getTotalRevenue() {
+  return db.prepare("SELECT COALESCE(SUM(price), 0) AS t FROM colis WHERE status = 'dropped'").get().t;
+}
+
+// Liste des expediteurs (hors "Autre") avec leur part du CA total, et si oui
+// ou non ils peuvent etre fusionnes dans "Autre" sans risque.
+function getMergeCandidates() {
+  const total = getTotalRevenue();
+  const rows = db
+    .prepare(
+      `SELECT s.id, s.name,
+              COALESCE((SELECT SUM(price) FROM colis WHERE sender_name = s.name AND status = 'dropped'), 0) AS ca,
+              COALESCE((SELECT COUNT(*) FROM colis WHERE sender_name = s.name), 0) AS colisCount
+       FROM senders s WHERE s.name != 'Autre' ORDER BY s.name ASC`
+    )
+    .all();
+  return rows.map((r) => {
+    const pct = total > 0 ? r.ca / total : 0;
+    return { id: r.id, name: r.name, ca: r.ca, colisCount: r.colisCount, pct, mergeable: pct <= MERGE_SAFETY_THRESHOLD };
+  });
+}
+
+// Fusionne les expediteurs donnes dans un expediteur generique "Autre",
+// en ignorant silencieusement ceux qui depassent le seuil de securite (protection
+// meme si la liste envoyee par le client est perimee).
+function mergeSendersIntoOther(senderIds) {
+  const total = getTotalRevenue();
+  const other = getOrCreateSender("Autre");
+  let merged = 0;
+
+  for (const id of senderIds) {
+    const sender = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
+    if (!sender || sender.name === "Autre") continue;
+    const ca = db
+      .prepare("SELECT COALESCE(SUM(price), 0) AS t FROM colis WHERE sender_name = ? AND status = 'dropped'")
+      .get(sender.name).t;
+    const pct = total > 0 ? ca / total : 0;
+    if (pct > MERGE_SAFETY_THRESHOLD) continue;
+
+    db.prepare("UPDATE colis SET sender_name = ? WHERE sender_name = ?").run(other.name, sender.name);
+    db.prepare("DELETE FROM senders WHERE id = ?").run(sender.id);
+    merged += 1;
+  }
+  return merged;
+}
+
 function setBatchType(batchId, type) {
   const rows = db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
   const update = db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?");
@@ -354,6 +404,8 @@ module.exports = {
   getPendingSummary,
   getStatsMessageId,
   setStatsMessageId,
+  getMergeCandidates,
+  mergeSendersIntoOther,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
 };

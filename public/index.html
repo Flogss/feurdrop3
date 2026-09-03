@@ -117,6 +117,15 @@
         </form>
         <p class="hint">Chaque expéditeur a deux tarifs : le prix normal (aussi appliqué aux BJ) et le prix LIT. Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit les tarifs par défaut à son premier colis.</p>
       </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Regrouper en "Autre"</h2>
+        </div>
+        <p class="hint">Coche les expéditeurs inactifs à fusionner dans un groupe "Autre" pour alléger la liste. Par sécurité, un expéditeur générant plus de 25% du chiffre d'affaires total est protégé et ne peut pas être fusionné.</p>
+        <div id="merge-rows" class="rows"></div>
+        <button class="btn btn-ghost" id="merge-to-other-btn" disabled>Fusionner la sélection en "Autre"</button>
+      </div>
     </section>
 
     <section id="view-stats" class="view">

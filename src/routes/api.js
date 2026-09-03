@@ -14,6 +14,8 @@ const {
   markSenderPaid,
   getStock,
   adjustStock,
+  getMergeCandidates,
+  mergeSendersIntoOther,
 } = require("../db");
 
 const router = express.Router();
@@ -148,6 +150,16 @@ router.get("/stats/revenue/weekly-series", (req, res) => {
 
 router.get("/senders", (req, res) => {
   res.json(db.prepare("SELECT * FROM senders ORDER BY name ASC").all());
+});
+
+router.get("/senders/merge-candidates", (req, res) => {
+  res.json(getMergeCandidates());
+});
+
+router.post("/senders/merge-to-other", (req, res) => {
+  const ids = Array.isArray(req.body.senderIds) ? req.body.senderIds : [];
+  const merged = mergeSendersIntoOther(ids);
+  res.json({ ok: true, merged });
 });
 
 router.post("/senders", (req, res) => {
