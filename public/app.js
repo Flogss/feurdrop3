@@ -130,15 +130,15 @@ function donutSVG(items) {
   const total = items.reduce((sum, it) => sum + it.value, 0);
   if (total <= 0) return `<div class="chart-empty">Pas encore de données</div>`;
 
-  const size = 200, cx = size / 2, cy = size / 2, r = 78, strokeWidth = 26;
+  const size = 220, cx = size / 2, cy = size / 2, r = 84, strokeWidth = 22;
   const circumference = 2 * Math.PI * r;
   let offset = 0;
   const segments = items.map((it, i) => {
     const frac = it.value / total;
     const len = frac * circumference;
-    const gap = items.length > 1 ? 2 : 0;
+    const gap = items.length > 1 ? 3 : 0;
     const dash = `${Math.max(len - gap, 0)} ${circumference - len + gap}`;
-    const seg = `<circle class="donut-seg" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
+    const seg = `<circle class="donut-seg" style="animation-delay:${i * 0.09}s" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
       stroke-width="${strokeWidth}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
       <title>${it.sender_name}: ${euro(it.value)} (${Math.round(frac * 100)}%)</title>
     </circle>`;
@@ -148,22 +148,33 @@ function donutSVG(items) {
 
   return `
     <svg viewBox="0 0 ${size} ${size}" class="donut-svg">
+      <circle class="donut-track" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke-width="${strokeWidth}"/>
       ${segments}
-      <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="donut-total-value">${euro(total)}</text>
-      <text x="${cx}" y="${cy + 16}" text-anchor="middle" class="donut-total-label">total</text>
+      <circle class="donut-center-ring" cx="${cx}" cy="${cy}" r="${r - strokeWidth / 2 - 8}" fill="none"/>
+      <text x="${cx}" y="${cy - 3}" text-anchor="middle" class="donut-total-value">${euro(total)}</text>
+      <text x="${cx}" y="${cy + 19}" text-anchor="middle" class="donut-total-label">total</text>
     </svg>
   `;
 }
 
 function donutLegend(items) {
   const total = items.reduce((sum, it) => sum + it.value, 0) || 1;
-  return `<div class="donut-legend">${items.map((it, i) => `
+  return `<div class="donut-legend">${items.map((it, i) => {
+    const pct = Math.round((it.value / total) * 100);
+    const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
+    return `
     <div class="donut-legend-item">
-      <span class="donut-swatch" style="background:${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"></span>
-      <span class="donut-legend-name">${escapeHtml(it.sender_name)}</span>
-      <span class="donut-legend-value">${euro(it.value)} · ${Math.round((it.value / total) * 100)}%</span>
-    </div>
-  `).join("")}</div>`;
+      <span class="donut-swatch" style="background:${color}"></span>
+      <div class="donut-legend-main">
+        <div class="donut-legend-top">
+          <span class="donut-legend-name">${escapeHtml(it.sender_name)}</span>
+          <span class="donut-legend-value">${euro(it.value)}</span>
+        </div>
+        <div class="donut-legend-bar"><div class="donut-legend-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      </div>
+      <span class="donut-legend-pct">${pct}%</span>
+    </div>`;
+  }).join("")}</div>`;
 }
 
 function renderDonut(bySender) {
@@ -273,7 +284,7 @@ function smoothPath(points) {
 let curveChartUid = 0;
 
 function curveChartSVG(items, { highlightBest = false } = {}) {
-  const W = 700, H = 260, padTop = 40, padBottom = 40, padSide = 30;
+  const W = 700, H = 280, padTop = 62, padBottom = 44, padSide = 34;
   const plotH = H - padTop - padBottom;
   const baseY = H - padBottom;
   const max = Math.max(...items.map((i) => i.value), 1);
@@ -297,13 +308,13 @@ function curveChartSVG(items, { highlightBest = false } = {}) {
   const dots = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
     const p = points[i];
-    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${p.x}" y="${p.y - 16}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
+    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${p.x}" y="${p.y - 22}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
     return `
-      <circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 6 : 4}">
+      <circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 11 : 8}">
         <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
       </circle>
       ${label}
-      <text class="chart-axis-label" x="${p.x}" y="${H - 12}" text-anchor="middle">${it.label}</text>
+      <text class="chart-axis-label" x="${p.x}" y="${H - 8}" text-anchor="middle">${it.label}</text>
     `;
   }).join("");
 
@@ -345,6 +356,8 @@ async function loadWeekChart() {
     ? `Cette semaine · ${frenchDateShort(r.startDate)} - ${frenchDateShort(r.endDate)}`
     : `${frenchDateShort(r.startDate)} - ${frenchDateShort(r.endDate)}`;
   document.querySelector('.chart-nav-btn[data-nav="week"][data-dir="-1"]').disabled = r.isCurrent;
+  chartState.week.canGoBack = r.hasEarlierData;
+  document.querySelector('.chart-nav-btn[data-nav="week"][data-dir="1"]').disabled = !r.hasEarlierData;
 }
 
 async function loadMonthChart() {
@@ -356,6 +369,8 @@ async function loadMonthChart() {
   const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
   document.getElementById("month-range").textContent = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
   document.querySelector('.chart-nav-btn[data-nav="month"][data-dir="-1"]').disabled = r.isCurrent;
+  chartState.month.canGoBack = r.hasEarlierData;
+  document.querySelector('.chart-nav-btn[data-nav="month"][data-dir="1"]').disabled = !r.hasEarlierData;
 }
 
 async function loadRevenueStats() {
@@ -376,6 +391,7 @@ async function loadRevenueStats() {
 
 function navigateChart(kind, dir) {
   const state = chartState[kind];
+  if (dir > 0 && state.canGoBack === false) return; // rien avant la premiere donnee
   const next = state.offset + dir;
   if (next < 0) return;
   state.offset = next;

@@ -249,7 +249,10 @@ function getWeekRevenue(offset = 0) {
     const row = byDate.get(key);
     return { date: key, value: row ? row.value : 0, count: row ? row.count : 0 };
   });
-  return { days, startDate: dateKeys[0], endDate: dateKeys[5], isCurrent: offset === 0 };
+  const hasEarlierData = !!db
+    .prepare("SELECT 1 FROM colis WHERE status = 'dropped' AND date(dropped_at) < ? LIMIT 1")
+    .get(dateKeys[0]);
+  return { days, startDate: dateKeys[0], endDate: dateKeys[5], isCurrent: offset === 0, hasEarlierData };
 }
 
 // Semaines (S1..S5, dimanche exclu) du mois courant moins `offsetMonths` mois.
@@ -273,7 +276,10 @@ function getMonthRevenue(offset = 0) {
     const row = byWeek.get(i);
     weeks.push({ label: `S${i + 1}`, value: row ? row.value : 0, count: row ? row.count : 0 });
   }
-  return { weeks, monthKey: monthStr, isCurrent: offset === 0 };
+  const hasEarlierData = !!db
+    .prepare("SELECT 1 FROM colis WHERE status = 'dropped' AND strftime('%Y-%m', dropped_at) < ? LIMIT 1")
+    .get(monthStr);
+  return { weeks, monthKey: monthStr, isCurrent: offset === 0, hasEarlierData };
 }
 
 function getBestDay() {
