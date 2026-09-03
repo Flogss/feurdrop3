@@ -2,20 +2,18 @@ const euro = (n) => `${Number(n || 0).toFixed(2)} €`;
 const DAY_LABELS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff", "#ff6b6b", "#5ad1ff", "#ff8ad1"];
 
+let currentView = "dashboard";
+
 function switchView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
-  // le panneau Stats est cache (display:none) tant qu'on n'y va pas : les
-  // graphiques n'ont donc pas pu se caler sur "aujourd'hui" a leur premier
-  // rendu (largeurs a zero). On les recale des que l'onglet devient visible.
-  if (view === "stats") {
-    requestAnimationFrame(() => {
-      ["chart-week", "chart-month"].forEach((id) => {
-        const c = document.getElementById(id);
-        if (c && c.dataset.userScrolled !== "1") c.scrollLeft = c.scrollWidth;
-      });
-    });
+  // la revelation animee (compteurs, courbes, barres, camembert) se rejoue a
+  // chaque fois qu'on arrive reellement sur l'onglet Stats (pas seulement au
+  // chargement du site, et pas si on est deja dessus)
+  if (view === "stats" && currentView !== "stats") {
+    playStatsReveal();
   }
+  currentView = view;
 }
 
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -92,13 +90,6 @@ function staggerIn(container) {
   });
 }
 
-// La revelation animee de la page Stats (compteurs 0 -> valeur, courbes et
-// barres qui montent, camembert qui se construit) ne doit jouer qu'une seule
-// fois par vrai chargement de page. Variable en memoire : elle repart a
-// false a chaque F5/rechargement, et reste true tant que l'utilisateur
-// navigue dans l'app sans recharger (changement d'onglet, retour, etc.).
-let statsRevealed = false;
-
 // Anime le texte d'un element de 0 (ou de la valeur de depart) jusqu'a
 // `target`, en repassant par `format` a chaque frame. Utilise uniquement
 // lors de la revelation initiale : les mises a jour normales ecrivent le
@@ -124,7 +115,7 @@ function animateNumberText(el, target, format, duration = 1000, delay = 0) {
   else start();
 }
 
-async function loadStats(animate) {
+async function loadStats(animate, force) {
   const s = await fetchJSON("/api/stats");
   animateValue(document.getElementById("stat-earned"), euro(s.droppedValue));
   document.getElementById("stat-earned-count").textContent = `${s.droppedCount} colis dropés`;
@@ -135,7 +126,7 @@ async function loadStats(animate) {
   animateValue(document.getElementById("stat-bj"), String(s.bjPendingCount || 0));
   document.getElementById("stat-bj-value").textContent = `≈ ${euro(s.bjPendingValue)}`;
 
-  if (!hasChanged("senders", s.bySender)) return;
+  if (!force && !hasChanged("senders", s.bySender)) return;
 
   const container = document.getElementById("sender-rows");
   container.innerHTML = "";
@@ -242,13 +233,13 @@ function renderDonut(bySender, animate) {
   if (animate) {
     revealOnVisible(el.closest(".panel"), () => {
     el.querySelectorAll(".paused").forEach((n) => n.classList.remove("paused"));
-    animateNumberText(document.getElementById("donut-total-value"), total, euro, 1000);
+    animateNumberText(document.getElementById("donut-total-value"), total, euro, 1800);
     el.querySelectorAll("[data-legend-value]").forEach((span, i) => {
-      animateNumberText(span, Number(span.dataset.legendValue), euro, 900, i * 90);
+      animateNumberText(span, Number(span.dataset.legendValue), euro, 1500, i * 140);
     });
     el.querySelectorAll("[data-legend-pct]").forEach((span, i) => {
       const target = Number(span.dataset.legendPct);
-      animateNumberText(span, target, (v) => `${Math.round(v)}%`, 900, i * 90);
+      animateNumberText(span, target, (v) => `${Math.round(v)}%`, 1500, i * 140);
     });
     });
   }
@@ -385,7 +376,7 @@ const CHART_PAD = 40;
 
 // SVG en taille reelle (pas de mise a l'echelle par viewBox) : plus large que
 // son conteneur, qui defile horizontalement en glisser libre.
-const CHART_H = 260;
+const CHART_H = 215;
 
 // Construit le trajet de reference (courbe ou aire) a partir d'une liste de
 // points {x, y}.
@@ -394,7 +385,7 @@ function areaPathFrom(points, baseY) {
 }
 
 function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) {
-  const H = CHART_H, padTop = 46, padBottom = 40;
+  const H = CHART_H, padTop = 34, padBottom = 38;
   const plotH = H - padTop - padBottom;
   const baseY = H - padBottom;
   const W = Math.max(CHART_PAD * 2 + (items.length - 1) * CHART_SPACING, 320);
@@ -404,7 +395,7 @@ function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) 
 
   const points = items.map((it, i) => ({
     x: CHART_PAD + i * CHART_SPACING,
-    y: baseY - (it.value / max) * plotH * 0.82,
+    y: baseY - (it.value / max) * plotH * 0.9,
   }));
   // au depart de la revelation, tout est aplati sur la ligne de base : la
   // courbe, les points et les valeurs monteront ensemble jusqu'a leur
@@ -412,7 +403,7 @@ function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) 
   const initial = animate ? points.map((p) => ({ x: p.x, y: baseY })) : points;
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
-    const y = padTop + plotH * (1 - f) * 0.82 + plotH * 0.18;
+    const y = padTop + plotH * (1 - f) * 0.9 + plotH * 0.1;
     return `<line class="chart-grid-line" x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
   }).join("");
 
@@ -454,7 +445,7 @@ function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) 
 
 // Fait monter la courbe, les points et leurs valeurs ensemble, image par
 // image, de la ligne de base jusqu'a leur position/valeur reelle.
-function runCurveReveal(track, geo, duration = 1900) {
+function runCurveReveal(track, geo, duration = 3200) {
   const { points, baseY } = geo;
   const lineEl = track.querySelector("[data-line]");
   const areaEl = track.querySelector("[data-area]");
@@ -485,7 +476,7 @@ function runCurveReveal(track, geo, duration = 1900) {
 }
 
 function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {}) {
-  const H = CHART_H, padTop = 46, padBottom = 40;
+  const H = CHART_H, padTop = 34, padBottom = 38;
   const plotH = H - padTop - padBottom;
   const baseY = H - padBottom;
   const barW = Math.min(CHART_SPACING * 0.5, 40);
@@ -496,11 +487,11 @@ function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {
 
   const bars = items.map((it, i) => ({
     x: CHART_PAD + i * CHART_SPACING,
-    h: Math.max((it.value / max) * plotH * 0.82, it.value > 0 ? 4 : 0),
+    h: Math.max((it.value / max) * plotH * 0.9, it.value > 0 ? 4 : 0),
   }));
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
-    const y = padTop + plotH * (1 - f) * 0.82 + plotH * 0.18;
+    const y = padTop + plotH * (1 - f) * 0.9 + plotH * 0.1;
     return `<line class="chart-grid-line" x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
   }).join("");
 
@@ -544,7 +535,7 @@ function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {
 
 // Fait monter chaque barre depuis la base, avec un leger decalage en
 // cascade, en synchronisant sa valeur affichee avec sa hauteur.
-function runBarReveal(track, geo, duration = 950, stagger = 55) {
+function runBarReveal(track, geo, duration = 1600, stagger = 90) {
   const { bars, baseY } = geo;
   const barEls = track.querySelectorAll("[data-bar]");
   const labelEls = track.querySelectorAll(".chart-value-label[data-target]");
@@ -732,9 +723,9 @@ function attachHorizontalDrag(container, onDragStart) {
   container.addEventListener("touchcancel", release, { passive: true });
 }
 
-async function loadDayScrollChart(animate) {
+async function loadDayScrollChart(animate, force) {
   const r = await fetchJSON("/api/stats/revenue/daily-series");
-  if (!hasChanged("dailySeries", r.days)) return;
+  if (!force && !hasChanged("dailySeries", r.days)) return;
 
   const container = document.getElementById("chart-week");
   const rangeEl = document.getElementById("week-range");
@@ -767,9 +758,9 @@ async function loadDayScrollChart(animate) {
   attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.date)} – ${frenchDateShort(b.date)}`);
 }
 
-async function loadWeekScrollChart(animate) {
+async function loadWeekScrollChart(animate, force) {
   const r = await fetchJSON("/api/stats/revenue/weekly-series");
-  if (!hasChanged("weeklySeries", r.weeks)) return;
+  if (!force && !hasChanged("weeklySeries", r.weeks)) return;
 
   const container = document.getElementById("chart-month");
   const rangeEl = document.getElementById("month-range");
@@ -803,14 +794,14 @@ async function loadWeekScrollChart(animate) {
   attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.start)} – ${frenchDateShort(b.end)}`);
 }
 
-async function loadRevenueStats(animate) {
-  await Promise.all([loadDayScrollChart(animate), loadWeekScrollChart(animate)]);
+async function loadRevenueStats(animate, force) {
+  await Promise.all([loadDayScrollChart(animate, force), loadWeekScrollChart(animate, force)]);
 
   const r = await fetchJSON("/api/stats/revenue");
   const bestDayEl = document.getElementById("stat-bestday-value");
   const bestDaySub = document.getElementById("stat-bestday-sub");
   if (r.bestDay) {
-    if (animate) animateNumberText(bestDayEl, r.bestDay.value, euro, 1000);
+    if (animate) animateNumberText(bestDayEl, r.bestDay.value, euro, 1600);
     else bestDayEl.textContent = euro(r.bestDay.value);
     const d = new Date(r.bestDay.date + "T12:00:00");
     bestDaySub.textContent = `${d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} · ${r.bestDay.count} colis`;
@@ -826,18 +817,25 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function refreshAll() {
-  // la revelation animee des stats (compteurs, courbes, barres, camembert)
-  // ne doit jouer qu'une fois par vrai chargement de page
-  const animateStats = !statsRevealed;
+  // les rafraichissements de fond (toutes les 5s) n'animent jamais : la
+  // revelation (compteurs, courbes, barres, camembert) ne se joue que
+  // lorsqu'on arrive reellement sur l'onglet Stats, voir playStatsReveal()
   await Promise.all([
-    loadStats(animateStats),
+    loadStats(false),
     loadDebts(),
     loadSenders(),
     loadMergeCandidates(),
-    loadRevenueStats(animateStats),
+    loadRevenueStats(false),
     loadStock(),
   ]);
-  if (animateStats) statsRevealed = true;
+}
+
+// Rejoue la revelation animee de la page Stats. Appelee a chaque fois qu'on
+// arrive reellement sur cet onglet (et pas seulement au premier chargement
+// du site), avec des donnees fraiches et en forcant le recalcul meme si
+// elles n'ont pas change depuis le dernier passage.
+async function playStatsReveal() {
+  await Promise.all([loadStats(true, true), loadRevenueStats(true, true)]);
 }
 
 document.addEventListener("click", async (e) => {
