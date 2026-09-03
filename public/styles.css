@@ -589,6 +589,9 @@ main { margin-top: 16px; }
 /* utilitaire : neutralise l'animation d'entree quand la revelation de la
    page Stats a deja eu lieu (pas de rejeu en changeant d'onglet) */
 .instant { animation: none !important; }
+/* utilitaire : l'animation est prete mais attend que l'element soit
+   visible a l'ecran (voir revealOnVisible en JS) avant de jouer */
+.paused { animation-play-state: paused !important; }
 
 .chart-line {
   stroke: var(--cyan);
@@ -597,22 +600,10 @@ main { margin-top: 16px; }
   stroke-linejoin: round;
   filter: drop-shadow(0 0 7px rgba(56,247,255,0.6));
 }
-.chart-area { }
 
-/* le groupe (aire + courbe) monte depuis la base, sans distordre l'epaisseur
-   du trait grace a vector-effect="non-scaling-stroke" sur le path */
-.chart-geo {
-  animation: chartGeoReveal 1.05s cubic-bezier(0.22, 1, 0.36, 1) backwards;
-}
-@keyframes chartGeoReveal {
-  from { transform: scaleY(0); opacity: 0.5; }
-  to { transform: scaleY(1); opacity: 1; }
-}
-
-/* les barres montent individuellement, en cascade (delai par barre) */
-.chart-bar-geo {
-  animation: chartGeoReveal 0.75s cubic-bezier(0.22, 1, 0.36, 1) backwards;
-}
+/* la courbe/les barres et leurs points sont maintenant animes image par
+   image en JS (voir runCurveReveal / runBarReveal), au lieu d'un keyframe
+   CSS : on garde juste le style final ici */
 .chart-bar {
   fill: var(--cyan);
   filter: drop-shadow(0 0 6px rgba(56,247,255,0.5));
@@ -627,11 +618,6 @@ main { margin-top: 16px; }
   stroke: var(--cyan);
   stroke-width: 3;
   transition: r 0.15s ease;
-  animation: dotPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
-}
-@keyframes dotPop {
-  from { transform: scale(0); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
 }
 .chart-dot.best {
   fill: var(--magenta);
@@ -640,17 +626,20 @@ main { margin-top: 16px; }
 }
 .chart-dot:hover { r: 9; }
 
-.chart-grid-line { stroke: rgba(255,255,255,0.07); stroke-width: 1; }
+/* teinte cyan claire plutot que gris neutre : reste lisible par-dessus
+   l'aire remplie sous la courbe, dans le theme du site */
+.chart-grid-line { stroke: rgba(173, 232, 255, 0.16); stroke-width: 1; }
 .chart-axis-label { fill: var(--text-dim); font-size: 12.5px; font-weight: 600; font-family: inherit; }
-.chart-value-label { fill: #b7bfda; font-size: 13.5px; font-weight: 700; font-family: inherit; }
+.chart-value-label { fill: #d3ecff; font-size: 13.5px; font-weight: 700; font-family: inherit; }
 .chart-value-label.is-best { fill: var(--magenta); }
-.chart-value-label.is-zero { fill: #4a5068; font-weight: 500; }
+.chart-value-label.is-zero { fill: #5b6685; font-weight: 500; }
 .chart-empty { text-align: center; color: var(--text-dim); font-size: 12.5px; padding: 30px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .bg-particles, .bg-glow, .stat-card, .brand-dot, .pulse,
   .panel::after, .row-enter, .value-bump, .donut-seg,
-  .chart-geo, .chart-bar-geo, .chart-dot, .donut-svg, .donut-legend-bar-fill { animation: none !important; }
+  .donut-svg, .donut-legend-bar-fill { animation: none !important; }
+  .paused { animation: none !important; }
   .view.active { animation: none; }
   .row:hover { transform: none; }
 }

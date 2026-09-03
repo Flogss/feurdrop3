@@ -175,14 +175,17 @@ function donutSVG(items, animate) {
 
   const size = 220, cx = size / 2, cy = size / 2, r = 84, strokeWidth = 22;
   const circumference = 2 * Math.PI * r;
-  const instant = animate ? "" : "instant";
+  // "paused" : le segment est pret a jouer son animation d'entree mais
+  // attend d'etre visible a l'ecran (voir revealOnVisible) ; "instant" :
+  // revelation deja faite cette session, on affiche l'etat final direct
+  const revealClass = animate ? "paused" : "instant";
   let offset = 0;
   const segments = items.map((it, i) => {
     const frac = it.value / total;
     const len = frac * circumference;
     const gap = items.length > 1 ? 3 : 0;
     const dash = `${Math.max(len - gap, 0)} ${circumference - len + gap}`;
-    const seg = `<circle class="donut-seg ${instant}" style="animation-delay:${i * 0.09}s" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
+    const seg = `<circle class="donut-seg ${revealClass}" style="animation-delay:${i * 0.09}s" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length]}"
       stroke-width="${strokeWidth}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
       <title>${it.sender_name}: ${euro(it.value)} (${Math.round(frac * 100)}%)</title>
     </circle>`;
@@ -203,7 +206,7 @@ function donutSVG(items, animate) {
 
 function donutLegend(items, animate) {
   const total = items.reduce((sum, it) => sum + it.value, 0) || 1;
-  const instant = animate ? "" : "instant";
+  const revealClass = animate ? "paused" : "instant";
   return `<div class="donut-legend">${items.map((it, i) => {
     const pct = Math.round((it.value / total) * 100);
     const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
@@ -215,7 +218,7 @@ function donutLegend(items, animate) {
           <span class="donut-legend-name">${escapeHtml(it.sender_name)}</span>
           <span class="donut-legend-value" data-legend-value="${it.value}">${animate ? euro(0) : euro(it.value)}</span>
         </div>
-        <div class="donut-legend-bar"><div class="donut-legend-bar-fill ${instant}" style="width:${pct}%;background:${color};animation-delay:${i * 0.09}s"></div></div>
+        <div class="donut-legend-bar"><div class="donut-legend-bar-fill ${revealClass}" style="width:${pct}%;background:${color};animation-delay:${i * 0.09}s"></div></div>
       </div>
       <span class="donut-legend-pct" data-legend-pct="${pct}">${animate ? "0%" : `${pct}%`}</span>
     </div>`;
@@ -237,6 +240,8 @@ function renderDonut(bySender, animate) {
   el.innerHTML = `<div class="donut-layout">${donutSVG(items, animate)}${donutLegend(items, animate)}</div>`;
 
   if (animate) {
+    revealOnVisible(el.closest(".panel"), () => {
+    el.querySelectorAll(".paused").forEach((n) => n.classList.remove("paused"));
     animateNumberText(document.getElementById("donut-total-value"), total, euro, 1000);
     el.querySelectorAll("[data-legend-value]").forEach((span, i) => {
       animateNumberText(span, Number(span.dataset.legendValue), euro, 900, i * 90);
@@ -244,6 +249,7 @@ function renderDonut(bySender, animate) {
     el.querySelectorAll("[data-legend-pct]").forEach((span, i) => {
       const target = Number(span.dataset.legendPct);
       animateNumberText(span, target, (v) => `${Math.round(v)}%`, 900, i * 90);
+    });
     });
   }
 }
@@ -356,7 +362,8 @@ async function adjustStock(delta) {
 
 // Chemin lisse (Catmull-Rom -> Bezier cubique) passant par tous les points.
 function smoothPath(points) {
-  if (points.length < 2) return "";
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
   let d = `M ${points[0].x} ${points[0].y}`;
   for (let i = 0; i < points.length - 1; i++) {
     const p0 = points[i - 1] || points[i];
@@ -380,6 +387,12 @@ const CHART_PAD = 40;
 // son conteneur, qui defile horizontalement en glisser libre.
 const CHART_H = 260;
 
+// Construit le trajet de reference (courbe ou aire) a partir d'une liste de
+// points {x, y}.
+function areaPathFrom(points, baseY) {
+  return `${smoothPath(points)} L ${points[points.length - 1].x} ${baseY} L ${points[0].x} ${baseY} Z`;
+}
+
 function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) {
   const H = CHART_H, padTop = 46, padBottom = 40;
   const plotH = H - padTop - padBottom;
@@ -388,33 +401,32 @@ function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) 
   const max = Math.max(...items.map((i) => i.value), 1);
   const bestIndex = items.reduce((best, it, i) => (it.value > items[best].value ? i : best), 0);
   const uid = curveChartUid++;
-  const instant = animate ? "" : "instant";
 
   const points = items.map((it, i) => ({
     x: CHART_PAD + i * CHART_SPACING,
     y: baseY - (it.value / max) * plotH * 0.82,
   }));
+  // au depart de la revelation, tout est aplati sur la ligne de base : la
+  // courbe, les points et les valeurs monteront ensemble jusqu'a leur
+  // position finale (voir runCurveReveal)
+  const initial = animate ? points.map((p) => ({ x: p.x, y: baseY })) : points;
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
     const y = padTop + plotH * (1 - f) * 0.82 + plotH * 0.18;
     return `<line class="chart-grid-line" x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
   }).join("");
 
-  const linePath = smoothPath(points);
-  const areaPath = `${linePath} L ${points[points.length - 1].x} ${baseY} L ${points[0].x} ${baseY} Z`;
-
   const circles = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
-    const p = points[i];
-    const delay = animate ? Math.min(i * 0.035, 0.5) + 0.15 : 0;
-    return `<circle class="chart-dot ${isBest ? "best" : ""} ${instant}" style="transform-origin:${p.x}px ${p.y}px;animation-delay:${delay}s" cx="${p.x}" cy="${p.y}" r="${isBest ? 7 : 5}">
+    const p = initial[i];
+    return `<circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 7 : 5}">
       <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
     </circle>`;
   }).join("");
 
   const labels = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
-    const p = points[i];
+    const p = initial[i];
     const startText = it.value > 0 ? (animate ? euro(0) : euro(it.value)) : "—";
     return `
       <text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" data-target="${it.value}" x="${p.x}" y="${p.y - 16}" text-anchor="middle">${startText}</text>
@@ -422,7 +434,7 @@ function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) 
     `;
   }).join("");
 
-  return `
+  const html = `
     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
       <defs>
         <linearGradient id="curveFill${uid}" x1="0" y1="0" x2="0" y2="1">
@@ -431,14 +443,45 @@ function scrollChartSVG(items, { highlightBest = false, animate = false } = {}) 
         </linearGradient>
       </defs>
       ${gridLines}
-      <g class="chart-geo ${instant}" style="transform-origin:0px ${H}px">
-        <path class="chart-area" d="${areaPath}" fill="url(#curveFill${uid})"/>
-        <path class="chart-line" d="${linePath}" fill="none" vector-effect="non-scaling-stroke"/>
-      </g>
+      <path class="chart-area" data-area d="${areaPathFrom(initial, baseY)}" fill="url(#curveFill${uid})"/>
+      <path class="chart-line" data-line d="${smoothPath(initial)}" fill="none" vector-effect="non-scaling-stroke"/>
       ${circles}
       ${labels}
     </svg>
   `;
+  return { html, points, baseY };
+}
+
+// Fait monter la courbe, les points et leurs valeurs ensemble, image par
+// image, de la ligne de base jusqu'a leur position/valeur reelle.
+function runCurveReveal(track, geo, duration = 1900) {
+  const { points, baseY } = geo;
+  const lineEl = track.querySelector("[data-line]");
+  const areaEl = track.querySelector("[data-area]");
+  const dotEls = track.querySelectorAll(".chart-dot");
+  const labelEls = track.querySelectorAll(".chart-value-label[data-target]");
+  if (!lineEl) return;
+
+  const apply = (eased) => {
+    const current = points.map((p) => ({ x: p.x, y: baseY - (baseY - p.y) * eased }));
+    lineEl.setAttribute("d", smoothPath(current));
+    areaEl.setAttribute("d", areaPathFrom(current, baseY));
+    dotEls.forEach((c, i) => c.setAttribute("cy", current[i].y));
+    labelEls.forEach((el, i) => {
+      const target = Number(el.dataset.target);
+      el.setAttribute("y", current[i].y - 16);
+      if (target > 0) el.textContent = euro(target * eased);
+    });
+  };
+
+  if (prefersReducedMotion) { apply(1); return; }
+  const t0 = performance.now();
+  const step = (now) => {
+    const p = Math.min((now - t0) / duration, 1);
+    apply(1 - Math.pow(1 - p, 3));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {}) {
@@ -450,41 +493,40 @@ function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {
   const max = Math.max(...items.map((i) => i.value), 1);
   const bestIndex = items.reduce((best, it, i) => (it.value > items[best].value ? i : best), 0);
   const uid = curveChartUid++;
-  const instant = animate ? "" : "instant";
+
+  const bars = items.map((it, i) => ({
+    x: CHART_PAD + i * CHART_SPACING,
+    h: Math.max((it.value / max) * plotH * 0.82, it.value > 0 ? 4 : 0),
+  }));
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
     const y = padTop + plotH * (1 - f) * 0.82 + plotH * 0.18;
     return `<line class="chart-grid-line" x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
   }).join("");
 
-  const bars = items.map((it, i) => {
+  const rects = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
-    const cx = CHART_PAD + i * CHART_SPACING;
-    const h = Math.max((it.value / max) * plotH * 0.82, it.value > 0 ? 4 : 0);
-    const y = baseY - h;
-    const delay = animate ? i * 0.045 : 0;
-    return `
-      <g class="chart-bar-geo ${instant}" style="transform-origin:0px ${baseY}px;animation-delay:${delay}s">
-        <rect class="chart-bar ${isBest ? "best" : ""}" x="${cx - barW / 2}" y="${y}" width="${barW}" height="${Math.max(h, 1)}" rx="${barW * 0.32}" fill="url(#barFill${uid})">
-          <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
-        </rect>
-      </g>
-    `;
+    const b = bars[i];
+    const h0 = animate ? 1 : Math.max(b.h, 1);
+    const y0 = baseY - h0;
+    return `<rect class="chart-bar ${isBest ? "best" : ""}" data-bar x="${b.x - barW / 2}" y="${y0}" width="${barW}" height="${h0}" rx="${barW * 0.32}" fill="url(#barFill${uid})">
+      <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
+    </rect>`;
   }).join("");
 
   const labels = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
-    const cx = CHART_PAD + i * CHART_SPACING;
-    const h = Math.max((it.value / max) * plotH * 0.82, it.value > 0 ? 4 : 0);
-    const y = baseY - h;
+    const b = bars[i];
+    const h0 = animate ? 1 : Math.max(b.h, 1);
+    const y0 = baseY - h0;
     const startText = it.value > 0 ? (animate ? euro(0) : euro(it.value)) : "—";
     return `
-      <text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" data-target="${it.value}" x="${cx}" y="${y - 14}" text-anchor="middle">${startText}</text>
-      <text class="chart-axis-label" x="${cx}" y="${H - 10}" text-anchor="middle">${it.label}</text>
+      <text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" data-target="${it.value}" x="${b.x}" y="${y0 - 14}" text-anchor="middle">${startText}</text>
+      <text class="chart-axis-label" x="${b.x}" y="${H - 10}" text-anchor="middle">${it.label}</text>
     `;
   }).join("");
 
-  return `
+  const html = `
     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
       <defs>
         <linearGradient id="barFill${uid}" x1="0" y1="0" x2="0" y2="1">
@@ -493,21 +535,72 @@ function scrollBarChartSVG(items, { highlightBest = false, animate = false } = {
         </linearGradient>
       </defs>
       ${gridLines}
-      ${bars}
+      ${rects}
       ${labels}
     </svg>
   `;
+  return { html, bars, baseY };
 }
 
-// Anime les compteurs [data-target] presents dans un graphique fraichement
-// insere (courbe ou barres), en cascade legere de gauche a droite.
-function animateChartLabels(container) {
-  const labels = container.querySelectorAll(".chart-value-label[data-target]");
-  labels.forEach((el, i) => {
-    const target = Number(el.dataset.target);
-    if (!target) return;
-    animateNumberText(el, target, euro, 850, Math.min(i * 35, 500));
-  });
+// Fait monter chaque barre depuis la base, avec un leger decalage en
+// cascade, en synchronisant sa valeur affichee avec sa hauteur.
+function runBarReveal(track, geo, duration = 950, stagger = 55) {
+  const { bars, baseY } = geo;
+  const barEls = track.querySelectorAll("[data-bar]");
+  const labelEls = track.querySelectorAll(".chart-value-label[data-target]");
+  if (barEls.length === 0) return;
+
+  const applyOne = (i, eased) => {
+    const b = bars[i];
+    const h = Math.max(b.h * eased, 1);
+    const y = baseY - h;
+    barEls[i].setAttribute("height", h);
+    barEls[i].setAttribute("y", y);
+    const target = Number(labelEls[i].dataset.target);
+    labelEls[i].setAttribute("y", y - 14);
+    if (target > 0) labelEls[i].textContent = euro(target * eased);
+  };
+
+  if (prefersReducedMotion) {
+    bars.forEach((_, i) => applyOne(i, 1));
+    return;
+  }
+
+  const t0 = performance.now();
+  const step = (now) => {
+    let done = true;
+    bars.forEach((_, i) => {
+      const localT = now - (t0 + i * stagger);
+      if (localT < 0) { done = false; return; }
+      const p = Math.min(localT / duration, 1);
+      if (p < 1) done = false;
+      applyOne(i, 1 - Math.pow(1 - p, 3));
+    });
+    if (!done) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// Ne declenche `run` que lorsque `el` entre reellement dans le viewport (les
+// graphiques plus bas dans la page Stats ne montent pas tous en meme temps a
+// l'ouverture de l'onglet, seulement quand on les fait defiler a l'ecran).
+function revealOnVisible(el, run) {
+  if (!el || prefersReducedMotion || !("IntersectionObserver" in window)) {
+    run();
+    return;
+  }
+  const io = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          io.disconnect();
+          run();
+        }
+      }
+    },
+    { threshold: 0.2 }
+  );
+  io.observe(el);
 }
 
 function frenchDateShort(dateStr) {
@@ -659,8 +752,11 @@ async function loadDayScrollChart(animate) {
   }));
   container._items = items;
   const track = container.querySelector(".chart-track");
-  track.innerHTML = scrollChartSVG(items, { highlightBest: true, animate });
-  if (animate) animateChartLabels(track);
+  const geo = scrollChartSVG(items, { highlightBest: true, animate });
+  track.innerHTML = geo.html;
+  // visible des l'ouverture de l'onglet Stats (tout en haut de la page) :
+  // pas besoin d'attendre un scroll pour la reveler
+  if (animate) runCurveReveal(track, geo);
 
   if (container.dataset.userScrolled !== "1") {
     requestAnimationFrame(() => { container.scrollLeft = container.scrollWidth; });
@@ -692,8 +788,11 @@ async function loadWeekScrollChart(animate) {
   }));
   container._items = items;
   const track = container.querySelector(".chart-track");
-  track.innerHTML = scrollBarChartSVG(items, { highlightBest: true, animate });
-  if (animate) animateChartLabels(track);
+  const geo = scrollBarChartSVG(items, { highlightBest: true, animate });
+  track.innerHTML = geo.html;
+  // ce graphique est plus bas dans la page : on attend qu'il soit reellement
+  // visible a l'ecran avant de faire monter les barres
+  if (animate) revealOnVisible(container.closest(".panel"), () => runBarReveal(track, geo));
 
   if (container.dataset.userScrolled !== "1") {
     requestAnimationFrame(() => { container.scrollLeft = container.scrollWidth; });
