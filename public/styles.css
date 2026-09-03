@@ -520,21 +520,72 @@ main { margin-top: 16px; }
 .donut-legend-value { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 
 /* charts */
+.chart-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.chart-range { font-size: 12px; color: var(--text-dim); min-width: 150px; text-align: center; }
+.chart-nav-btn {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+.chart-nav-btn:hover:not(:disabled) { border-color: rgba(56,247,255,0.5); background: rgba(56,247,255,0.08); }
+.chart-nav-btn:active:not(:disabled) { transform: scale(0.9); }
+.chart-nav-btn:disabled { opacity: 0.25; cursor: default; }
+
 .chart-wrap { width: 100%; }
 .chart-wrap svg { width: 100%; height: auto; display: block; overflow: visible; }
-.chart-bar { fill: var(--cyan); opacity: 0.85; transition: opacity 0.15s ease; }
-.chart-bar:hover, .chart-bar:active { opacity: 1; }
-.chart-bar.best { fill: var(--magenta); }
+.chart-swipe { touch-action: pan-y; cursor: grab; user-select: none; }
+.chart-swipe:active { cursor: grabbing; }
+
+.chart-line {
+  stroke: var(--cyan);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px rgba(56,247,255,0.55));
+  animation: lineDraw 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.chart-area { animation: fadein 0.6s ease 0.2s backwards; }
+@keyframes lineDraw {
+  from { stroke-dasharray: 1400; stroke-dashoffset: 1400; }
+  to { stroke-dasharray: 1400; stroke-dashoffset: 0; }
+}
+
+.chart-dot {
+  fill: var(--bg);
+  stroke: var(--cyan);
+  stroke-width: 2.5;
+  transition: r 0.15s ease;
+}
+.chart-dot.best {
+  fill: var(--magenta);
+  stroke: var(--magenta);
+  filter: drop-shadow(0 0 8px rgba(255,62,203,0.7));
+}
+.chart-dot:hover { r: 7; }
+
 .chart-grid-line { stroke: rgba(255,255,255,0.06); stroke-width: 1; }
 .chart-axis-label { fill: var(--text-dim); font-size: 10px; font-family: inherit; }
 .chart-value-label { fill: #9aa3bf; font-size: 10px; font-weight: 700; font-family: inherit; }
-.chart-value-label.is-best { fill: var(--text); }
+.chart-value-label.is-best { fill: var(--magenta); }
 .chart-value-label.is-zero { fill: #3f4459; font-weight: 400; }
 .chart-empty { text-align: center; color: var(--text-dim); font-size: 12.5px; padding: 30px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .bg-particles, .bg-glow, .stat-card, .brand-dot, .pulse,
-  .panel::after, .row-enter, .value-bump, .donut-seg { animation: none !important; }
+  .panel::after, .row-enter, .value-bump, .donut-seg,
+  .chart-line, .chart-area { animation: none !important; }
   .view.active { animation: none; }
   .row:hover { transform: none; }
 }

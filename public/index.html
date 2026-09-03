@@ -130,16 +130,26 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>7 derniers jours</h2>
+          <h2>Revenus par jour</h2>
         </div>
-        <div class="chart-wrap" id="chart-week"></div>
+        <div class="chart-nav">
+          <button class="chart-nav-btn" data-nav="week" data-dir="1" aria-label="Semaine précédente">‹</button>
+          <span class="chart-range" id="week-range">—</span>
+          <button class="chart-nav-btn" data-nav="week" data-dir="-1" aria-label="Semaine suivante">›</button>
+        </div>
+        <div class="chart-wrap chart-swipe" id="chart-week"></div>
       </div>
 
       <div class="panel">
         <div class="panel-head">
-          <h2>Semaine par semaine (ce mois)</h2>
+          <h2>Revenus par semaine</h2>
         </div>
-        <div class="chart-wrap" id="chart-month"></div>
+        <div class="chart-nav">
+          <button class="chart-nav-btn" data-nav="month" data-dir="1" aria-label="Mois précédent">‹</button>
+          <span class="chart-range" id="month-range">—</span>
+          <button class="chart-nav-btn" data-nav="month" data-dir="-1" aria-label="Mois suivant">›</button>
+        </div>
+        <div class="chart-wrap chart-swipe" id="chart-month"></div>
       </div>
 
       <div class="panel">

@@ -252,56 +252,116 @@ async function adjustStock(delta) {
 }
 
 
-function barChartSVG(items, { highlightBest = false } = {}) {
-  if (items.every((i) => i.value === 0)) {
-    return `<div class="chart-empty">Pas encore de données</div>`;
+// Chemin lisse (Catmull-Rom -> Bezier cubique) passant par tous les points.
+function smoothPath(points) {
+  if (points.length < 2) return "";
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
   }
-  const W = 700, H = 220, padTop = 30, padBottom = 28, padSide = 14;
+  return d;
+}
+
+let curveChartUid = 0;
+
+function curveChartSVG(items, { highlightBest = false } = {}) {
+  const W = 700, H = 260, padTop = 40, padBottom = 40, padSide = 30;
   const plotH = H - padTop - padBottom;
+  const baseY = H - padBottom;
   const max = Math.max(...items.map((i) => i.value), 1);
-  const gap = 14;
-  const barW = (W - padSide * 2 - gap * (items.length - 1)) / items.length;
+  const stepX = items.length > 1 ? (W - padSide * 2) / (items.length - 1) : 0;
   const bestIndex = items.reduce((best, it, i) => (it.value > items[best].value ? i : best), 0);
+  const uid = curveChartUid++;
+
+  const points = items.map((it, i) => ({
+    x: padSide + i * stepX,
+    y: baseY - (it.value / max) * plotH * 0.86,
+  }));
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => {
-    const y = padTop + plotH * (1 - f);
+    const y = padTop + plotH * (1 - f) * 0.86 + plotH * 0.14;
     return `<line class="chart-grid-line" x1="${padSide}" y1="${y}" x2="${W - padSide}" y2="${y}" />`;
   }).join("");
 
-  const bars = items.map((it, i) => {
-    const x = padSide + i * (barW + gap);
-    const h = max > 0 ? (it.value / max) * plotH : 0;
-    const y = padTop + plotH - h;
+  const linePath = smoothPath(points);
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${baseY} L ${points[0].x} ${baseY} Z`;
+
+  const dots = items.map((it, i) => {
     const isBest = highlightBest && i === bestIndex && it.value > 0;
-    // le montant est affiche au-dessus de chaque barre, pas seulement la meilleure
-    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${
-      x + barW / 2
-    }" y="${y - 8}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
+    const p = points[i];
+    const label = `<text class="chart-value-label ${it.value > 0 ? "" : "is-zero"} ${isBest ? "is-best" : ""}" x="${p.x}" y="${p.y - 16}" text-anchor="middle">${it.value > 0 ? euro(it.value) : "—"}</text>`;
     return `
-      <rect class="chart-bar ${isBest ? "best" : ""}" x="${x}" y="${y}" width="${barW}" height="${Math.max(h, 2)}" rx="4">
+      <circle class="chart-dot ${isBest ? "best" : ""}" cx="${p.x}" cy="${p.y}" r="${isBest ? 6 : 4}">
         <title>${it.label}: ${euro(it.value)} (${it.count} colis)</title>
-      </rect>
+      </circle>
       ${label}
-      <text class="chart-axis-label" x="${x + barW / 2}" y="${H - 8}" text-anchor="middle">${it.label}</text>
+      <text class="chart-axis-label" x="${p.x}" y="${H - 12}" text-anchor="middle">${it.label}</text>
     `;
   }).join("");
 
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${gridLines}${bars}</svg>`;
+  return `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="curveFill${uid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38f7ff" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#38f7ff" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${gridLines}
+      <path class="chart-area" d="${areaPath}" fill="url(#curveFill${uid})"/>
+      <path class="chart-line" d="${linePath}" fill="none"/>
+      ${dots}
+    </svg>
+  `;
 }
 
-async function loadRevenueStats() {
-  const r = await fetchJSON("/api/stats/revenue");
+const chartState = {
+  week: { offset: 0 },
+  month: { offset: 0 },
+};
 
-  const week = r.last7Days.map((d) => ({
-    label: DAY_LABELS[new Date(d.date + "T12:00:00").getDay()],
+function frenchDateShort(dateStr) {
+  return new Date(`${dateStr}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+async function loadWeekChart() {
+  const offset = chartState.week.offset;
+  const r = await fetchJSON(`/api/stats/revenue/week?offset=${offset}`);
+  const items = r.days.map((d) => ({
+    label: DAY_LABELS[new Date(`${d.date}T12:00:00`).getDay()],
     value: d.value,
     count: d.count,
   }));
-  document.getElementById("chart-week").innerHTML = barChartSVG(week, { highlightBest: true });
+  document.getElementById("chart-week").innerHTML = curveChartSVG(items, { highlightBest: true });
+  document.getElementById("week-range").textContent = r.isCurrent
+    ? `Cette semaine · ${frenchDateShort(r.startDate)} - ${frenchDateShort(r.endDate)}`
+    : `${frenchDateShort(r.startDate)} - ${frenchDateShort(r.endDate)}`;
+  document.querySelector('.chart-nav-btn[data-nav="week"][data-dir="-1"]').disabled = r.isCurrent;
+}
 
-  const month = r.weeksThisMonth.map((w) => ({ label: w.label.replace("Semaine ", "S"), value: w.value, count: w.count }));
-  document.getElementById("chart-month").innerHTML = barChartSVG(month, { highlightBest: true });
+async function loadMonthChart() {
+  const offset = chartState.month.offset;
+  const r = await fetchJSON(`/api/stats/revenue/month?offset=${offset}`);
+  const items = r.weeks.map((w) => ({ label: w.label, value: w.value, count: w.count }));
+  document.getElementById("chart-month").innerHTML = curveChartSVG(items, { highlightBest: true });
+  const [y, m] = r.monthKey.split("-").map(Number);
+  const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  document.getElementById("month-range").textContent = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
+  document.querySelector('.chart-nav-btn[data-nav="month"][data-dir="-1"]').disabled = r.isCurrent;
+}
 
+async function loadRevenueStats() {
+  await Promise.all([loadWeekChart(), loadMonthChart()]);
+
+  const r = await fetchJSON("/api/stats/revenue");
   const bestDayEl = document.getElementById("stat-bestday-value");
   const bestDaySub = document.getElementById("stat-bestday-sub");
   if (r.bestDay) {
@@ -313,6 +373,38 @@ async function loadRevenueStats() {
     bestDaySub.textContent = "Pas encore de données";
   }
 }
+
+function navigateChart(kind, dir) {
+  const state = chartState[kind];
+  const next = state.offset + dir;
+  if (next < 0) return;
+  state.offset = next;
+  if (kind === "week") loadWeekChart();
+  else loadMonthChart();
+}
+
+document.querySelectorAll(".chart-nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => navigateChart(btn.dataset.nav, Number(btn.dataset.dir)));
+});
+
+// swipe gauche/droite sur les graphiques pour naviguer dans l'historique
+document.querySelectorAll(".chart-swipe").forEach((el) => {
+  const kind = el.id === "chart-week" ? "week" : "month";
+  let startX = null, dragging = false;
+
+  const onStart = (x) => { startX = x; dragging = true; };
+  const onEnd = (x) => {
+    if (!dragging || startX === null) return;
+    dragging = false;
+    const dx = x - startX;
+    if (Math.abs(dx) > 40) navigateChart(kind, dx < 0 ? 1 : -1);
+    startX = null;
+  };
+
+  el.addEventListener("pointerdown", (e) => onStart(e.clientX));
+  el.addEventListener("pointerup", (e) => onEnd(e.clientX));
+  el.addEventListener("pointerleave", () => { dragging = false; startX = null; });
+});
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

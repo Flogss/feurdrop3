@@ -7,8 +7,8 @@ const {
   setColisType,
   quickAddColis,
   quickRemoveColis,
-  getRevenueLast7Days,
-  getRevenueWeeksThisMonth,
+  getWeekRevenue,
+  getMonthRevenue,
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
@@ -135,11 +135,17 @@ router.post("/debts/:sender/pay", (req, res) => {
 });
 
 router.get("/stats/revenue", (req, res) => {
-  res.json({
-    last7Days: getRevenueLast7Days(),
-    weeksThisMonth: getRevenueWeeksThisMonth(),
-    bestDay: getBestDay() || null,
-  });
+  res.json({ bestDay: getBestDay() || null });
+});
+
+router.get("/stats/revenue/week", (req, res) => {
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  res.json(getWeekRevenue(offset));
+});
+
+router.get("/stats/revenue/month", (req, res) => {
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  res.json(getMonthRevenue(offset));
 });
 
 router.get("/senders", (req, res) => {

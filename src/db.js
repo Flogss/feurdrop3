@@ -216,43 +216,64 @@ function quickRemoveColis(senderName) {
   return true;
 }
 
-function getRevenueLast7Days() {
+// Lundi (UTC) de la semaine courante moins `offsetWeeks` semaines. Les dates
+// sont calculees en UTC car dropped_at est stocke via datetime('now') (UTC).
+function mondayOfWeek(offsetWeeks) {
+  const now = new Date();
+  const utcDow = now.getUTCDay(); // 0=dim .. 6=sam
+  const isoDow = utcDow === 0 ? 7 : utcDow; // 1=lun .. 7=dim
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - (isoDow - 1) - offsetWeeks * 7);
+  return monday;
+}
+
+// Semaine lundi -> samedi (dimanche exclu), paginable via offset (0 = semaine
+// en cours, 1 = semaine precedente, etc.)
+function getWeekRevenue(offset = 0) {
+  const monday = mondayOfWeek(offset);
+  const dateKeys = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(monday);
+    d.setUTCDate(monday.getUTCDate() + i);
+    dateKeys.push(d.toISOString().slice(0, 10));
+  }
   const rows = db
     .prepare(
       `SELECT date(dropped_at) AS d, SUM(price) AS value, COUNT(*) AS count
-       FROM colis WHERE status = 'dropped' AND dropped_at >= datetime('now', '-6 days', 'start of day')
+       FROM colis WHERE status = 'dropped' AND date(dropped_at) BETWEEN ? AND ?
        GROUP BY d`
     )
-    .all();
+    .all(dateKeys[0], dateKeys[5]);
   const byDate = new Map(rows.map((r) => [r.d, r]));
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+  const days = dateKeys.map((key) => {
     const row = byDate.get(key);
-    days.push({ date: key, value: row ? row.value : 0, count: row ? row.count : 0 });
-  }
-  return days;
+    return { date: key, value: row ? row.value : 0, count: row ? row.count : 0 };
+  });
+  return { days, startDate: dateKeys[0], endDate: dateKeys[5], isCurrent: offset === 0 };
 }
 
-function getRevenueWeeksThisMonth() {
+// Semaines (S1..S5, dimanche exclu) du mois courant moins `offsetMonths` mois.
+function getMonthRevenue(offset = 0) {
+  const now = new Date();
+  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1));
+  const monthStr = `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
+
   const rows = db
     .prepare(
       `SELECT CAST((CAST(strftime('%d', dropped_at) AS INTEGER) - 1) / 7 AS INTEGER) AS week_index,
               SUM(price) AS value, COUNT(*) AS count
        FROM colis
-       WHERE status = 'dropped' AND strftime('%Y-%m', dropped_at) = strftime('%Y-%m', 'now')
+       WHERE status = 'dropped' AND strftime('%Y-%m', dropped_at) = ? AND strftime('%w', dropped_at) != '0'
        GROUP BY week_index ORDER BY week_index ASC`
     )
-    .all();
+    .all(monthStr);
   const byWeek = new Map(rows.map((r) => [r.week_index, r]));
   const weeks = [];
   for (let i = 0; i <= 4; i++) {
     const row = byWeek.get(i);
-    weeks.push({ label: `Semaine ${i + 1}`, value: row ? row.value : 0, count: row ? row.count : 0 });
+    weeks.push({ label: `S${i + 1}`, value: row ? row.value : 0, count: row ? row.count : 0 });
   }
-  return weeks;
+  return { weeks, monthKey: monthStr, isCurrent: offset === 0 };
 }
 
 function getBestDay() {
@@ -307,8 +328,8 @@ module.exports = {
   setBatchPrice,
   quickAddColis,
   quickRemoveColis,
-  getRevenueLast7Days,
-  getRevenueWeeksThisMonth,
+  getWeekRevenue,
+  getMonthRevenue,
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
