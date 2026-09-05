@@ -40,6 +40,7 @@ db.exec(`
     message_id INTEGER,
     batch_id INTEGER,
     paid INTEGER NOT NULL DEFAULT 0,
+    carrier TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     dropped_at TEXT,
     paid_at TEXT
@@ -68,6 +69,7 @@ if (!colisColumns.includes("paid_at")) db.exec("ALTER TABLE colis ADD COLUMN pai
 if (!colisColumns.includes("price_locked")) {
   db.exec("ALTER TABLE colis ADD COLUMN price_locked INTEGER NOT NULL DEFAULT 0");
 }
+if (!colisColumns.includes("carrier")) db.exec("ALTER TABLE colis ADD COLUMN carrier TEXT");
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -154,15 +156,40 @@ function createBatch(chatId) {
   return info.lastInsertRowid;
 }
 
-function addColis(senderName, { chatId, messageId, batchId, type = "normal" } = {}) {
+function addColis(senderName, { chatId, messageId, batchId, type = "normal", carrier = null } = {}) {
   const sender = getOrCreateSender(senderName);
   const price = priceForType(sender, type);
   const info = db
     .prepare(
-      "INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id) VALUES (?, ?, ?, 'pending', ?, ?, ?)"
+      "INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)"
     )
-    .run(sender.name, type, price, chatId || null, messageId || null, batchId || null);
-  return { id: info.lastInsertRowid, sender_name: sender.name, price, type };
+    .run(sender.name, type, price, chatId || null, messageId || null, batchId || null, carrier || null);
+  return { id: info.lastInsertRowid, sender_name: sender.name, price, type, carrier };
+}
+
+// Colis en attente groupes par transporteur detecte (nom de fichier /
+// description). "Autre" regroupe les colis dont le transporteur n'a pas pu
+// etre determine.
+function getCarrierSummary() {
+  return db
+    .prepare(
+      `SELECT COALESCE(carrier, 'Autre') AS carrier, COUNT(*) AS pending_count, SUM(price) AS pending_value
+       FROM colis WHERE status = 'pending'
+       GROUP BY COALESCE(carrier, 'Autre') ORDER BY pending_count DESC`
+    )
+    .all();
+}
+
+function dropByCarrier(carrier) {
+  const isOther = carrier === "Autre";
+  const info = isOther
+    ? db
+        .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND carrier IS NULL")
+        .run()
+    : db
+        .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND carrier = ?")
+        .run(carrier);
+  return info.changes;
 }
 
 function findColisByMessage(chatId, messageId) {
@@ -385,6 +412,8 @@ module.exports = {
   getOrCreateSender,
   updateSenderPrices,
   addColis,
+  getCarrierSummary,
+  dropByCarrier,
   createBatch,
   findColisByMessage,
   getLatestBatchId,

@@ -16,6 +16,8 @@ const {
   adjustStock,
   getMergeCandidates,
   mergeSendersIntoOther,
+  getCarrierSummary,
+  dropByCarrier,
 } = require("../db");
 
 const router = express.Router();
@@ -62,6 +64,7 @@ router.get("/stats", (req, res) => {
     bjPendingCount: bjPending.count,
     bjPendingValue: bjPending.value,
     bySender,
+    byCarrier: getCarrierSummary(),
   });
 });
 
@@ -104,6 +107,12 @@ router.post("/colis/drop-sender/:name", (req, res) => {
     .run(req.params.name);
   if (info.changes > 0) adjustStock(-info.changes);
   res.json({ ok: true, count: info.changes, stock: getStock() });
+});
+
+router.post("/colis/drop-carrier/:carrier", (req, res) => {
+  const count = dropByCarrier(req.params.carrier);
+  if (count > 0) adjustStock(-count);
+  res.json({ ok: true, count, stock: getStock() });
 });
 
 router.post("/colis/quick-add/:sender", (req, res) => {

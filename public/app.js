@@ -1,6 +1,7 @@
 const euro = (n) => `${Number(n || 0).toFixed(2)} €`;
 const DAY_LABELS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff", "#ff6b6b", "#5ad1ff", "#ff8ad1"];
+const CARRIER_LABELS = { MR: "Mondial Relay", LP: "La Poste", UPS: "UPS", DPD: "DPD", GLS: "GLS", Autre: "Autre" };
 
 let currentView = "dashboard";
 
@@ -157,7 +158,33 @@ async function loadStats(animate, force) {
   }
   staggerIn(container);
 
+  renderCarriers(s.byCarrier || []);
   renderDonut(s.bySender, animate);
+}
+
+function renderCarriers(byCarrier) {
+  const container = document.getElementById("carrier-rows");
+  if (!container) return;
+  const pending = byCarrier.filter((c) => c.pending_count > 0);
+  container.innerHTML = "";
+  if (pending.length === 0) {
+    container.innerHTML = `<div class="empty-row">Rien à poster 🎉</div>`;
+  }
+  for (const c of pending) {
+    const el = document.createElement("div");
+    el.className = "row row-inline";
+    el.innerHTML = `
+      <div class="row-main">
+        <div class="row-title">${escapeHtml(CARRIER_LABELS[c.carrier] || c.carrier)}</div>
+      </div>
+      <div class="row-actions">
+        <span class="chip chip-pending">${c.pending_count} · ${euro(c.pending_value)}</span>
+        <button class="btn btn-small btn-ghost" data-drop-carrier="${escapeAttr(c.carrier)}">Dropper</button>
+      </div>
+    `;
+    container.appendChild(el);
+  }
+  staggerIn(container);
 }
 
 function donutSVG(items, animate) {
@@ -839,10 +866,11 @@ async function playStatsReveal() {
 }
 
 document.addEventListener("click", async (e) => {
-  const target = e.target.closest("[data-drop-sender], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn");
+  const target = e.target.closest("[data-drop-sender], [data-drop-carrier], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn");
   if (!target) return;
 
   const dropSender = target.dataset.dropSender;
+  const dropCarrier = target.dataset.dropCarrier;
   const deleteSender = target.dataset.deleteSender;
   const quickAdd = target.dataset.quickAdd;
   const quickRemove = target.dataset.quickRemove;
@@ -853,6 +881,9 @@ document.addEventListener("click", async (e) => {
     refreshAll();
   } else if (dropSender) {
     await fetchJSON(`/api/colis/drop-sender/${encodeURIComponent(dropSender)}`, { method: "POST" });
+    refreshAll();
+  } else if (dropCarrier) {
+    await fetchJSON(`/api/colis/drop-carrier/${encodeURIComponent(dropCarrier)}`, { method: "POST" });
     refreshAll();
   } else if (deleteSender) {
     if (confirm("Supprimer cet expéditeur ?")) {

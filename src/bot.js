@@ -13,6 +13,7 @@ const {
   setStatsMessageId,
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
+const { detectCarrier } = require("./carrier");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
@@ -102,6 +103,7 @@ function startBot() {
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
     const senderName = extractSenderName(msg);
+    const carrier = detectCarrier(msg.document.file_name, msg.caption);
     const threadId = msg.message_thread_id;
     const key = batchKey(msg.chat.id, threadId);
 
@@ -124,6 +126,7 @@ function startBot() {
       messageId: msg.message_id,
       batchId: batch.batchId,
       type: forcedType || "normal",
+      carrier,
     });
 
     batch.count += 1;
