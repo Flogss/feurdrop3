@@ -1,7 +1,15 @@
 const euro = (n) => `${Number(n || 0).toFixed(2)} €`;
 const DAY_LABELS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff", "#ff6b6b", "#5ad1ff", "#ff8ad1"];
-const CARRIER_LABELS = { MR: "Mondial Relay", LP: "La Poste", UPS: "UPS", DPD: "DPD", GLS: "GLS", Autre: "Autre" };
+const CARRIER_LABELS = {
+  MR: "Mondial Relay",
+  LP: "La Poste",
+  UPS: "UPS",
+  DPD: "DPD",
+  GLS: "GLS",
+  BJ: "BJ",
+  Inconnu: "⚠️ Non reconnu",
+};
 
 let currentView = "dashboard";
 

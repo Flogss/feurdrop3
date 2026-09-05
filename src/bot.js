@@ -116,9 +116,16 @@ function startBot() {
         count: 0,
         total: 0,
         bySender: new Map(),
+        unknown: [],
         timer: null,
       };
       batches.set(key, batch);
+    }
+
+    // transporteur non reconnu : on le signale sur Telegram a la fin du lot,
+    // pour pouvoir completer les regles de detection
+    if (!carrier && forcedType !== "bj") {
+      batch.unknown.push({ fileName: msg.document.file_name, caption: msg.caption });
     }
 
     const colis = addColis(senderName, {
@@ -255,10 +262,30 @@ async function updateGroupStatsPhoto(bot, addedCount) {
   }
 }
 
+// Previent dans le topic General du groupe quand des fichiers n'ont pas pu
+// etre rattaches a un transporteur, avec nom de fichier et description pour
+// pouvoir completer les regles de detection.
+function notifyUnknownCarriers(bot, unknown) {
+  if (!unknown || unknown.length === 0) return;
+
+  const detail = unknown
+    .slice(0, 15)
+    .map((u) => `  • ${u.fileName || "sans nom"} — ${u.caption ? `"${u.caption}"` : "sans description"}`)
+    .join("\n");
+  const extra = unknown.length > 15 ? `\n  … et ${unknown.length - 15} autre(s)` : "";
+  const text = `⚠️ ${unknown.length} colis sans transporteur reconnu :\n${detail}${extra}`;
+
+  bot
+    .sendMessage(AUTO_GROUP_CHAT_ID, text)
+    .catch((err) => console.error("[bot] notify unknown error", err.message));
+}
+
 function flushBatch(bot, key, batches) {
   const batch = batches.get(key);
   if (!batch) return;
   batches.delete(key);
+
+  notifyUnknownCarriers(bot, batch.unknown);
 
   if (batch.chatId === AUTO_GROUP_CHAT_ID) {
     updateGroupStatsPhoto(bot, batch.count);

@@ -1,44 +1,46 @@
 // Devine le transporteur d'un colis a partir du nom de fichier du PDF et de
-// la description/legende envoyee avec (les deux sont verifies, car selon les
-// cas l'info utile se trouve dans l'un ou l'autre).
-//
-// Priorite de detection : UPS > La Poste > DPD > Mondial Relay > GLS.
-// Mondial Relay est verifie avant GLS car une description du type
-// "PR MONDIAL RELAY & GLS" doit etre classee MR, pas GLS.
+// la description/legende envoyee avec. Les deux sont fouilles de la meme
+// maniere : le numero de suivi peut se trouver dans l'un comme dans l'autre
+// (ex. fichier "safari.pdf" avec "8569588855" en description).
 function normalize(str) {
   return (str || "").toUpperCase();
 }
 
+// Decoupe une chaine en jetons alphanumeriques, pour isoler un eventuel
+// numero de suivi noye au milieu d'autre texte.
+function tokensOf(str) {
+  return normalize(str).split(/[^A-Z0-9]+/).filter(Boolean);
+}
+
+// Reconnait un transporteur a partir d'un seul jeton (numero de suivi).
+function carrierFromToken(token) {
+  if (/^1Z[0-9A-Z]{10,}$/.test(token)) return "UPS";
+  if (/^8R\d{8,}$/.test(token)) return "LP";
+  if (/^[A-Z]{2}\d{9}FR$/.test(token)) return "LP";
+  if (/^0\d{13}$/.test(token)) return "DPD";
+  if (/^\d{8,10}[A-Z]{0,3}$/.test(token)) return "MR";
+  return null;
+}
+
+// Ordre de confiance quand plusieurs numeros sont presents.
+const TOKEN_PRIORITY = ["UPS", "LP", "DPD", "MR"];
+
 function detectCarrier(fileName, caption) {
-  const name = normalize(fileName).replace(/\.PDF$/i, "").trim();
-  const desc = normalize(caption);
-  const combined = `${name} ${desc}`;
+  const combined = `${normalize(fileName)} ${normalize(caption)}`;
 
-  // UPS : motif de suivi "1Z..." ou mention explicite
-  if (/1Z[0-9A-Z]{10,}/.test(combined) || /UPS/.test(combined)) return "UPS";
+  // 1. Mention explicite du transporteur, ou motif tres distinctif.
+  //    Mondial Relay passe avant GLS : "PR MONDIAL RELAY & GLS" -> MR.
+  if (/UPS/.test(combined) || /1Z[0-9A-Z]{14,}/.test(combined)) return "UPS";
+  if (/LA POSTE|COLISSIMO|CHRONOPOST/.test(combined) || (caption || "").includes("📮")) return "LP";
+  if (/\bDPD\b/.test(combined)) return "DPD";
+  if (/MONDIAL RELAY|\bMR\b/.test(combined)) return "MR";
+  if (/\bGLS\b/.test(combined)) return "GLS";
 
-  // La Poste / Colissimo : prefixe "8R", format universel 2 lettres + 9
-  // chiffres + FR, ou mention explicite (texte ou emoji boite aux lettres)
-  if (
-    /^8R\d{8,}/.test(name) ||
-    /^[A-Z]{2}\d{9}FR$/.test(name) ||
-    /LA POSTE|COLISSIMO/.test(desc) ||
-    (caption || "").includes("📮")
-  ) {
-    return "LP";
+  // 2. Motif de numero de suivi, cherche dans le nom ET dans la description.
+  const found = [...tokensOf(fileName), ...tokensOf(caption)].map(carrierFromToken).filter(Boolean);
+  for (const carrier of TOKEN_PRIORITY) {
+    if (found.includes(carrier)) return carrier;
   }
-
-  // DPD : suivi numerique long (14 chiffres) commencant par 0, ou mention
-  // explicite
-  if (/^0\d{13}$/.test(name) || /\bDPD\b/.test(desc)) return "DPD";
-
-  // Mondial Relay : mention explicite (prioritaire meme si "GLS" est cite
-  // dans la meme description), ou suivi numerique court (8-10 chiffres,
-  // parfois suivi de 1-3 lettres)
-  if (/MONDIAL RELAY|\bMR\b/.test(desc) || /^\d{8,10}[A-Z]{0,3}$/.test(name)) return "MR";
-
-  // GLS : uniquement si mentionne seul, sans Mondial Relay
-  if (/\bGLS\b/.test(desc)) return "GLS";
 
   return null;
 }

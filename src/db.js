@@ -170,25 +170,41 @@ function addColis(senderName, { chatId, messageId, batchId, type = "normal", car
 // Colis en attente groupes par transporteur detecte (nom de fichier /
 // description). "Autre" regroupe les colis dont le transporteur n'a pas pu
 // etre determine.
+// Les colis BJ forment leur propre ligne dans "compagnies a poster" : ils se
+// deposent differemment, meme s'ils portent un numero de suivi transporteur.
+// "Inconnu" ne devrait quasiment jamais apparaitre : le bot previent sur
+// Telegram des qu'un fichier n'est pas reconnu, pour affiner les regles.
+const CARRIER_GROUP_SQL = "CASE WHEN type = 'bj' THEN 'BJ' ELSE COALESCE(carrier, 'Inconnu') END";
+
 function getCarrierSummary() {
   return db
     .prepare(
-      `SELECT COALESCE(carrier, 'Autre') AS carrier, COUNT(*) AS pending_count, SUM(price) AS pending_value
+      `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS pending_count, SUM(price) AS pending_value
        FROM colis WHERE status = 'pending'
-       GROUP BY COALESCE(carrier, 'Autre') ORDER BY pending_count DESC`
+       GROUP BY ${CARRIER_GROUP_SQL} ORDER BY pending_count DESC`
     )
     .all();
 }
 
 function dropByCarrier(carrier) {
-  const isOther = carrier === "Autre";
-  const info = isOther
-    ? db
-        .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND carrier IS NULL")
-        .run()
-    : db
-        .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND carrier = ?")
-        .run(carrier);
+  let info;
+  if (carrier === "BJ") {
+    info = db
+      .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND type = 'bj'")
+      .run();
+  } else if (carrier === "Inconnu") {
+    info = db
+      .prepare(
+        "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND type != 'bj' AND carrier IS NULL"
+      )
+      .run();
+  } else {
+    info = db
+      .prepare(
+        "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND type != 'bj' AND carrier = ?"
+      )
+      .run(carrier);
+  }
   return info.changes;
 }
 
