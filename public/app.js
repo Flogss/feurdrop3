@@ -180,14 +180,15 @@ function renderCarriers(byCarrier) {
   }
   for (const c of pending) {
     const el = document.createElement("div");
-    el.className = "row row-inline";
+    el.className = "row row-inline carrier-row";
+    el.dataset.carrier = c.carrier;
     el.innerHTML = `
       <div class="row-main">
         <div class="row-title">${escapeHtml(CARRIER_LABELS[c.carrier] || c.carrier)}</div>
       </div>
       <div class="row-actions">
-        <span class="chip chip-pending">${c.pending_count} · ${euro(c.pending_value)}</span>
-        <button class="btn btn-small btn-ghost" data-drop-carrier="${escapeAttr(c.carrier)}">Dropper</button>
+        <span class="chip chip-carrier">${c.pending_count} · ${euro(c.pending_value)}</span>
+        <button class="btn btn-small btn-carrier" data-drop-carrier="${escapeAttr(c.carrier)}">Dropper</button>
       </div>
     `;
     container.appendChild(el);
