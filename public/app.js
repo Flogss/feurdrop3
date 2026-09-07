@@ -323,9 +323,11 @@ async function loadSenders() {
       </div>
       <div class="row-actions">
         <input class="price-input price-normal" type="number" step="0.5" min="0" value="${s.price}"
-               data-sender-id="${s.id}" data-field="price" title="Prix normal (et BJ)" />
+               data-sender-id="${s.id}" data-field="price" title="Prix normal" />
         <input class="price-input price-lit" type="number" step="0.5" min="0" value="${s.lit_price}"
                data-sender-id="${s.id}" data-field="litPrice" title="Prix LIT" />
+        <input class="price-input price-bj" type="number" step="0.5" min="0" value="${s.bj_price}"
+               data-sender-id="${s.id}" data-field="bjPrice" title="Prix BJ" />
         <button class="btn btn-small btn-ghost" data-delete-sender="${s.id}">Suppr.</button>
       </div>
     `;
@@ -765,10 +767,25 @@ async function loadDayScrollChart(animate, force) {
 
   const container = document.getElementById("chart-week");
   const rangeEl = document.getElementById("week-range");
+  const averageEl = document.getElementById("day-average");
   if (!r.days || r.days.length === 0) {
     container.querySelector(".chart-track").innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
     rangeEl.textContent = "—";
+    if (averageEl) averageEl.textContent = "—";
     return;
+  }
+
+  // moyenne sur tous les jours enregistres (dimanches exclus de la serie),
+  // jours sans revenu compris : c'est le revenu moyen d'une journee type
+  const total = r.days.reduce((sum, d) => sum + d.value, 0);
+  const average = total / r.days.length;
+  if (averageEl) {
+    if (animate) {
+      averageEl.innerHTML = `Moyenne <span id="day-average-value">${euro(0)}</span> / jour · sur ${r.days.length} jours`;
+      animateNumberText(document.getElementById("day-average-value"), average, euro, 1600);
+    } else {
+      averageEl.innerHTML = `Moyenne <span id="day-average-value">${euro(average)}</span> / jour · sur ${r.days.length} jours`;
+    }
   }
 
   const items = r.days.map((d) => ({
@@ -924,7 +941,8 @@ document.addEventListener("change", async (e) => {
   const senderId = e.target.dataset.senderId;
   if (!senderId) return;
 
-  const field = e.target.dataset.field === "litPrice" ? "litPrice" : "price";
+  const allowedFields = ["price", "litPrice", "bjPrice"];
+  const field = allowedFields.includes(e.target.dataset.field) ? e.target.dataset.field : "price";
   await fetchJSON(`/api/senders/${senderId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -960,11 +978,12 @@ document.getElementById("add-sender-form").addEventListener("submit", async (e) 
   const name = document.getElementById("new-sender-name").value.trim();
   const price = Number(document.getElementById("new-sender-price").value);
   const litPrice = Number(document.getElementById("new-sender-lit-price").value);
+  const bjPrice = Number(document.getElementById("new-sender-bj-price").value);
   try {
     await fetchJSON("/api/senders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, price, litPrice }),
+      body: JSON.stringify({ name, price, litPrice, bjPrice }),
     });
     e.target.reset();
     refreshAll();

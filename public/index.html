@@ -113,16 +113,17 @@
       <div class="panel">
         <div class="panel-head">
           <h2>Prix par expéditeur</h2>
-          <span class="price-legend"><span class="legend-normal">normal</span> / <span class="legend-lit">LIT</span></span>
+          <span class="price-legend"><span class="legend-normal">normal</span> / <span class="legend-lit">LIT</span> / <span class="legend-bj">BJ</span></span>
         </div>
         <div id="settings-rows" class="rows"></div>
         <form id="add-sender-form" class="add-form">
           <input type="text" id="new-sender-name" placeholder="Nom exact de l'expéditeur" required />
           <input type="number" id="new-sender-price" placeholder="Normal €" step="0.5" min="0" required />
           <input type="number" id="new-sender-lit-price" placeholder="LIT €" step="0.5" min="0" required />
+          <input type="number" id="new-sender-bj-price" placeholder="BJ €" step="0.5" min="0" required />
           <button type="submit" class="btn btn-primary">Ajouter</button>
         </form>
-        <p class="hint">Chaque expéditeur a deux tarifs : le prix normal (aussi appliqué aux BJ) et le prix LIT. Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit les tarifs par défaut à son premier colis.</p>
+        <p class="hint">Chaque expéditeur a trois tarifs : normal, LIT et BJ. Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit les tarifs par défaut à son premier colis.</p>
       </div>
 
       <div class="panel">
@@ -149,6 +150,7 @@
           <h2>Revenus par jour</h2>
           <span class="chart-range" id="week-range">—</span>
         </div>
+        <div class="chart-average" id="day-average">—</div>
         <div class="chart-scroll" id="chart-week"><div class="chart-track"></div></div>
       </div>
 

@@ -9,6 +9,7 @@ const DB_PATH =
     : "./data/drop.db");
 const DEFAULT_PRICE = Number(process.env.DEFAULT_PRICE || 4);
 const DEFAULT_LIT_PRICE = Number(process.env.DEFAULT_LIT_PRICE || 5.5);
+const DEFAULT_BJ_PRICE = Number(process.env.DEFAULT_BJ_PRICE || DEFAULT_PRICE);
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
@@ -21,6 +22,7 @@ db.exec(`
     name TEXT NOT NULL UNIQUE,
     price REAL NOT NULL DEFAULT ${DEFAULT_PRICE},
     lit_price REAL NOT NULL DEFAULT ${DEFAULT_LIT_PRICE},
+    bj_price REAL NOT NULL DEFAULT ${DEFAULT_BJ_PRICE},
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -75,6 +77,9 @@ const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => 
 if (!senderColumns.includes("lit_price")) {
   db.exec(`ALTER TABLE senders ADD COLUMN lit_price REAL NOT NULL DEFAULT ${DEFAULT_LIT_PRICE}`);
 }
+if (!senderColumns.includes("bj_price")) {
+  db.exec(`ALTER TABLE senders ADD COLUMN bj_price REAL NOT NULL DEFAULT ${DEFAULT_BJ_PRICE}`);
+}
 
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
@@ -90,7 +95,9 @@ function setSetting(key, value) {
 // Prix applique a un colis selon son type : les LIT ont leur propre tarif par
 // expediteur, les BJ suivent le tarif normal.
 function priceForType(sender, type) {
-  return type === "lit" ? sender.lit_price : sender.price;
+  if (type === "lit") return sender.lit_price;
+  if (type === "bj") return sender.bj_price;
+  return sender.price;
 }
 
 function getStock() {
@@ -123,30 +130,37 @@ function getOrCreateSender(name) {
   const clean = (name || "Inconnu").trim().slice(0, 120) || "Inconnu";
   const existing = db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
   if (existing) return existing;
-  db.prepare("INSERT INTO senders (name, price, lit_price) VALUES (?, ?, ?)").run(
+  db.prepare("INSERT INTO senders (name, price, lit_price, bj_price) VALUES (?, ?, ?, ?)").run(
     clean,
     DEFAULT_PRICE,
-    DEFAULT_LIT_PRICE
+    DEFAULT_LIT_PRICE,
+    DEFAULT_BJ_PRICE
   );
   return db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
 }
 
-function updateSenderPrices(id, { price, litPrice }) {
+function updateSenderPrices(id, { price, litPrice, bjPrice }) {
   const current = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
   if (!current) return null;
 
   const nextPrice = price === undefined ? current.price : price;
   const nextLitPrice = litPrice === undefined ? current.lit_price : litPrice;
-  db.prepare("UPDATE senders SET price = ?, lit_price = ? WHERE id = ?").run(nextPrice, nextLitPrice, id);
+  const nextBjPrice = bjPrice === undefined ? current.bj_price : bjPrice;
+  db.prepare("UPDATE senders SET price = ?, lit_price = ?, bj_price = ? WHERE id = ?").run(
+    nextPrice,
+    nextLitPrice,
+    nextBjPrice,
+    id
+  );
 
-  // les colis BJ suivent le meme tarif que les colis normaux ; les prix fixes
-  // manuellement via /prix ne sont pas ecrases
-  db.prepare(
-    "UPDATE colis SET price = ? WHERE status = 'pending' AND price_locked = 0 AND type IN ('normal', 'bj') AND sender_name = ?"
-  ).run(nextPrice, current.name);
-  db.prepare(
-    "UPDATE colis SET price = ? WHERE status = 'pending' AND price_locked = 0 AND type = 'lit' AND sender_name = ?"
-  ).run(nextLitPrice, current.name);
+  // chaque type suit son propre tarif ; les prix fixes manuellement via /prix
+  // ne sont pas ecrases
+  const applyTo = db.prepare(
+    "UPDATE colis SET price = ? WHERE status = 'pending' AND price_locked = 0 AND type = ? AND sender_name = ?"
+  );
+  applyTo.run(nextPrice, "normal", current.name);
+  applyTo.run(nextLitPrice, "lit", current.name);
+  applyTo.run(nextBjPrice, "bj", current.name);
 
   return db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
 }
@@ -453,4 +467,5 @@ module.exports = {
   mergeSendersIntoOther,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
+  DEFAULT_BJ_PRICE,
 };

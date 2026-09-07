@@ -446,6 +446,8 @@ main { margin-top: 16px; }
 .price-input.price-normal { width: 64px; border-color: rgba(56,247,255,0.25); color: var(--cyan); }
 .price-input.price-lit { width: 64px; border-color: rgba(255,62,203,0.3); color: var(--magenta); }
 .price-input.price-lit:focus { border-color: var(--magenta); box-shadow: 0 0 8px rgba(255,62,203,0.25); }
+.price-input.price-bj { width: 64px; border-color: rgba(255,214,51,0.3); color: #ffd633; }
+.price-input.price-bj:focus { border-color: #ffd633; box-shadow: 0 0 8px rgba(255,214,51,0.25); }
 
 .price-legend { font-size: 10px; letter-spacing: 0.5px; color: var(--text-dim); }
 
@@ -465,6 +467,7 @@ main { margin-top: 16px; }
 #merge-to-other-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .legend-normal { color: var(--cyan); font-weight: 700; }
 .legend-lit { color: var(--magenta); font-weight: 700; }
+.legend-bj { color: #ffd633; font-weight: 700; }
 
 .add-form { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .add-form input {
@@ -604,6 +607,18 @@ main { margin-top: 16px; }
   border-radius: 999px;
   border: 1px solid var(--panel-border);
   background: rgba(255,255,255,0.02);
+}
+
+/* moyenne journaliere, sous l'intitule de plage du graphique */
+.chart-average {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin: -4px 0 10px;
+}
+.chart-average span {
+  color: var(--cyan);
+  font-weight: 700;
+  text-shadow: 0 0 12px rgba(56,247,255,0.35);
 }
 
 /* piste de defilement horizontal libre (glisser a la main, momentum natif) */

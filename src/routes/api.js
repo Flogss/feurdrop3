@@ -175,11 +175,22 @@ router.post("/senders", (req, res) => {
   const name = (req.body.name || "").trim();
   const price = Number(req.body.price);
   const litPrice = req.body.litPrice === undefined ? DEFAULT_LIT_PRICE : Number(req.body.litPrice);
-  if (!name || Number.isNaN(price) || price < 0 || Number.isNaN(litPrice) || litPrice < 0) {
+  const bjPrice = req.body.bjPrice === undefined ? price : Number(req.body.bjPrice);
+  if (
+    !name ||
+    Number.isNaN(price) || price < 0 ||
+    Number.isNaN(litPrice) || litPrice < 0 ||
+    Number.isNaN(bjPrice) || bjPrice < 0
+  ) {
     return res.status(400).json({ error: "Nom ou prix invalide" });
   }
   try {
-    db.prepare("INSERT INTO senders (name, price, lit_price) VALUES (?, ?, ?)").run(name, price, litPrice);
+    db.prepare("INSERT INTO senders (name, price, lit_price, bj_price) VALUES (?, ?, ?, ?)").run(
+      name,
+      price,
+      litPrice,
+      bjPrice
+    );
   } catch (err) {
     return res.status(400).json({ error: "Cet expediteur existe deja" });
   }
@@ -197,6 +208,11 @@ router.put("/senders/:id", (req, res) => {
     const litPrice = Number(req.body.litPrice);
     if (Number.isNaN(litPrice) || litPrice < 0) return res.status(400).json({ error: "Prix LIT invalide" });
     patch.litPrice = litPrice;
+  }
+  if (req.body.bjPrice !== undefined) {
+    const bjPrice = Number(req.body.bjPrice);
+    if (Number.isNaN(bjPrice) || bjPrice < 0) return res.status(400).json({ error: "Prix BJ invalide" });
+    patch.bjPrice = bjPrice;
   }
   const sender = updateSenderPrices(req.params.id, patch);
   if (!sender) return res.status(404).json({ error: "Expediteur introuvable" });
