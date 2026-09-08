@@ -265,6 +265,9 @@ main { margin-top: 16px; }
 
 .stat-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.8px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-value { font-size: 19px; font-weight: 700; margin-top: 5px; transition: opacity 0.2s ease; white-space: nowrap; }
+/* montants longs (>= 1000 €) : on retrecit pour que le symbole € reste dans la carte */
+.stat-value.stat-value-long { font-size: 16.5px; letter-spacing: -0.3px; }
+.stat-value.stat-value-xlong { font-size: 14.5px; letter-spacing: -0.5px; }
 .glow-cyan .stat-value { color: var(--cyan); text-shadow: 0 0 16px rgba(56,247,255,0.4); }
 .glow-magenta .stat-value { color: var(--magenta); text-shadow: 0 0 16px rgba(255,62,203,0.4); }
 .glow-lime .stat-value { color: var(--lime); text-shadow: 0 0 16px rgba(182,255,62,0.4); }
@@ -450,6 +453,40 @@ main { margin-top: 16px; }
 .price-input.price-bj:focus { border-color: #ffd633; box-shadow: 0 0 8px rgba(255,214,51,0.25); }
 
 .price-legend { font-size: 10px; letter-spacing: 0.5px; color: var(--text-dim); }
+
+/* Ligne "prix par expediteur" : le nom sur sa propre ligne, puis les trois
+   tarifs etiquetes en dessous (sinon le nom devenait illisible). */
+.sender-price-row { display: block; }
+.sender-price-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sender-price-head .row-title { flex: 1; min-width: 0; }
+.sender-price-fields { display: flex; gap: 8px; margin-top: 9px; }
+.price-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.price-tag { font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-dim); }
+.sender-price-fields .price-input,
+.sender-price-fields .price-input.price-normal,
+.sender-price-fields .price-input.price-lit,
+.sender-price-fields .price-input.price-bj { width: 100%; }
+
+/* Fusion de deux expediteurs (meme personne qui a recree un compte) */
+.merge-pair-form { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
+.merge-pair-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.merge-pair-field select {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  width: 100%;
+}
+.merge-pair-field select:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 8px rgba(56,247,255,0.2); }
+.merge-pair-arrow { color: var(--text-dim); padding-bottom: 8px; font-size: 13px; }
+@media (max-width: 420px) {
+  .merge-pair-form { flex-wrap: wrap; }
+  .merge-pair-field { flex-basis: calc(50% - 20px); }
+  .merge-pair-form .btn { width: 100%; }
+}
 
 /* .row-main utilise display:contents, donc c'est le label (et non
    .row-title a l'interieur) qui devient l'enfant direct de la grille .row */

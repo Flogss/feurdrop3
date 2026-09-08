@@ -429,6 +429,25 @@ function mergeSendersIntoOther(senderIds) {
   return merged;
 }
 
+// Fusionne un expediteur dans un autre (cas typique : la meme personne a
+// recree un compte Telegram). Tous les colis - dropes comme en attente -
+// passent sous le nom cible, puis l'expediteur source est supprime. Le seuil
+// de securite de "Autre" ne s'applique pas ici : c'est un choix explicite et
+// rien n'est perdu, tout est deplace vers un expediteur existant.
+function mergeSenderInto(sourceId, targetId) {
+  const source = db.prepare("SELECT * FROM senders WHERE id = ?").get(sourceId);
+  const target = db.prepare("SELECT * FROM senders WHERE id = ?").get(targetId);
+  if (!source) throw new Error("Expéditeur source introuvable");
+  if (!target) throw new Error("Expéditeur cible introuvable");
+  if (source.id === target.id) throw new Error("Choisis deux expéditeurs différents");
+
+  const moved = db
+    .prepare("UPDATE colis SET sender_name = ? WHERE sender_name = ?")
+    .run(target.name, source.name).changes;
+  db.prepare("DELETE FROM senders WHERE id = ?").run(source.id);
+  return { moved, source: source.name, target: target.name };
+}
+
 function setBatchType(batchId, type) {
   const rows = db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
   const update = db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?");
@@ -470,6 +489,7 @@ module.exports = {
   setStatsMessageId,
   getMergeCandidates,
   mergeSendersIntoOther,
+  mergeSenderInto,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
   DEFAULT_BJ_PRICE,

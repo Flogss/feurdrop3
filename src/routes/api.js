@@ -16,6 +16,7 @@ const {
   adjustStock,
   getMergeCandidates,
   mergeSendersIntoOther,
+  mergeSenderInto,
   getCarrierSummary,
   dropByCarrier,
 } = require("../db");
@@ -169,6 +170,17 @@ router.post("/senders/merge-to-other", (req, res) => {
   const ids = Array.isArray(req.body.senderIds) ? req.body.senderIds : [];
   const merged = mergeSendersIntoOther(ids);
   res.json({ ok: true, merged });
+});
+
+router.post("/senders/merge", (req, res) => {
+  const sourceId = Number(req.body.sourceId);
+  const targetId = Number(req.body.targetId);
+  if (!sourceId || !targetId) return res.status(400).json({ error: "Expéditeurs invalides" });
+  try {
+    res.json({ ok: true, ...mergeSenderInto(sourceId, targetId) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 router.post("/senders", (req, res) => {

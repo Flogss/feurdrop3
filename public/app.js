@@ -1,4 +1,8 @@
 const euro = (n) => `${Number(n || 0).toFixed(2)} €`;
+// Les cartes du dashboard sont etroites (3 par ligne sur mobile) : au-dela
+// de 1000 € on laisse tomber les centimes pour que le symbole € ne soit pas
+// tronque sur le bord.
+const euroCompact = (n) => (Math.abs(Number(n) || 0) >= 1000 ? `${Math.round(Number(n) || 0)} €` : euro(n));
 const DAY_LABELS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff", "#ff6b6b", "#5ad1ff", "#ff8ad1"];
 const CARRIER_LABELS = {
@@ -56,7 +60,9 @@ function animateValue(el, newText) {
 
   const target = parseFloat(String(newText).replace(/[^\d.-]/g, ""));
   const start = parseFloat(String(el.textContent).replace(/[^\d.-]/g, ""));
-  const suffix = String(newText).replace(/^[\d.,\s-]+/, "");
+  // on garde tout ce qui suit le dernier chiffre (ex: " €") pour ne pas
+  // perdre l'espace insecable pendant l'animation
+  const suffix = (String(newText).match(/[^\d]*$/) || [""])[0];
   const decimals = (String(newText).split(".")[1] || "").replace(/\D+$/, "").length;
 
   if (prefersReducedMotion || Number.isNaN(target) || Number.isNaN(start) || start === target) {
@@ -124,16 +130,29 @@ function animateNumberText(el, target, format, duration = 1000, delay = 0) {
   else start();
 }
 
+// Reduit la taille de police quand le montant est long (ex: "1234.50 €")
+// pour que le symbole € ne deborde pas de la carte.
+function fitStatValue(el, text) {
+  if (!el) return;
+  const len = String(text).length;
+  el.classList.toggle("stat-value-long", len >= 8 && len < 10);
+  el.classList.toggle("stat-value-xlong", len >= 10);
+}
+
 async function loadStats(animate, force) {
   const s = await fetchJSON("/api/stats");
-  animateValue(document.getElementById("stat-earned"), euro(s.droppedValue));
+  const earnedText = euroCompact(s.droppedValue);
+  fitStatValue(document.getElementById("stat-earned"), earnedText);
+  animateValue(document.getElementById("stat-earned"), earnedText);
   document.getElementById("stat-earned-count").textContent = `${s.droppedCount} colis dropés`;
   animateValue(document.getElementById("stat-pending"), String(s.pendingCount));
-  document.getElementById("stat-pending-value").textContent = `≈ ${euro(s.pendingValue)}`;
-  animateValue(document.getElementById("stat-today"), euro(s.todayValue));
+  document.getElementById("stat-pending-value").textContent = `≈ ${euroCompact(s.pendingValue)}`;
+  const todayText = euroCompact(s.todayValue);
+  fitStatValue(document.getElementById("stat-today"), todayText);
+  animateValue(document.getElementById("stat-today"), todayText);
   document.getElementById("stat-today-count").textContent = `${s.todayCount} colis dropés`;
   animateValue(document.getElementById("stat-bj"), String(s.bjPendingCount || 0));
-  document.getElementById("stat-bj-value").textContent = `≈ ${euro(s.bjPendingValue)}`;
+  document.getElementById("stat-bj-value").textContent = `≈ ${euroCompact(s.bjPendingValue)}`;
 
   if (!force && !hasChanged("senders", s.bySender)) return;
 
@@ -316,24 +335,50 @@ async function loadSenders() {
   container.innerHTML = "";
   for (const s of rows) {
     const el = document.createElement("div");
-    el.className = "row row-inline";
+    // le nom occupe sa propre ligne : avec trois tarifs editables, tout mettre
+    // sur une seule ligne rognait completement le nom de l'expediteur
+    el.className = "row sender-price-row";
     el.innerHTML = `
-      <div class="row-main">
-        <div class="row-title">${escapeHtml(s.name)}</div>
-      </div>
-      <div class="row-actions">
-        <input class="price-input price-normal" type="number" step="0.5" min="0" value="${s.price}"
-               data-sender-id="${s.id}" data-field="price" title="Prix normal" />
-        <input class="price-input price-lit" type="number" step="0.5" min="0" value="${s.lit_price}"
-               data-sender-id="${s.id}" data-field="litPrice" title="Prix LIT" />
-        <input class="price-input price-bj" type="number" step="0.5" min="0" value="${s.bj_price}"
-               data-sender-id="${s.id}" data-field="bjPrice" title="Prix BJ" />
+      <div class="sender-price-head">
+        <div class="row-title" title="${escapeAttr(s.name)}">${escapeHtml(s.name)}</div>
         <button class="btn btn-small btn-ghost" data-delete-sender="${s.id}">Suppr.</button>
+      </div>
+      <div class="sender-price-fields">
+        <label class="price-field">
+          <span class="price-tag legend-normal">Normal</span>
+          <input class="price-input price-normal" type="number" step="0.5" min="0" value="${s.price}"
+                 data-sender-id="${s.id}" data-field="price" title="Prix normal" />
+        </label>
+        <label class="price-field">
+          <span class="price-tag legend-lit">LIT</span>
+          <input class="price-input price-lit" type="number" step="0.5" min="0" value="${s.lit_price}"
+                 data-sender-id="${s.id}" data-field="litPrice" title="Prix LIT" />
+        </label>
+        <label class="price-field">
+          <span class="price-tag legend-bj">BJ</span>
+          <input class="price-input price-bj" type="number" step="0.5" min="0" value="${s.bj_price}"
+                 data-sender-id="${s.id}" data-field="bjPrice" title="Prix BJ" />
+        </label>
       </div>
     `;
     container.appendChild(el);
   }
   staggerIn(container);
+  renderMergePairSelects(rows);
+}
+
+// Remplit les deux listes deroulantes de fusion en conservant la selection
+// courante si les noms existent toujours.
+function renderMergePairSelects(rows) {
+  for (const id of ["merge-source", "merge-target"]) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    const previous = select.value;
+    select.innerHTML = rows
+      .map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`)
+      .join("");
+    if (rows.some((s) => String(s.id) === previous)) select.value = previous;
+  }
 }
 
 async function loadMergeCandidates() {
@@ -949,6 +994,31 @@ document.addEventListener("change", async (e) => {
     body: JSON.stringify({ [field]: Number(e.target.value) }),
   });
   refreshAll();
+});
+
+document.getElementById("merge-pair-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const source = document.getElementById("merge-source");
+  const target = document.getElementById("merge-target");
+  const sourceId = Number(source.value);
+  const targetId = Number(target.value);
+  if (!sourceId || !targetId) return;
+  if (sourceId === targetId) return alert("Choisis deux expéditeurs différents.");
+  const sourceName = source.options[source.selectedIndex].textContent;
+  const targetName = target.options[target.selectedIndex].textContent;
+  if (!confirm(`Fusionner « ${sourceName} » dans « ${targetName} » ?\nTous ses colis et gains seront transférés et « ${sourceName} » sera supprimé.`)) return;
+  try {
+    const r = await fetchJSON("/api/senders/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId, targetId }),
+    });
+    renderCache.clear();
+    await refreshAll();
+    alert(`${r.moved} colis transférés vers « ${r.target} ».`);
+  } catch (err) {
+    alert(err.message);
+  }
 });
 
 document.getElementById("merge-to-other-btn").addEventListener("click", async () => {
