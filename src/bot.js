@@ -7,6 +7,7 @@ const {
   setColisType,
   setBatchType,
   setColisPrice,
+  setColisCarrier,
   setBatchPrice,
   getPendingSummary,
   getStatsMessageId,
@@ -70,6 +71,25 @@ function isPdf(document) {
   return /\.pdf$/i.test(document.file_name || "");
 }
 
+function isImageDocument(document) {
+  if (!document) return false;
+  if ((document.mime_type || "").startsWith("image/")) return true;
+  return /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(document.file_name || "");
+}
+
+// Un colis peut arriver en PDF, en fichier image, ou en photo Telegram
+// (compressee : dans ce cas il n'y a pas de nom de fichier, seule la
+// legende peut porter le numero de suivi).
+function colisAttachment(msg) {
+  if (isPdf(msg.document) || isImageDocument(msg.document)) {
+    return { fileName: msg.document.file_name || null };
+  }
+  if (Array.isArray(msg.photo) && msg.photo.length > 0) {
+    return { fileName: null };
+  }
+  return null;
+}
+
 // Determine le type impose par le topic Telegram (groupe auto-import), ou
 // null si le message n'est pas dans un topic reconnu / n'est pas concerne.
 function resolveForcedType(msg) {
@@ -97,13 +117,14 @@ function startBot() {
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
 
   const handleIncoming = (msg) => {
-    if (!isPdf(msg.document)) return;
+    const attachment = colisAttachment(msg);
+    if (!attachment) return;
 
     const forcedType = resolveForcedType(msg);
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
     const senderName = extractSenderName(msg);
-    const carrier = detectCarrier(msg.document.file_name, msg.caption);
+    const carrier = detectCarrier(attachment.fileName, msg.caption);
     const threadId = msg.message_thread_id;
     const key = batchKey(msg.chat.id, threadId);
 
@@ -116,16 +137,17 @@ function startBot() {
         count: 0,
         total: 0,
         bySender: new Map(),
-        unknown: [],
+        groupCaptions: new Map(),
+        unresolved: [],
         timer: null,
       };
       batches.set(key, batch);
     }
 
-    // transporteur non reconnu : on le signale sur Telegram a la fin du lot,
-    // pour pouvoir completer les regles de detection
-    if (!carrier && forcedType !== "bj") {
-      batch.unknown.push({ fileName: msg.document.file_name, caption: msg.caption });
+    // dans un album, Telegram n'attache la legende qu'a un seul des messages :
+    // on la memorise pour la rattacher aux autres photos du meme envoi
+    if (msg.media_group_id && msg.caption) {
+      batch.groupCaptions.set(msg.media_group_id, msg.caption);
     }
 
     const colis = addColis(senderName, {
@@ -135,6 +157,17 @@ function startBot() {
       type: forcedType || "normal",
       carrier,
     });
+
+    // transporteur non reconnu : nouvelle tentative a la fin du lot (la
+    // legende de l'album a pu arriver apres), puis signalement sur Telegram
+    if (!carrier && forcedType !== "bj") {
+      batch.unresolved.push({
+        colisId: colis.id,
+        fileName: attachment.fileName,
+        caption: msg.caption,
+        mediaGroupId: msg.media_group_id,
+      });
+    }
 
     batch.count += 1;
     batch.total += colis.price;
@@ -280,12 +313,26 @@ function notifyUnknownCarriers(bot, unknown) {
     .catch((err) => console.error("[bot] notify unknown error", err.message));
 }
 
+// Deuxieme passe sur les colis restes sans transporteur : dans un album de
+// photos, la legende peut etre arrivee sur un autre message du meme envoi.
+// Renvoie ceux qui restent non identifies.
+function resolveBatchCarriers(batch) {
+  const stillUnknown = [];
+  for (const item of batch.unresolved) {
+    const groupCaption = item.mediaGroupId ? batch.groupCaptions.get(item.mediaGroupId) : null;
+    const carrier = groupCaption ? detectCarrier(item.fileName, groupCaption) : null;
+    if (carrier) setColisCarrier(item.colisId, carrier);
+    else stillUnknown.push({ ...item, caption: item.caption || groupCaption });
+  }
+  return stillUnknown;
+}
+
 function flushBatch(bot, key, batches) {
   const batch = batches.get(key);
   if (!batch) return;
   batches.delete(key);
 
-  notifyUnknownCarriers(bot, batch.unknown);
+  notifyUnknownCarriers(bot, resolveBatchCarriers(batch));
 
   if (batch.chatId === AUTO_GROUP_CHAT_ID) {
     updateGroupStatsPhoto(bot, batch.count);

@@ -245,6 +245,10 @@ function setColisType(id, type) {
   return { ...colis, type, price };
 }
 
+function setColisCarrier(id, carrier) {
+  db.prepare("UPDATE colis SET carrier = ? WHERE id = ?").run(carrier, id);
+}
+
 function setColisPrice(id, price) {
   const info = db
     .prepare("UPDATE colis SET price = ?, price_locked = 1 WHERE id = ? AND status = 'pending'")
@@ -450,6 +454,7 @@ module.exports = {
   setColisType,
   setBatchType,
   setColisPrice,
+  setColisCarrier,
   setBatchPrice,
   quickAddColis,
   quickRemoveColis,
