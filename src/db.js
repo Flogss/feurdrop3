@@ -13,6 +13,10 @@ const DEFAULT_BJ_PRICE = Number(process.env.DEFAULT_BJ_PRICE || DEFAULT_PRICE);
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
+// La base existait-elle deja avant d'ouvrir la connexion ? C'est la question
+// qui distingue "on a perdu les donnees" de "on ecrit dans un autre fichier".
+const dbExisted = fs.existsSync(DB_PATH);
+
 const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
 
@@ -88,6 +92,29 @@ if (!senderColumns.includes("lit_price")) {
 }
 if (!senderColumns.includes("bj_price")) {
   db.exec(`ALTER TABLE senders ADD COLUMN bj_price REAL NOT NULL DEFAULT ${DEFAULT_BJ_PRICE}`);
+}
+
+// Diagnostic au demarrage : sans volume persistant, le fichier vit dans le
+// conteneur et disparait a chaque deploiement. Le compte de lignes permet de
+// verifier d'un coup d'oeil dans les logs que la base est bien celle d'avant.
+{
+  const colisCount = db.prepare("SELECT COUNT(*) AS c FROM colis").get().c;
+  const senderCount = db.prepare("SELECT COUNT(*) AS c FROM senders").get().c;
+  console.log(
+    `[db] ${path.resolve(DB_PATH)} (${dbExisted ? "existante" : "NOUVELLE"}) :` +
+      ` ${colisCount} colis, ${senderCount} expediteurs`
+  );
+  if (!process.env.RAILWAY_VOLUME_MOUNT_PATH && process.env.RAILWAY_ENVIRONMENT) {
+    console.warn(
+      "[db] ATTENTION : aucun volume Railway monte, la base sera perdue au prochain deploiement."
+    );
+  }
+  if (process.env.DB_PATH && process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    console.warn(
+      `[db] ATTENTION : DB_PATH (${process.env.DB_PATH}) prend le dessus sur le volume` +
+        ` (${process.env.RAILWAY_VOLUME_MOUNT_PATH}). Supprime la variable DB_PATH pour utiliser le volume.`
+    );
+  }
 }
 
 function getSetting(key, fallback) {
