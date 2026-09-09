@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>DROP // Control Center</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#05060a" />
+<!-- iOS n'utilise pas le manifest pour l'ajout a l'ecran d'accueil : il lui
+     faut ces balises pour ouvrir le site en plein ecran (et donc autoriser
+     les notifications push). -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="DROP" />
+<link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -99,6 +108,19 @@
           <h2>Compagnies à poster</h2>
         </div>
         <div id="carrier-rows" class="rows"></div>
+      </div>
+
+      <div class="panel" id="push-panel" hidden>
+        <div class="panel-head">
+          <h2>Notifications</h2>
+          <span class="push-state" id="push-state">—</span>
+        </div>
+        <p class="hint" id="push-hint">Reçois une alerte dès qu'un lot de colis arrive, même app fermée.</p>
+        <div class="push-actions">
+          <button class="btn btn-primary" id="push-enable">Activer les notifications</button>
+          <button class="btn btn-ghost" id="push-test" hidden>Tester</button>
+          <button class="btn btn-ghost" id="push-disable" hidden>Désactiver</button>
+        </div>
       </div>
     </section>
 

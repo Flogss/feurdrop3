@@ -15,6 +15,7 @@ const {
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
 const { detectCarrier } = require("./carrier");
+const { notifyNewColis } = require("./push");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
@@ -333,6 +334,7 @@ function flushBatch(bot, key, batches) {
   batches.delete(key);
 
   notifyUnknownCarriers(bot, resolveBatchCarriers(batch));
+  pushBatchNotification(batch);
 
   if (batch.chatId === AUTO_GROUP_CHAT_ID) {
     updateGroupStatsPhoto(bot, batch.count);
@@ -351,6 +353,20 @@ function flushBatch(bot, key, batches) {
   bot
     .sendMessage(batch.chatId, text, opts)
     .catch((err) => console.error("[bot] send error", err.message));
+}
+
+// Notification push vers les appareils abonnes (PWA sur l'ecran d'accueil).
+// C'est l'equivalent du "ding" de vente : un lot recu = une notification.
+function pushBatchNotification(batch) {
+  const pending = getPendingSummary();
+  const bySender = [...batch.bySender.entries()].map(([name, count]) => `${name} +${count}`);
+  notifyNewColis({
+    count: batch.count,
+    total: batch.total,
+    pendingCount: pending.count,
+    pendingValue: pending.value,
+    bySender,
+  });
 }
 
 module.exports = { startBot };

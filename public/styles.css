@@ -84,7 +84,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; display:
   z-index: 1;
   max-width: 720px;
   margin: 0 auto;
-  padding: 16px 14px 96px;
+  /* en mode app installee (plein ecran), il faut degager l'encoche et les
+     bords arrondis : env() vaut 0 dans un onglet normal */
+  padding: calc(16px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 96px
+    calc(14px + env(safe-area-inset-left));
 }
 
 .topbar {
@@ -467,6 +470,12 @@ main { margin-top: 16px; }
 .sender-price-fields .price-input.price-lit,
 .sender-price-fields .price-input.price-bj { width: 100%; }
 
+/* Panneau notifications push */
+.push-state { font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; font-weight: 700; }
+.push-state.push-on { color: var(--lime); text-shadow: 0 0 12px rgba(182,255,62,0.4); }
+.push-state.push-off { color: var(--text-dim); }
+.push-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
 /* Fusion de deux expediteurs (meme personne qui a recree un compte) */
 .merge-pair-form { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
 .merge-pair-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -739,7 +748,7 @@ main { margin-top: 16px; }
 @media (min-width: 640px) {
   .app {
     max-width: 1040px;
-    padding: 28px 32px 56px;
+    padding: calc(28px + env(safe-area-inset-top)) 32px 56px;
     display: flex;
     flex-direction: column;
   }

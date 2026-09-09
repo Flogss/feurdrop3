@@ -53,6 +53,15 @@ db.exec(`
     value TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    label TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_colis_status ON colis(status);
   CREATE INDEX IF NOT EXISTS idx_colis_message ON colis(chat_id, message_id);
   CREATE INDEX IF NOT EXISTS idx_colis_batch ON colis(batch_id);
@@ -448,6 +457,37 @@ function mergeSenderInto(sourceId, targetId) {
   return { moved, source: source.name, target: target.name };
 }
 
+// --- Notifications push (PWA iOS/Android) -----------------------------------
+// Un abonnement = un appareil. iOS peut le revoquer silencieusement, donc le
+// client se reabonne a chaque ouverture et on supprime les endpoints morts
+// des que le service de push repond 404/410.
+function saveSubscription({ endpoint, keys, label }) {
+  db.prepare(
+    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, label)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET
+       p256dh = excluded.p256dh,
+       auth = excluded.auth,
+       label = COALESCE(excluded.label, push_subscriptions.label),
+       last_seen_at = datetime('now')`
+  ).run(endpoint, keys.p256dh, keys.auth, label || null);
+}
+
+function deleteSubscription(endpoint) {
+  return db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint).changes;
+}
+
+function listSubscriptions() {
+  return db
+    .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions")
+    .all()
+    .map((r) => ({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }));
+}
+
+function countSubscriptions() {
+  return db.prepare("SELECT COUNT(*) AS c FROM push_subscriptions").get().c;
+}
+
 function setBatchType(batchId, type) {
   const rows = db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
   const update = db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?");
@@ -490,6 +530,12 @@ module.exports = {
   getMergeCandidates,
   mergeSendersIntoOther,
   mergeSenderInto,
+  getSetting,
+  setSetting,
+  saveSubscription,
+  deleteSubscription,
+  listSubscriptions,
+  countSubscriptions,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
   DEFAULT_BJ_PRICE,

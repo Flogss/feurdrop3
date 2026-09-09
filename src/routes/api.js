@@ -19,7 +19,10 @@ const {
   mergeSenderInto,
   getCarrierSummary,
   dropByCarrier,
+  saveSubscription,
+  deleteSubscription,
 } = require("../db");
+const { getPublicKey, sendToAll, countSubscriptions } = require("../push");
 
 const router = express.Router();
 
@@ -170,6 +173,37 @@ router.post("/senders/merge-to-other", (req, res) => {
   const ids = Array.isArray(req.body.senderIds) ? req.body.senderIds : [];
   const merged = mergeSendersIntoOther(ids);
   res.json({ ok: true, merged });
+});
+
+// --- Notifications push -----------------------------------------------------
+router.get("/push/key", (req, res) => {
+  res.json({ publicKey: getPublicKey(), devices: countSubscriptions() });
+});
+
+router.post("/push/subscribe", (req, res) => {
+  const { endpoint, keys, label } = req.body || {};
+  if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
+    return res.status(400).json({ error: "Abonnement invalide" });
+  }
+  saveSubscription({ endpoint, keys, label });
+  res.json({ ok: true, devices: countSubscriptions() });
+});
+
+router.post("/push/unsubscribe", (req, res) => {
+  const { endpoint } = req.body || {};
+  if (!endpoint) return res.status(400).json({ error: "Endpoint manquant" });
+  deleteSubscription(endpoint);
+  res.json({ ok: true, devices: countSubscriptions() });
+});
+
+router.post("/push/test", async (req, res) => {
+  const result = await sendToAll({
+    title: "+3 colis à dropper",
+    body: "≈ 25.50 € une fois dropés\nTest depuis le dashboard",
+    tag: "colis",
+    url: "/",
+  });
+  res.json({ ok: true, ...result });
 });
 
 router.post("/senders/merge", (req, res) => {

@@ -1062,5 +1062,155 @@ document.getElementById("add-sender-form").addEventListener("submit", async (e) 
   }
 });
 
+// --- Notifications push -----------------------------------------------------
+// Sur iOS, le push web n'existe QUE dans une PWA installee sur l'ecran
+// d'accueil (Safari 16.4+). Dans un onglet Safari classique, PushManager
+// n'existe simplement pas : on affiche alors la marche a suivre.
+const pushSupported =
+  "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const isStandalone =
+  window.navigator.standalone === true ||
+  window.matchMedia("(display-mode: standalone)").matches;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+let swRegistration = null;
+let pushError = null;
+
+function urlBase64ToUint8Array(base64) {
+  const padded = (base64 + "=".repeat((4 - (base64.length % 4)) % 4))
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const raw = atob(padded);
+  return Uint8Array.from([...raw].map((ch) => ch.charCodeAt(0)));
+}
+
+async function currentSubscription() {
+  if (!swRegistration) return null;
+  return swRegistration.pushManager.getSubscription();
+}
+
+async function updatePushUI() {
+  const panel = document.getElementById("push-panel");
+  const state = document.getElementById("push-state");
+  const hint = document.getElementById("push-hint");
+  const enable = document.getElementById("push-enable");
+  const test = document.getElementById("push-test");
+  const disable = document.getElementById("push-disable");
+  if (!panel) return;
+
+  panel.hidden = false;
+
+  if (!pushSupported) {
+    state.textContent = "indisponible";
+    state.className = "push-state push-off";
+    hint.textContent = isIOS
+      ? "Sur iPhone, les notifications ne marchent que si le site est ajouté à l'écran d'accueil : bouton Partager → « Sur l'écran d'accueil », puis rouvre l'app depuis cette icône."
+      : "Ce navigateur ne gère pas les notifications push.";
+    enable.hidden = true;
+    test.hidden = true;
+    disable.hidden = true;
+    return;
+  }
+
+  if (pushError) {
+    state.textContent = "indisponible";
+    state.className = "push-state push-off";
+    hint.textContent = `Les notifications n'ont pas pu démarrer sur cet appareil (${pushError}).`;
+    enable.hidden = true;
+    test.hidden = true;
+    disable.hidden = true;
+    return;
+  }
+
+  const sub = await currentSubscription();
+  const granted = Notification.permission === "granted" && sub;
+
+  state.textContent = granted ? "activées" : Notification.permission === "denied" ? "bloquées" : "désactivées";
+  state.className = `push-state ${granted ? "push-on" : "push-off"}`;
+  enable.hidden = granted;
+  test.hidden = !granted;
+  disable.hidden = !granted;
+
+  if (Notification.permission === "denied") {
+    hint.textContent = isIOS
+      ? "Notifications refusées. Réglages iOS → Notifications → DROP pour les réautoriser."
+      : "Notifications refusées. Réautorise-les dans les réglages du navigateur pour ce site.";
+    enable.hidden = true;
+  } else if (granted) {
+    hint.textContent = "Tu recevras « +X colis · Y € » à chaque lot reçu, même app fermée.";
+  } else {
+    hint.textContent = "Reçois une alerte dès qu'un lot de colis arrive, même app fermée.";
+  }
+}
+
+async function subscribePush() {
+  const { publicKey } = await fetchJSON("/api/push/key");
+  let sub = await currentSubscription();
+  if (!sub) {
+    sub = await swRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  }
+  const json = sub.toJSON();
+  await fetchJSON("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      endpoint: json.endpoint,
+      keys: json.keys,
+      label: `${isIOS ? "iOS" : "web"}${isStandalone ? " (app)" : ""}`,
+    }),
+  });
+}
+
+async function initPush() {
+  if (!pushSupported) return updatePushUI();
+  try {
+    swRegistration = await navigator.serviceWorker.register("/sw.js");
+    // iOS revoque parfois l'abonnement en silence : on se reabonne a chaque
+    // ouverture tant que la permission est accordee.
+    if (Notification.permission === "granted") await subscribePush();
+  } catch (err) {
+    console.error("[push] init", err);
+    pushError = err.message || String(err);
+  }
+  updatePushUI();
+}
+
+document.getElementById("push-enable").addEventListener("click", async () => {
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return updatePushUI();
+    await subscribePush();
+    await updatePushUI();
+  } catch (err) {
+    alert(`Impossible d'activer les notifications : ${err.message}`);
+  }
+});
+
+document.getElementById("push-test").addEventListener("click", async () => {
+  try {
+    const r = await fetchJSON("/api/push/test", { method: "POST" });
+    if (r.sent === 0) alert("Aucun appareil abonné n'a pu être joint.");
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("push-disable").addEventListener("click", async () => {
+  const sub = await currentSubscription();
+  if (sub) {
+    await fetchJSON("/api/push/unsubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    }).catch(() => {});
+    await sub.unsubscribe();
+  }
+  updatePushUI();
+});
+
+initPush();
+
 refreshAll();
 setInterval(refreshAll, 5000);
