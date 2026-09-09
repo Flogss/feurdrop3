@@ -19,6 +19,13 @@ const {
   mergeSenderInto,
   getCarrierSummary,
   dropByCarrier,
+  dropAll,
+  dropBySender,
+  getTourStart,
+  startTour,
+  endTour,
+  tourScope,
+  getArrivedDuringTour,
   saveSubscription,
   deleteSubscription,
   markPushSeen,
@@ -42,9 +49,14 @@ router.use((req, res, next) => {
 });
 
 router.get("/stats", (req, res) => {
+  // Pendant une tournee, tout ce qui est "a dropper" ne compte que le sac :
+  // les colis arrives depuis le depart sont montres a part.
+  const tour = tourScope();
   const pending = db
-    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'")
-    .get();
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'${tour.clause}`
+    )
+    .get(...tour.params);
   const dropped = db
     .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'dropped'")
     .get();
@@ -54,22 +66,31 @@ router.get("/stats", (req, res) => {
        WHERE status = 'dropped' AND date(dropped_at) = date('now')`
     )
     .get();
+  // le "en attente" par expediteur suit la meme regle que le bouton Drop
+  const pendingInScope = tour.params.length
+    ? "status = 'pending' AND created_at <= @tourStart"
+    : "status = 'pending'";
   const bySender = db
     .prepare(
       `SELECT sender_name,
-              SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-              SUM(CASE WHEN status = 'pending' THEN price ELSE 0 END) AS pending_value,
+              SUM(CASE WHEN ${pendingInScope} THEN 1 ELSE 0 END) AS pending_count,
+              SUM(CASE WHEN ${pendingInScope} THEN price ELSE 0 END) AS pending_value,
               SUM(CASE WHEN status = 'dropped' THEN 1 ELSE 0 END) AS dropped_count,
               SUM(CASE WHEN status = 'dropped' THEN price ELSE 0 END) AS dropped_value
        FROM colis GROUP BY sender_name ORDER BY pending_count DESC`
     )
-    .all();
+    .all(...(tour.params.length ? [{ tourStart: tour.params[0] }] : []));
   const litPending = db
-    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'lit'")
-    .get();
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'lit'${tour.clause}`
+    )
+    .get(...tour.params);
   const bjPending = db
-    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'bj'")
-    .get();
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'bj'${tour.clause}`
+    )
+    .get(...tour.params);
+  const arrived = getArrivedDuringTour();
 
   res.json({
     pendingCount: pending.count,
@@ -84,7 +105,22 @@ router.get("/stats", (req, res) => {
     bjPendingValue: bjPending.value,
     bySender,
     byCarrier: getCarrierSummary(),
+    tour: {
+      startedAt: getTourStart(),
+      arrivedCount: arrived.count,
+      arrivedValue: arrived.value,
+    },
   });
+});
+
+// --- Tournee ----------------------------------------------------------------
+router.post("/tour/start", (req, res) => {
+  res.json({ ok: true, startedAt: startTour() });
+});
+
+router.post("/tour/end", (req, res) => {
+  endTour();
+  res.json({ ok: true, startedAt: null });
 });
 
 router.get("/colis", (req, res) => {
@@ -111,21 +147,15 @@ router.post("/colis/:id/type", (req, res) => {
 });
 
 router.post("/colis/drop-all", (req, res) => {
-  const info = db
-    .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'")
-    .run();
-  if (info.changes > 0) adjustStock(-info.changes);
-  res.json({ ok: true, count: info.changes, stock: getStock() });
+  const count = dropAll();
+  if (count > 0) adjustStock(-count);
+  res.json({ ok: true, count, stock: getStock() });
 });
 
 router.post("/colis/drop-sender/:name", (req, res) => {
-  const info = db
-    .prepare(
-      "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND sender_name = ?"
-    )
-    .run(req.params.name);
-  if (info.changes > 0) adjustStock(-info.changes);
-  res.json({ ok: true, count: info.changes, stock: getStock() });
+  const count = dropBySender(req.params.name);
+  if (count > 0) adjustStock(-count);
+  res.json({ ok: true, count, stock: getStock() });
 });
 
 router.post("/colis/drop-carrier/:carrier", (req, res) => {

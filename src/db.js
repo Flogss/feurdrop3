@@ -199,35 +199,102 @@ function addColis(senderName, { chatId, messageId, batchId, type = "normal", car
 // Telegram des qu'un fichier n'est pas reconnu, pour affiner les regles.
 const CARRIER_GROUP_SQL = "CASE WHEN type = 'bj' THEN 'BJ' ELSE COALESCE(carrier, 'Inconnu') END";
 
+// --- Tournee ----------------------------------------------------------------
+// Quand on part poster, on fige l'instant du depart : tout ce qui arrive
+// pendant qu'on est dehors n'est pas dans le sac, donc ne doit pas pouvoir
+// etre drope. Toutes les vues et actions "a dropper" se limitent alors aux
+// colis anterieurs au depart.
+function getTourStart() {
+  return getSetting("tour_started_at", null) || null;
+}
+
+function startTour() {
+  setSetting("tour_started_at", db.prepare("SELECT datetime('now') AS d").get().d);
+  return getTourStart();
+}
+
+function endTour() {
+  db.prepare("DELETE FROM settings WHERE key = 'tour_started_at'").run();
+}
+
+// Condition SQL a coller apres un WHERE existant, plus ses parametres.
+function tourScope() {
+  const start = getTourStart();
+  return start ? { clause: " AND created_at <= ?", params: [start] } : { clause: "", params: [] };
+}
+
+// Colis arrives depuis le depart : ils restent en attente pour la prochaine
+// tournee.
+function getArrivedDuringTour() {
+  const start = getTourStart();
+  if (!start) return { count: 0, value: 0 };
+  return db
+    .prepare(
+      "SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND created_at > ?"
+    )
+    .get(start);
+}
+
+// Termine la tournee automatiquement quand le sac est vide : plus aucun colis
+// en attente datant d'avant le depart.
+function endTourIfEmpty() {
+  const start = getTourStart();
+  if (!start) return false;
+  const left = db
+    .prepare("SELECT COUNT(*) AS c FROM colis WHERE status = 'pending' AND created_at <= ?")
+    .get(start).c;
+  if (left > 0) return false;
+  endTour();
+  return true;
+}
+
 function getCarrierSummary() {
+  const { clause, params } = tourScope();
   return db
     .prepare(
       `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS pending_count, SUM(price) AS pending_value
-       FROM colis WHERE status = 'pending'
+       FROM colis WHERE status = 'pending'${clause}
        GROUP BY ${CARRIER_GROUP_SQL} ORDER BY pending_count DESC`
     )
-    .all();
+    .all(...params);
 }
 
 function dropByCarrier(carrier) {
+  const { clause, params } = tourScope();
+  const base = "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'";
+
   let info;
   if (carrier === "BJ") {
-    info = db
-      .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND type = 'bj'")
-      .run();
+    info = db.prepare(`${base} AND type = 'bj'${clause}`).run(...params);
   } else if (carrier === "Inconnu") {
-    info = db
-      .prepare(
-        "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND type != 'bj' AND carrier IS NULL"
-      )
-      .run();
+    info = db.prepare(`${base} AND type != 'bj' AND carrier IS NULL${clause}`).run(...params);
   } else {
-    info = db
-      .prepare(
-        "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND type != 'bj' AND carrier = ?"
-      )
-      .run(carrier);
+    info = db.prepare(`${base} AND type != 'bj' AND carrier = ?${clause}`).run(carrier, ...params);
   }
+  endTourIfEmpty();
+  return info.changes;
+}
+
+// Drop de tous les colis du sac (ou de tout ce qui est en attente hors tournee).
+function dropAll() {
+  const { clause, params } = tourScope();
+  const info = db
+    .prepare(
+      `UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'${clause}`
+    )
+    .run(...params);
+  endTourIfEmpty();
+  return info.changes;
+}
+
+function dropBySender(name) {
+  const { clause, params } = tourScope();
+  const info = db
+    .prepare(
+      `UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND sender_name = ?${clause}`
+    )
+    .run(name, ...params);
+  endTourIfEmpty();
   return info.changes;
 }
 
@@ -535,6 +602,13 @@ module.exports = {
   addColis,
   getCarrierSummary,
   dropByCarrier,
+  dropAll,
+  dropBySender,
+  getTourStart,
+  startTour,
+  endTour,
+  tourScope,
+  getArrivedDuringTour,
   createBatch,
   findColisByMessage,
   getLatestBatchId,

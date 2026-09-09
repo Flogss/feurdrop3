@@ -154,6 +154,7 @@ async function loadStats(animate, force) {
   document.getElementById("stat-today-count").textContent = `${s.todayCount} colis dropés`;
   animateValue(document.getElementById("stat-bj"), String(s.bjPendingCount || 0));
   document.getElementById("stat-bj-value").textContent = `≈ ${euroCompact(s.bjPendingValue)}`;
+  renderTour(s.tour || {});
 
   if (!force && !hasChanged("senders", s.bySender)) return;
 
@@ -189,6 +190,49 @@ async function loadStats(animate, force) {
   renderCarriers(s.byCarrier || []);
   renderDonut(s.bySender, animate);
 }
+
+// Tournee : une fois parti poster, tout ce qui est "a dropper" ne concerne
+// plus que le sac. Les colis recus entre-temps attendent la prochaine sortie.
+let tourStartedAt = null;
+
+function renderTour(tour) {
+  tourStartedAt = tour.startedAt || null;
+  const btn = document.getElementById("tour-btn");
+  const text = document.getElementById("tour-btn-text");
+  const banner = document.getElementById("tour-banner");
+  if (!btn) return;
+
+  btn.classList.toggle("tour-active", Boolean(tourStartedAt));
+  text.textContent = tourStartedAt ? "Je suis rentré" : "Je pars poster";
+  banner.hidden = !tourStartedAt;
+  if (!tourStartedAt) return;
+
+  const since = formatTourTime(tourStartedAt);
+  document.getElementById("tour-banner-title").textContent = `Tournée depuis ${since}`;
+  document.getElementById("tour-banner-sub").textContent =
+    tour.arrivedCount > 0
+      ? `${tour.arrivedCount} colis reçus depuis (${euro(tour.arrivedValue)}) — gardés pour la prochaine fois`
+      : "Seuls les colis présents au départ peuvent être dropés";
+}
+
+// les dates SQLite sont en UTC ("2026-09-09 14:32:10")
+function formatTourTime(sqlDate) {
+  const date = new Date(`${String(sqlDate).replace(" ", "T")}Z`);
+  if (Number.isNaN(date.getTime())) return sqlDate;
+  return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+document.getElementById("tour-btn").addEventListener("click", async () => {
+  const ending = Boolean(tourStartedAt);
+  if (ending && !confirm("Terminer la tournée ? Les colis reçus pendant redeviennent droppables.")) return;
+  try {
+    await fetchJSON(ending ? "/api/tour/end" : "/api/tour/start", { method: "POST" });
+    renderCache.clear();
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 function renderCarriers(byCarrier) {
   const container = document.getElementById("carrier-rows");

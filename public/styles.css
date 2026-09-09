@@ -237,6 +237,58 @@ main { margin-top: 16px; }
 .glow-lime { --glow: 182, 255, 62; border-color: rgba(182,255,62,0.25); }
 .glow-yellow { --glow: 255, 214, 51; border-color: rgba(255,214,51,0.28); }
 
+/* bandeau BJ + bouton de tournee cote a cote */
+.strip-row { display: flex; gap: 8px; margin-bottom: 14px; align-items: stretch; }
+.strip-row .stat-strip { flex: 1; min-width: 0; margin-bottom: 0; }
+
+.tour-btn {
+  flex: 0 0 auto;
+  max-width: 42%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(56,247,255,0.3);
+  background: var(--panel);
+  color: var(--cyan);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.2s ease, color 0.2s ease;
+  animation: fadein 0.4s ease 0.18s backwards;
+}
+.tour-btn:active { transform: scale(0.96); }
+.tour-btn-icon { font-size: 16px; line-height: 1; }
+/* tournee en cours : le bouton devient l'action de retour */
+.tour-btn.tour-active {
+  border-color: rgba(182,255,62,0.45);
+  color: var(--lime);
+  --glow: 182, 255, 62;
+  animation: fadein 0.4s ease backwards, ledPulse 2.6s ease-in-out infinite;
+}
+
+.tour-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(182,255,62,0.3);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: rgba(182,255,62,0.05);
+  animation: fadein 0.35s ease;
+}
+.tour-banner-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tour-banner-title { font-size: 12px; font-weight: 700; color: var(--lime); }
+.tour-banner-sub { font-size: 10.5px; color: var(--text-dim); }
+
 /* bandeau compact (BJ) : meme theme que les cartes mais sur une seule ligne */
 .stat-strip {
   display: flex;
