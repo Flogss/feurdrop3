@@ -8,13 +8,15 @@ const {
   setBatchType,
   setColisPrice,
   setColisCarrier,
+  setBatchCarrier,
+  getColisById,
   setBatchPrice,
   getPendingSummary,
   getStatsMessageId,
   setStatsMessageId,
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
-const { detectCarrier } = require("./carrier");
+const { detectCarrier, CARRIERS, parseCarrier, carrierLabel } = require("./carrier");
 const { notifyNewColis } = require("./push");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
@@ -186,7 +188,7 @@ function startBot() {
   bot.onText(/^\/start/, (msg) => {
     bot.sendMessage(
       msg.chat.id,
-      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)"
+      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)"
     );
   });
 
@@ -200,8 +202,140 @@ function startBot() {
     handlePrice(bot, msg, Number(String(match[2]).replace(",", ".")))
   );
 
+  // /transporteur MR  (en reponse a un colis, sinon applique au dernier lot)
+  // /transporteur     -> propose les transporteurs en boutons
+  bot.onText(/^\/transporteur(@\w+)?(?:\s+(.+))?$/i, (msg, match) =>
+    handleCarrierCommand(bot, msg, match[2])
+  );
+  // Variantes /transporteur_mr, /transporteur_chrono... : elles servent
+  // surtout a faire apparaitre les noms dans les suggestions de Telegram.
+  bot.onText(/^\/transporteur_([a-z]+)(@\w+)?$/i, (msg, match) =>
+    handleCarrierCommand(bot, msg, match[1])
+  );
+
+  bot.on("callback_query", (query) => handleCarrierCallback(bot, query));
+
+  registerCommands(bot);
+
   console.log("[bot] demarre (polling)");
   return bot;
+}
+
+// La liste envoyee a Telegram alimente le menu de suggestions : en tapant
+// "/transporteur", les noms des transporteurs apparaissent directement.
+function registerCommands(bot) {
+  const commands = [
+    { command: "start", description: "Mode d'emploi" },
+    { command: "lit", description: "Passer le colis en LIT (en reponse)" },
+    { command: "unlit", description: "Repasser le colis en normal (en reponse)" },
+    { command: "litall", description: "Passer tout le dernier lot en LIT" },
+    { command: "unlitall", description: "Repasser tout le dernier lot en normal" },
+    { command: "prix", description: "Forcer le montant, ex: /prix 7.5" },
+    { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
+    ...CARRIERS.map((carrier) => ({
+      command: `transporteur_${carrier.code.toLowerCase()}`,
+      description: carrier.code === "BJ" ? "BJ (type de colis)" : carrier.label,
+    })),
+  ];
+  bot.setMyCommands(commands).catch((err) => console.error("[bot] setMyCommands", err.message));
+}
+
+// Dans un groupe a topics, il faut repondre dans le topic d'origine.
+function threadOpts(msg) {
+  return msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {};
+}
+
+const CARRIER_LIST_HINT = CARRIERS.map((c) => `${c.code} (${c.label})`).join(", ");
+
+// Cible de la commande : le colis auquel on repond, sinon le dernier lot recu.
+function carrierTarget(msg) {
+  const reply = msg.reply_to_message;
+  if (reply) {
+    const colis = findColisByMessage(msg.chat.id, reply.message_id);
+    if (!colis) return { error: "Colis introuvable (deja drope ou pas un colis)." };
+    return { kind: "colis", id: colis.id };
+  }
+  const batchId = getLatestBatchId(msg.chat.id);
+  if (!batchId) return { error: "Aucun colis recent trouve. Reponds au colis avec /transporteur." };
+  return { kind: "batch", id: batchId };
+}
+
+function handleCarrierCommand(bot, msg, rawName) {
+  const target = carrierTarget(msg);
+  if (target.error) {
+    bot.sendMessage(msg.chat.id, target.error, threadOpts(msg));
+    return;
+  }
+
+  // sans nom : on propose les transporteurs en boutons
+  if (!rawName || !rawName.trim()) {
+    const keyboard = [];
+    for (let i = 0; i < CARRIERS.length; i += 2) {
+      keyboard.push(
+        CARRIERS.slice(i, i + 2).map((carrier) => ({
+          text: carrier.label,
+          callback_data: `tr:${carrier.code}:${target.kind[0]}:${target.id}`,
+        }))
+      );
+    }
+    const scope = target.kind === "colis" ? "ce colis" : "le dernier lot";
+    bot.sendMessage(msg.chat.id, `Transporteur pour ${scope} ?`, {
+      ...threadOpts(msg),
+      reply_markup: { inline_keyboard: keyboard },
+    });
+    return;
+  }
+
+  const carrier = parseCarrier(rawName);
+  if (!carrier) {
+    bot.sendMessage(
+      msg.chat.id,
+      `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`,
+      threadOpts(msg)
+    );
+    return;
+  }
+
+  const result = applyCarrier(target, carrier.code);
+  bot.sendMessage(msg.chat.id, result, threadOpts(msg));
+}
+
+function handleCarrierCallback(bot, query) {
+  const data = query.data || "";
+  if (!data.startsWith("tr:")) return;
+
+  const [, code, kindLetter, rawId] = data.split(":");
+  const carrier = CARRIERS.find((c) => c.code === code);
+  if (!carrier) return bot.answerCallbackQuery(query.id, { text: "Transporteur inconnu" });
+
+  const target = { kind: kindLetter === "c" ? "colis" : "batch", id: Number(rawId) };
+  const result = applyCarrier(target, carrier.code);
+
+  bot.answerCallbackQuery(query.id, { text: carrier.label });
+  bot
+    .editMessageText(result, { chat_id: query.message.chat.id, message_id: query.message.message_id })
+    .catch((err) => console.error("[bot] editMessageText", err.message));
+}
+
+// "BJ" n'est pas un transporteur mais un type de colis : il se corrige avec la
+// meme commande parce que c'est une ligne de "compagnies a poster" comme
+// les autres.
+function applyCarrier(target, code) {
+  if (target.kind === "colis") {
+    if (code === "BJ") {
+      const updated = setColisType(target.id, "bj");
+      if (!updated) return "Colis introuvable ou deja drope.";
+      return `Colis #${updated.id} (${updated.sender_name}) passe en BJ (${updated.price.toFixed(2)} EUR).`;
+    }
+    const updated = setColisCarrier(target.id, code);
+    if (!updated) return "Colis introuvable.";
+    return `Colis #${updated.id} (${updated.sender_name}) : transporteur ${carrierLabel(code)}.`;
+  }
+
+  const count = code === "BJ" ? setBatchType(target.id, "bj") : setBatchCarrier(target.id, code);
+  if (count === 0) return "Aucun colis en attente dans le dernier lot.";
+  const label = code === "BJ" ? "BJ" : carrierLabel(code);
+  return `${count} colis passes en ${label}.`;
 }
 
 function handleSingleType(bot, msg, type) {
@@ -307,7 +441,9 @@ function notifyUnknownCarriers(bot, unknown) {
     .map((u) => `  • ${u.fileName || "sans nom"} — ${u.caption ? `"${u.caption}"` : "sans description"}`)
     .join("\n");
   const extra = unknown.length > 15 ? `\n  … et ${unknown.length - 15} autre(s)` : "";
-  const text = `⚠️ ${unknown.length} colis sans transporteur reconnu :\n${detail}${extra}`;
+  const text =
+    `⚠️ ${unknown.length} colis sans transporteur reconnu :\n${detail}${extra}\n\n` +
+    `Reponds au fichier avec /transporteur (ou /transporteur mr, /transporteur chrono...) pour le classer.`;
 
   bot
     .sendMessage(AUTO_GROUP_CHAT_ID, text)
@@ -320,6 +456,11 @@ function notifyUnknownCarriers(bot, unknown) {
 function resolveBatchCarriers(batch) {
   const stillUnknown = [];
   for (const item of batch.unresolved) {
+    // un colis passe en BJ entre-temps est deja classe : les BJ forment leur
+    // propre ligne dans "compagnies a poster", pas besoin de transporteur
+    const colis = getColisById(item.colisId);
+    if (colis && colis.type === "bj") continue;
+
     const groupCaption = item.mediaGroupId ? batch.groupCaptions.get(item.mediaGroupId) : null;
     const carrier = groupCaption ? detectCarrier(item.fileName, groupCaption) : null;
     if (carrier) setColisCarrier(item.colisId, carrier);

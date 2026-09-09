@@ -256,6 +256,19 @@ function setColisType(id, type) {
 
 function setColisCarrier(id, carrier) {
   db.prepare("UPDATE colis SET carrier = ? WHERE id = ?").run(carrier, id);
+  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+}
+
+// Applique un transporteur a tout un lot (commande /transporteur sans reponse
+// a un colis precis).
+function setBatchCarrier(batchId, carrier) {
+  return db
+    .prepare("UPDATE colis SET carrier = ? WHERE batch_id = ? AND status = 'pending'")
+    .run(carrier, batchId).changes;
+}
+
+function getColisById(id) {
+  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
 }
 
 function setColisPrice(id, price) {
@@ -514,6 +527,8 @@ module.exports = {
   setBatchType,
   setColisPrice,
   setColisCarrier,
+  setBatchCarrier,
+  getColisById,
   setBatchPrice,
   quickAddColis,
   quickRemoveColis,

@@ -8,6 +8,7 @@ const CATEGORICAL_COLORS = ["#38f7ff", "#ff3ecb", "#b6ff3e", "#ffb84d", "#b388ff
 const CARRIER_LABELS = {
   MR: "Mondial Relay",
   LP: "La Poste",
+  CHRONO: "Chronopost",
   UPS: "UPS",
   DPD: "DPD",
   GLS: "GLS",

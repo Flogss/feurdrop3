@@ -375,6 +375,7 @@ main { margin-top: 16px; }
 .carrier-row[data-carrier="UPS"] { --carrier: 176, 116, 56; }  /* marron */
 .carrier-row[data-carrier="LP"] { --carrier: 255, 214, 51; }   /* jaune */
 .carrier-row[data-carrier="DPD"] { --carrier: 255, 71, 71; }   /* rouge */
+.carrier-row[data-carrier="CHRONO"] { --carrier: 110, 231, 130; } /* vert */
 .carrier-row[data-carrier="BJ"] { --carrier: 255, 214, 51; }   /* jaune */
 .carrier-row[data-carrier="Inconnu"] { --carrier: 122, 129, 156; }
 
