@@ -641,17 +641,10 @@ function flushBatch(bot, key, batches) {
 }
 
 // Notification push vers les appareils abonnes (PWA sur l'ecran d'accueil).
-// C'est l'equivalent du "ding" de vente : un lot recu = une notification.
+// Le contenu exact est calcule dans push.js a partir de la base : ici on ne
+// passe que le nombre du lot, utilise tant que le site n'a jamais ete ouvert.
 function pushBatchNotification(batch) {
-  const pending = getPendingSummary();
-  const bySender = [...batch.bySender.entries()].map(([name, count]) => `${name} +${count}`);
-  notifyNewColis({
-    count: batch.count,
-    total: batch.total,
-    pendingCount: pending.count,
-    pendingValue: pending.value,
-    bySender,
-  });
+  notifyNewColis({ count: batch.count });
 }
 
 // Appele par le dashboard apres chaque modification de colis : l'image postee

@@ -21,6 +21,8 @@ const {
   dropByCarrier,
   saveSubscription,
   deleteSubscription,
+  markPushSeen,
+  getPendingSummary,
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions } = require("../push");
 const { refreshGroupStats } = require("../bot");
@@ -209,10 +211,18 @@ router.post("/push/unsubscribe", (req, res) => {
   res.json({ ok: true, devices: countSubscriptions() });
 });
 
+// Le dashboard signale qu'il est sous les yeux : le "+N" des notifications
+// repart de zero a partir de la.
+router.post("/push/seen", (req, res) => {
+  markPushSeen();
+  res.json({ ok: true });
+});
+
 router.post("/push/test", async (req, res) => {
+  const pending = getPendingSummary();
   const result = await sendToAll({
-    title: "+3 colis à dropper",
-    body: "≈ 25.50 € une fois dropés\nTest depuis le dashboard",
+    title: "+3 colis",
+    body: `${pending.count} colis en attente · ${pending.value.toFixed(2)} €`,
     tag: "colis",
     url: "/",
   });

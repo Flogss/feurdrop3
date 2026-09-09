@@ -5,6 +5,8 @@ const {
   listSubscriptions,
   deleteSubscription,
   countSubscriptions,
+  countColisSince,
+  getPendingSummary,
 } = require("./db");
 
 // Les cles VAPID identifient le serveur aupres d'Apple/Google. On les prend
@@ -69,21 +71,19 @@ async function sendToAll(payload) {
 }
 
 // Notification "nouveaux colis" : c'est l'equivalent du son de vente Shopify.
-// Le titre reste court, iOS tronque vite sur l'ecran verrouille.
-function notifyNewColis({ count, total, pendingCount, pendingValue, bySender }) {
-  const plural = count > 1 ? "s" : "";
-  const detail = bySender && bySender.length > 0 ? bySender.join(", ") : null;
-  const body = [
-    `≈ ${total.toFixed(2)} € une fois dropé${plural}`,
-    detail,
-    `${pendingCount} en attente · ${pendingValue.toFixed(2)} €`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+// Volontairement minimale : le nombre de colis arrives depuis la derniere fois
+// que le site a ete ouvert, puis le total en attente et sa valeur.
+// Le "+N" se cumule : si trois colis arrivent un par un sans qu'on ouvre le
+// dashboard, la troisieme notification affiche +3 et remplace les precedentes
+// (meme tag).
+function notifyNewColis({ count }) {
+  const pending = getPendingSummary();
+  const since = countColisSince(getSetting("push_seen_at", null));
+  const added = since ? since.count : count;
 
   return sendToAll({
-    title: `+${count} colis à dropper`,
-    body,
+    title: `+${added} colis`,
+    body: `${pending.count} colis en attente · ${pending.value.toFixed(2)} €`,
     tag: "colis",
     url: "/",
   }).catch((err) => console.error("[push] notifyNewColis", err.message));

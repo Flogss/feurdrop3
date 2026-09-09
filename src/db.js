@@ -470,6 +470,21 @@ function mergeSenderInto(sourceId, targetId) {
   return { moved, source: source.name, target: target.name };
 }
 
+// Horodatage de la derniere fois que le dashboard a ete regarde. Sert a
+// cumuler les notifications : tant que le site n'a pas ete rouvert, le "+N"
+// compte tous les colis arrives depuis, pas seulement le dernier lot.
+function markPushSeen() {
+  setSetting("push_seen_at", db.prepare("SELECT datetime('now') AS d").get().d);
+}
+
+// Colis enregistres depuis la derniere consultation du site.
+function countColisSince(since) {
+  if (!since) return null;
+  return db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE created_at > ?")
+    .get(since);
+}
+
 // --- Notifications push (PWA iOS/Android) -----------------------------------
 // Un abonnement = un appareil. iOS peut le revoquer silencieusement, donc le
 // client se reabonne a chaque ouverture et on supprime les endpoints morts
@@ -547,6 +562,8 @@ module.exports = {
   mergeSenderInto,
   getSetting,
   setSetting,
+  markPushSeen,
+  countColisSince,
   saveSubscription,
   deleteSubscription,
   listSubscriptions,

@@ -915,7 +915,20 @@ function escapeHtml(str) {
 }
 function escapeAttr(str) { return escapeHtml(str); }
 
+// Tant que le dashboard est ouvert et visible, on previent le serveur : le
+// "+N" des notifications compte les colis arrives depuis la derniere fois
+// qu'on l'a regarde. Fermer l'app (ou la mettre en fond) fait donc cumuler
+// +1, +2, +3... au lieu d'envoyer trois fois "+1".
+function markSeen() {
+  if (document.visibilityState !== "visible") return;
+  fetch("/api/push/seen", { method: "POST" }).catch(() => {});
+}
+
+document.addEventListener("visibilitychange", markSeen);
+window.addEventListener("focus", markSeen);
+
 async function refreshAll() {
+  markSeen();
   // les rafraichissements de fond (toutes les 5s) n'animent jamais : la
   // revelation (compteurs, courbes, barres, camembert) ne se joue que
   // lorsqu'on arrive reellement sur l'onglet Stats, voir playStatsReveal()
