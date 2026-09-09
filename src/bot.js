@@ -29,12 +29,12 @@ const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
 
 // Groupe Telegram avec topics dedies : les PDF envoyes directement dans ces
 // topics sont comptes automatiquement, sans avoir besoin de forward au bot.
-const AUTO_GROUP_CHAT_ID = -1004349429422; // derive de l'id de canal 4349429422 (t.me/c/4349429422/...)
-const AUTO_LIT_TOPIC_IDS = [3];
-const AUTO_NORMAL_TOPIC_IDS = [2, 4];
+const AUTO_GROUP_CHAT_ID = -1004388459228; // derive de l'id de canal 4388459228 (t.me/c/4388459228/...)
+const AUTO_LIT_TOPIC_IDS = [4];
+const AUTO_NORMAL_TOPIC_IDS = [2, 5];
 // Les colis BJ sont factures comme des colis normaux, ils sont juste
 // comptabilises a part pour le suivi.
-const AUTO_BJ_TOPIC_IDS = [5];
+const AUTO_BJ_TOPIC_IDS = [6];
 // Le topic "1" (t.me/c/.../1) correspond au topic General par defaut d'un
 // forum Telegram, qui n'a pas de vrai message_thread_id cote Bot API : il ne
 // faut pas en passer un pour y poster.
@@ -173,6 +173,13 @@ function startBot() {
 
   const bot = new TelegramBot(TOKEN, { polling: true });
   botInstance = bot;
+  // l'id du message de stats vaut pour un chat donne : si on a change de
+  // groupe, on repart de zero au lieu d'essayer d'editer un message d'ailleurs
+  if (getSetting("stats_group_chat", null) !== String(AUTO_GROUP_CHAT_ID)) {
+    setStatsMessageId("group", "");
+    setSetting("stats_group_chat", AUTO_GROUP_CHAT_ID);
+    console.log("[bot] nouveau groupe detecte, l'image de stats sera repostee");
+  }
   const batches = new Map(); // "chatId:threadId" -> { chatId, threadId, batchId, count, total, bySender, timer }
 
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
