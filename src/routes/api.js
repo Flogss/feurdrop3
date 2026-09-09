@@ -120,6 +120,17 @@ router.post("/tour/start", (req, res) => {
   res.json({ ok: true, startedAt });
 });
 
+// Retour de tournee : ce qu'on a emporte a ete poste, donc on le marque drope
+// et la tournee se referme (les colis recus pendant redeviennent droppables).
+router.post("/tour/finish", (req, res) => {
+  const count = dropAll();
+  if (count > 0) adjustStock(-count);
+  endTour();
+  res.json({ ok: true, count, stock: getStock() });
+});
+
+// Annulation : on referme la tournee sans rien dropper (finalement pas parti,
+// ou rien poste).
 router.post("/tour/end", (req, res) => {
   endTour();
   res.json({ ok: true, startedAt: null });

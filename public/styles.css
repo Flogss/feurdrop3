@@ -285,7 +285,20 @@ main { margin-top: 16px; }
   background: rgba(182,255,62,0.05);
   animation: fadein 0.35s ease;
 }
-.tour-banner-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tour-banner-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+/* refermer la tournee sans rien dropper (finalement pas parti) */
+.tour-cancel {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10.5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.tour-cancel:active { transform: scale(0.95); }
 .tour-banner-title { font-size: 12px; font-weight: 700; color: var(--lime); }
 .tour-banner-sub { font-size: 10.5px; color: var(--text-dim); }
 

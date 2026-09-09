@@ -154,6 +154,7 @@ async function loadStats(animate, force) {
   document.getElementById("stat-today-count").textContent = `${s.todayCount} colis dropés`;
   animateValue(document.getElementById("stat-bj"), String(s.bjPendingCount || 0));
   document.getElementById("stat-bj-value").textContent = `≈ ${euroCompact(s.bjPendingValue)}`;
+  bagSummary = { count: s.pendingCount, value: s.pendingValue };
   renderTour(s.tour || {});
 
   if (!force && !hasChanged("senders", s.bySender)) return;
@@ -194,6 +195,7 @@ async function loadStats(animate, force) {
 // Tournee : une fois parti poster, tout ce qui est "a dropper" ne concerne
 // plus que le sac. Les colis recus entre-temps attendent la prochaine sortie.
 let tourStartedAt = null;
+let bagSummary = { count: 0, value: 0 };
 
 function renderTour(tour) {
   tourStartedAt = tour.startedAt || null;
@@ -223,15 +225,36 @@ function formatTourTime(sqlDate) {
 }
 
 document.getElementById("tour-btn").addEventListener("click", async () => {
-  const ending = Boolean(tourStartedAt);
-  if (ending && !confirm("Terminer la tournée ? Les colis reçus pendant redeviennent droppables.")) return;
+  // au retour, ce qu'on avait emporte est poste : on le marque drope et la
+  // tournee se referme
+  if (tourStartedAt) {
+    const { count, value } = bagSummary;
+    if (count === 0) return endTour(false);
+    if (!confirm(`Marquer ${count} colis comme dropés (${euro(value)}) ?`)) return;
+    return endTour(true);
+  }
   try {
-    await fetchJSON(ending ? "/api/tour/end" : "/api/tour/start", { method: "POST" });
+    await fetchJSON("/api/tour/start", { method: "POST" });
     renderCache.clear();
     await refreshAll();
   } catch (err) {
     alert(err.message);
   }
+});
+
+// drop = true : le sac est drope. false : on referme sans rien dropper.
+async function endTour(drop) {
+  try {
+    await fetchJSON(drop ? "/api/tour/finish" : "/api/tour/end", { method: "POST" });
+    renderCache.clear();
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+document.getElementById("tour-cancel").addEventListener("click", () => {
+  if (confirm("Annuler la tournée sans rien dropper ?")) endTour(false);
 });
 
 function renderCarriers(byCarrier) {
