@@ -2,11 +2,17 @@ const path = require("path");
 const fs = require("fs");
 const { DatabaseSync } = require("node:sqlite");
 
+// Un DB_PATH relatif pointe vers le systeme de fichiers du conteneur, qui est
+// recree a chaque deploiement : si un volume est monte, il gagne toujours.
+// C'est le seul cas ou on ignore une variable d'environnement, parce que la
+// respecter revient a perdre la base a chaque mise en ligne.
+const VOLUME = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+const ENV_DB_PATH = process.env.DB_PATH;
+const ENV_DB_PATH_IGNORED = Boolean(VOLUME && ENV_DB_PATH && !path.isAbsolute(ENV_DB_PATH));
+
 const DB_PATH =
-  process.env.DB_PATH ||
-  (process.env.RAILWAY_VOLUME_MOUNT_PATH
-    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, "drop.db")
-    : "./data/drop.db");
+  (ENV_DB_PATH_IGNORED ? null : ENV_DB_PATH) ||
+  (VOLUME ? path.join(VOLUME, "drop.db") : "./data/drop.db");
 const DEFAULT_PRICE = Number(process.env.DEFAULT_PRICE || 4);
 const DEFAULT_LIT_PRICE = Number(process.env.DEFAULT_LIT_PRICE || 5.5);
 const DEFAULT_BJ_PRICE = Number(process.env.DEFAULT_BJ_PRICE || DEFAULT_PRICE);
@@ -109,10 +115,10 @@ if (!senderColumns.includes("bj_price")) {
       "[db] ATTENTION : aucun volume Railway monte, la base sera perdue au prochain deploiement."
     );
   }
-  if (process.env.DB_PATH && process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+  if (ENV_DB_PATH_IGNORED) {
     console.warn(
-      `[db] ATTENTION : DB_PATH (${process.env.DB_PATH}) prend le dessus sur le volume` +
-        ` (${process.env.RAILWAY_VOLUME_MOUNT_PATH}). Supprime la variable DB_PATH pour utiliser le volume.`
+      `[db] DB_PATH="${ENV_DB_PATH}" ignore : chemin relatif, donc efface a chaque deploiement.` +
+        ` Le volume ${VOLUME} est utilise a la place. Supprime la variable DB_PATH pour faire taire cet avertissement.`
     );
   }
 }
