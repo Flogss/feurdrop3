@@ -581,7 +581,7 @@ async function updateGroupStatsPhoto(bot, addedCount) {
 }
 
 // Un fichier dont le transporteur n'a pas ete reconnu recoit un point
-// d'interrogation en reaction : ca remplace le coeur sur le message concerne,
+// d'interrogation en reaction : ca remplace le pouce sur le message concerne,
 // sans polluer le fil avec un message d'alerte.
 function reactUnknownCarriers(bot, unknown) {
   if (!unknown || unknown.length === 0) return;
