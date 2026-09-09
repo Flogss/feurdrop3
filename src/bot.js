@@ -109,11 +109,11 @@ function resolveForcedType(msg) {
   return null; // dans ce groupe mais hors des topics suivis : on ignore
 }
 
-// Reactions : le coeur accuse reception d'un colis, le point d'interrogation
-// signale un transporteur non reconnu (il remplace le coeur sur le meme
+// Reactions : le pouce accuse reception d'un colis, le point d'interrogation
+// signale un transporteur non reconnu (il remplace le pouce sur le meme
 // message). Telegram n'accepte qu'une liste fermee d'emojis en reaction, d'ou
 // le repli sur 🤔 si ❓ est refuse.
-const REACTION_RECEIVED = "❤";
+const REACTION_RECEIVED = "👍";
 const REACTION_UNKNOWN = "❓";
 const REACTION_UNKNOWN_FALLBACK = "🤔";
 
