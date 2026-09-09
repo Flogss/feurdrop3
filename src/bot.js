@@ -1,3 +1,6 @@
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const TelegramBot = require("node-telegram-bot-api");
 const {
   addColis,
@@ -104,6 +107,40 @@ function resolveForcedType(msg) {
   return null; // dans ce groupe mais hors des topics suivis : on ignore
 }
 
+// Reactions : le coeur accuse reception d'un colis, le point d'interrogation
+// signale un transporteur non reconnu (il remplace le coeur sur le meme
+// message). Telegram n'accepte qu'une liste fermee d'emojis en reaction, d'ou
+// le repli sur 🤔 si ❓ est refuse.
+const REACTION_RECEIVED = "❤";
+const REACTION_UNKNOWN = "❓";
+const REACTION_UNKNOWN_FALLBACK = "🤔";
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Les reactions partent une par une : un lot de 20 fichiers ferait sinon
+// autant d'appels simultanes et Telegram limiterait.
+let reactionQueue = Promise.resolve();
+function queueReaction(bot, chatId, messageId, emoji, fallbackEmoji) {
+  if (!chatId || !messageId) return;
+  const react = (value) =>
+    bot.setMessageReaction(chatId, messageId, { reaction: [{ type: "emoji", emoji: value }] });
+
+  reactionQueue = reactionQueue
+    .then(() => sleep(120))
+    .then(() => react(emoji))
+    .catch(() => (fallbackEmoji ? react(fallbackEmoji) : null))
+    .catch((err) => console.error("[bot] reaction", err.message));
+}
+
+// Efface la commande de l'utilisateur une fois traitee pour ne pas polluer le
+// fil. Necessite le droit "Supprimer les messages" dans le groupe ; en cas de
+// refus on laisse simplement le message en place.
+function deleteCommand(bot, msg) {
+  bot
+    .deleteMessage(msg.chat.id, msg.message_id)
+    .catch((err) => console.error("[bot] suppression commande impossible :", err.message));
+}
+
 function batchKey(chatId, threadId) {
   return `${chatId}:${threadId || 0}`;
 }
@@ -141,6 +178,7 @@ function startBot() {
         total: 0,
         bySender: new Map(),
         groupCaptions: new Map(),
+        groupFirstMessage: new Map(),
         unresolved: [],
         timer: null,
       };
@@ -151,6 +189,17 @@ function startBot() {
     // on la memorise pour la rattacher aux autres photos du meme envoi
     if (msg.media_group_id && msg.caption) {
       batch.groupCaptions.set(msg.media_group_id, msg.caption);
+    }
+
+    // Telegram n'autorise la reaction que sur le premier message d'un album :
+    // on retient lequel c'est, et on ne reagit qu'une fois par album.
+    const isNewGroup = msg.media_group_id && !batch.groupFirstMessage.has(msg.media_group_id);
+    if (isNewGroup) batch.groupFirstMessage.set(msg.media_group_id, msg.message_id);
+    const reactionMessageId = msg.media_group_id
+      ? batch.groupFirstMessage.get(msg.media_group_id)
+      : msg.message_id;
+    if (!msg.media_group_id || isNewGroup) {
+      queueReaction(bot, msg.chat.id, reactionMessageId, REACTION_RECEIVED);
     }
 
     const colis = addColis(senderName, {
@@ -169,6 +218,8 @@ function startBot() {
         fileName: attachment.fileName,
         caption: msg.caption,
         mediaGroupId: msg.media_group_id,
+        chatId: msg.chat.id,
+        messageId: reactionMessageId,
       });
     }
 
@@ -185,32 +236,48 @@ function startBot() {
   // arrivent comme channel_post et non comme message classique.
   bot.on("channel_post", handleIncoming);
 
-  bot.onText(/^\/start/, (msg) => {
-    bot.sendMessage(
-      msg.chat.id,
-      "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)"
-    );
-  });
+  // Chaque commande est effacee du fil une fois traitee : le chat ne garde
+  // que les colis et les recapitulatifs.
+  const command = (handler) => (msg, match) => {
+    try {
+      handler(msg, match);
+    } finally {
+      deleteCommand(bot, msg);
+    }
+  };
 
-  bot.onText(/^\/lit(@\w+)?$/, (msg) => handleSingleType(bot, msg, "lit"));
-  bot.onText(/^\/unlit(@\w+)?$/, (msg) => handleSingleType(bot, msg, "normal"));
+  bot.onText(
+    /^\/start/,
+    command((msg) => {
+      bot.sendMessage(
+        msg.chat.id,
+        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)"
+      );
+    })
+  );
 
-  bot.onText(/^\/litall(@\w+)?$/, (msg) => handleBatchType(bot, msg, "lit"));
-  bot.onText(/^\/unlitall(@\w+)?$/, (msg) => handleBatchType(bot, msg, "normal"));
+  bot.onText(/^\/lit(@\w+)?$/, command((msg) => handleSingleType(bot, msg, "lit")));
+  bot.onText(/^\/unlit(@\w+)?$/, command((msg) => handleSingleType(bot, msg, "normal")));
 
-  bot.onText(/^\/prix(@\w+)?\s+(-?[\d]+(?:[.,][\d]+)?)/, (msg, match) =>
-    handlePrice(bot, msg, Number(String(match[2]).replace(",", ".")))
+  bot.onText(/^\/litall(@\w+)?$/, command((msg) => handleBatchType(bot, msg, "lit")));
+  bot.onText(/^\/unlitall(@\w+)?$/, command((msg) => handleBatchType(bot, msg, "normal")));
+
+  bot.onText(
+    /^\/prix(@\w+)?\s+(-?[\d]+(?:[.,][\d]+)?)/,
+    command((msg, match) => handlePrice(bot, msg, Number(String(match[2]).replace(",", "."))))
   );
 
   // /transporteur MR  (en reponse a un colis, sinon applique au dernier lot)
   // /transporteur     -> propose les transporteurs en boutons
-  bot.onText(/^\/transporteur(@\w+)?(?:\s+(.+))?$/i, (msg, match) =>
-    handleCarrierCommand(bot, msg, match[2])
+  bot.onText(
+    /^\/transporteur(@\w+)?(?:\s+(.+))?$/i,
+    command((msg, match) => handleCarrierCommand(bot, msg, match[2]))
   );
   // Variantes /transporteur_mr, /transporteur_chrono... : elles servent
   // surtout a faire apparaitre les noms dans les suggestions de Telegram.
-  bot.onText(/^\/transporteur_([a-z]+)(@\w+)?$/i, (msg, match) =>
-    handleCarrierCommand(bot, msg, match[1])
+  bot.onText(
+    /^\/transporteur_([a-z]+)(@\w+)?$/i,
+    command((msg, match) => handleCarrierCommand(bot, msg, match[1]))
   );
 
   bot.on("callback_query", (query) => handleCarrierCallback(bot, query));
@@ -404,19 +471,36 @@ function handlePrice(bot, msg, price) {
   bot.sendMessage(msg.chat.id, `${count} colis passes a ${price.toFixed(2)} EUR.`);
 }
 
+// Met a jour l'image de stats deja postee plutot que d'en empiler une
+// nouvelle. editMessageMedia de la librairie attend un chemin de fichier
+// (attach://...), d'ou le passage par un fichier temporaire.
+// Renvoie false si le message n'existe plus : l'appelant en poste alors un neuf.
+async function editStatsPhoto(bot, messageId, image) {
+  const tmpPath = path.join(os.tmpdir(), `drop-stats-${Date.now()}.png`);
+  try {
+    fs.writeFileSync(tmpPath, image);
+    await bot.editMessageMedia(
+      { type: "photo", media: `attach://${tmpPath}` },
+      { chat_id: AUTO_GROUP_CHAT_ID, message_id: messageId }
+    );
+    return true;
+  } catch (err) {
+    // image identique : rien a faire, mais le message est toujours la
+    if (/not modified/i.test(err.message)) return true;
+    console.error("[bot] edition image stats impossible :", err.message);
+    return false;
+  } finally {
+    fs.rm(tmpPath, { force: true }, () => {});
+  }
+}
+
 async function updateGroupStatsPhoto(bot, addedCount) {
   try {
     const { count, value } = getPendingSummary();
     const image = await renderStatsImage({ pendingCount: count, pendingValue: value, addedCount });
 
     const prevId = getStatsMessageId("group");
-    if (prevId) {
-      try {
-        await bot.deleteMessage(AUTO_GROUP_CHAT_ID, prevId);
-      } catch (err) {
-        // message deja supprime ou trop vieux, on continue
-      }
-    }
+    if (prevId && (await editStatsPhoto(bot, prevId, image))) return;
 
     const sent = await bot.sendPhoto(
       AUTO_GROUP_CHAT_ID,
@@ -430,24 +514,18 @@ async function updateGroupStatsPhoto(bot, addedCount) {
   }
 }
 
-// Previent dans le topic General du groupe quand des fichiers n'ont pas pu
-// etre rattaches a un transporteur, avec nom de fichier et description pour
-// pouvoir completer les regles de detection.
-function notifyUnknownCarriers(bot, unknown) {
+// Un fichier dont le transporteur n'a pas ete reconnu recoit un point
+// d'interrogation en reaction : ca remplace le coeur sur le message concerne,
+// sans polluer le fil avec un message d'alerte.
+function reactUnknownCarriers(bot, unknown) {
   if (!unknown || unknown.length === 0) return;
-
-  const detail = unknown
-    .slice(0, 15)
-    .map((u) => `  • ${u.fileName || "sans nom"} — ${u.caption ? `"${u.caption}"` : "sans description"}`)
-    .join("\n");
-  const extra = unknown.length > 15 ? `\n  … et ${unknown.length - 15} autre(s)` : "";
-  const text =
-    `⚠️ ${unknown.length} colis sans transporteur reconnu :\n${detail}${extra}\n\n` +
-    `Reponds au fichier avec /transporteur (ou /transporteur mr, /transporteur chrono...) pour le classer.`;
-
-  bot
-    .sendMessage(AUTO_GROUP_CHAT_ID, text)
-    .catch((err) => console.error("[bot] notify unknown error", err.message));
+  const done = new Set();
+  for (const item of unknown) {
+    const key = `${item.chatId}:${item.messageId}`;
+    if (done.has(key)) continue; // album : une seule reaction possible
+    done.add(key);
+    queueReaction(bot, item.chatId, item.messageId, REACTION_UNKNOWN, REACTION_UNKNOWN_FALLBACK);
+  }
 }
 
 // Deuxieme passe sur les colis restes sans transporteur : dans un album de
@@ -474,7 +552,7 @@ function flushBatch(bot, key, batches) {
   if (!batch) return;
   batches.delete(key);
 
-  notifyUnknownCarriers(bot, resolveBatchCarriers(batch));
+  reactUnknownCarriers(bot, resolveBatchCarriers(batch));
   pushBatchNotification(batch);
 
   if (batch.chatId === AUTO_GROUP_CHAT_ID) {
