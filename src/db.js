@@ -217,6 +217,32 @@ function endTour() {
   db.prepare("DELETE FROM settings WHERE key = 'tour_started_at'").run();
 }
 
+// Resume de la derniere tournee terminee, affiche sur le dashboard jusqu'a ce
+// qu'on le ferme (il survit donc a un rechargement de la page).
+function saveLastTour(summary) {
+  setSetting("last_tour", JSON.stringify(summary));
+}
+
+function getLastTour() {
+  const raw = getSetting("last_tour", null);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    return null;
+  }
+}
+
+function clearLastTour() {
+  db.prepare("DELETE FROM settings WHERE key = 'last_tour'").run();
+}
+
+// Heure du serveur, pour que le chrono du navigateur ne derive pas si les
+// deux horloges ne sont pas d'accord.
+function serverNow() {
+  return db.prepare("SELECT datetime('now') AS d").get().d;
+}
+
 // Condition SQL a coller apres un WHERE existant, plus ses parametres.
 function tourScope() {
   const start = getTourStart();
@@ -607,6 +633,10 @@ module.exports = {
   getTourStart,
   startTour,
   endTour,
+  saveLastTour,
+  getLastTour,
+  clearLastTour,
+  serverNow,
   tourScope,
   getArrivedDuringTour,
   createBatch,

@@ -24,6 +24,10 @@ const {
   getTourStart,
   startTour,
   endTour,
+  saveLastTour,
+  getLastTour,
+  clearLastTour,
+  serverNow,
   tourScope,
   getArrivedDuringTour,
   saveSubscription,
@@ -109,6 +113,10 @@ router.get("/stats", (req, res) => {
       startedAt: getTourStart(),
       arrivedCount: arrived.count,
       arrivedValue: arrived.value,
+      // heure du serveur : le chrono du navigateur s'y recale pour ne pas
+      // deriver si les deux horloges different
+      now: serverNow(),
+      last: getLastTour(),
     },
   });
 });
@@ -123,10 +131,28 @@ router.post("/tour/start", (req, res) => {
 // Retour de tournee : ce qu'on a emporte a ete poste, donc on le marque drope
 // et la tournee se referme (les colis recus pendant redeviennent droppables).
 router.post("/tour/finish", (req, res) => {
+  const startedAt = getTourStart();
+  const bag = db
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'${
+        startedAt ? " AND created_at <= ?" : ""
+      }`
+    )
+    .get(...(startedAt ? [startedAt] : []));
+
   const count = dropAll();
   if (count > 0) adjustStock(-count);
+  const endedAt = serverNow();
   endTour();
-  res.json({ ok: true, count, stock: getStock() });
+  if (startedAt) saveLastTour({ startedAt, endedAt, count, value: bag.value });
+
+  res.json({ ok: true, count, value: bag.value, startedAt, endedAt, stock: getStock() });
+});
+
+// Fermeture du resume de tournee affiche sur le dashboard.
+router.post("/tour/dismiss-summary", (req, res) => {
+  clearLastTour();
+  res.json({ ok: true });
 });
 
 // Annulation : on referme la tournee sans rien dropper (finalement pas parti,

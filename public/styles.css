@@ -275,8 +275,8 @@ main { margin-top: 16px; }
 
 .tour-banner {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 5px;
   padding: 10px 14px;
   margin-bottom: 14px;
   border: 1px solid rgba(182,255,62,0.3);
@@ -285,6 +285,21 @@ main { margin-top: 16px; }
   background: rgba(182,255,62,0.05);
   animation: fadein 0.35s ease;
 }
+/* sans ca, le display:flex ci-dessus l'emporte sur l'attribut hidden */
+.tour-banner[hidden] { display: none; }
+.tour-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+/* chrono de la tournee en cours */
+.tour-chrono {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--lime);
+  text-shadow: 0 0 14px rgba(182,255,62,0.4);
+  font-variant-numeric: tabular-nums;
+}
+/* resume affiche apres le retour : couleurs cyan pour le distinguer */
+.tour-summary { border-color: rgba(56,247,255,0.3); background: rgba(56,247,255,0.05); }
+.tour-summary-title { font-size: 14px; font-weight: 700; color: var(--cyan); }
 .tour-banner-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 /* refermer la tournee sans rien dropper (finalement pas parti) */
 .tour-cancel {

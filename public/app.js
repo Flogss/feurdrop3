@@ -196,9 +196,14 @@ async function loadStats(animate, force) {
 // plus que le sac. Les colis recus entre-temps attendent la prochaine sortie.
 let tourStartedAt = null;
 let bagSummary = { count: 0, value: 0 };
+let serverClockOffset = 0;
 
 function renderTour(tour) {
   tourStartedAt = tour.startedAt || null;
+  // decalage entre l'horloge du serveur et celle du telephone, pour que le
+  // chrono parte de la bonne valeur
+  if (tour.now) serverClockOffset = sqlDateToMs(tour.now) - Date.now();
+
   const btn = document.getElementById("tour-btn");
   const text = document.getElementById("tour-btn-text");
   const banner = document.getElementById("tour-banner");
@@ -207,21 +212,92 @@ function renderTour(tour) {
   btn.classList.toggle("tour-active", Boolean(tourStartedAt));
   text.textContent = tourStartedAt ? "Je suis rentré" : "Je pars poster";
   banner.hidden = !tourStartedAt;
-  if (!tourStartedAt) return;
 
-  const since = formatTourTime(tourStartedAt);
-  document.getElementById("tour-banner-title").textContent = `Tournée depuis ${since}`;
+  renderTourSummary(tourStartedAt ? null : tour.last);
+
+  if (!tourStartedAt) {
+    stopChrono();
+    return;
+  }
+
   document.getElementById("tour-banner-sub").textContent =
-    tour.arrivedCount > 0
-      ? `${tour.arrivedCount} colis reçus depuis (${euro(tour.arrivedValue)}) — gardés pour la prochaine fois`
-      : "Seuls les colis présents au départ peuvent être dropés";
+    `Depuis ${formatTourTime(tourStartedAt)}` +
+    (tour.arrivedCount > 0
+      ? ` · ${tour.arrivedCount} colis reçus depuis (${euro(tour.arrivedValue)}), gardés pour la prochaine fois`
+      : " · seuls les colis présents au départ peuvent être dropés");
+
+  startChrono(tourStartedAt);
+}
+
+// Resume de la derniere tournee, garde jusqu'a ce qu'on le ferme.
+function renderTourSummary(last) {
+  const box = document.getElementById("tour-summary");
+  if (!box) return;
+  box.hidden = !last;
+  if (!last) return;
+
+  const seconds = Math.max(0, Math.round((sqlDateToMs(last.endedAt) - sqlDateToMs(last.startedAt)) / 1000));
+  document.getElementById("tour-summary-title").textContent = `Tournée terminée en ${formatDuration(seconds)}`;
+  document.getElementById("tour-summary-sub").textContent =
+    `${formatTourTime(last.startedAt)} → ${formatTourTime(last.endedAt)} · ${last.count} colis dropé${
+      last.count > 1 ? "s" : ""
+    } · ${euro(last.value)}`;
+}
+
+document.getElementById("tour-summary-close").addEventListener("click", async () => {
+  document.getElementById("tour-summary").hidden = true;
+  await fetch("/api/tour/dismiss-summary", { method: "POST" }).catch(() => {});
+  renderCache.clear();
+});
+
+// --- Chrono de tournee ------------------------------------------------------
+let chronoTimer = null;
+
+function startChrono(startedAt) {
+  const el = document.getElementById("tour-chrono");
+  const start = sqlDateToMs(startedAt);
+  const tick = () => {
+    const now = Date.now() + serverClockOffset;
+    el.textContent = formatChrono(Math.max(0, Math.round((now - start) / 1000)));
+  };
+  tick();
+  if (chronoTimer) return; // deja lance : on ne double pas l'intervalle
+  chronoTimer = setInterval(tick, 1000);
+}
+
+function stopChrono() {
+  if (!chronoTimer) return;
+  clearInterval(chronoTimer);
+  chronoTimer = null;
+}
+
+// mm:ss, ou h:mm:ss au-dela d'une heure
+function formatChrono(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+// duree lisible : "1 h 12 min", "34 min", "48 s"
+function formatDuration(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h} h ${m} min` : `${h} h`;
+  if (m > 0) return `${m} min`;
+  return `${totalSeconds} s`;
+}
+
+function sqlDateToMs(sqlDate) {
+  return new Date(`${String(sqlDate).replace(" ", "T")}Z`).getTime();
 }
 
 // les dates SQLite sont en UTC ("2026-09-09 14:32:10")
 function formatTourTime(sqlDate) {
-  const date = new Date(`${String(sqlDate).replace(" ", "T")}Z`);
-  if (Number.isNaN(date.getTime())) return sqlDate;
-  return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const ms = sqlDateToMs(sqlDate);
+  if (Number.isNaN(ms)) return sqlDate;
+  return new Date(ms).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
 document.getElementById("tour-btn").addEventListener("click", async () => {
