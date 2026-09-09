@@ -23,8 +23,21 @@ const {
   deleteSubscription,
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions } = require("../push");
+const { refreshGroupStats } = require("../bot");
 
 const router = express.Router();
+
+// Toute modification de colis ou de tarifs faite depuis le site change le
+// nombre / la valeur en attente : on met a jour l'image postee dans le groupe
+// Telegram (les appels rapproches sont regroupes cote bot).
+const STATS_AFFECTING = /^\/(colis|senders)/;
+router.use((req, res, next) => {
+  if (req.method === "GET" || !STATS_AFFECTING.test(req.path)) return next();
+  res.on("finish", () => {
+    if (res.statusCode < 400) refreshGroupStats();
+  });
+  next();
+});
 
 router.get("/stats", (req, res) => {
   const pending = db

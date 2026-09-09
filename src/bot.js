@@ -17,6 +17,8 @@ const {
   getPendingSummary,
   getStatsMessageId,
   setStatsMessageId,
+  getSetting,
+  setSetting,
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel } = require("./carrier");
@@ -145,6 +147,10 @@ function batchKey(chatId, threadId) {
   return `${chatId}:${threadId || 0}`;
 }
 
+// Instance partagee : le dashboard web (routes/api.js) s'en sert pour
+// rafraichir l'image de stats du groupe quand on modifie des colis sur le site.
+let botInstance = null;
+
 function startBot() {
   if (!TOKEN) {
     console.warn("[bot] TELEGRAM_BOT_TOKEN manquant, le bot ne demarre pas.");
@@ -152,6 +158,7 @@ function startBot() {
   }
 
   const bot = new TelegramBot(TOKEN, { polling: true });
+  botInstance = bot;
   const batches = new Map(); // "chatId:threadId" -> { chatId, threadId, batchId, count, total, bySender, timer }
 
   bot.on("polling_error", (err) => console.error("[bot] polling_error", err.message));
@@ -249,9 +256,12 @@ function startBot() {
   bot.onText(
     /^\/start/,
     command((msg) => {
-      bot.sendMessage(
-        msg.chat.id,
-        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)"
+      replyEphemeral(
+        bot,
+        msg,
+        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)",
+        {},
+        30000
       );
     })
   );
@@ -290,7 +300,18 @@ function startBot() {
 
 // La liste envoyee a Telegram alimente le menu de suggestions : en tapant
 // "/transporteur", les noms des transporteurs apparaissent directement.
-function registerCommands(bot) {
+// Telegram choisit la liste selon la portee du chat : sans enregistrement
+// explicite pour les groupes, le menu peut rester vide la-bas. On enregistre
+// donc la meme liste pour toutes les portees utiles.
+const COMMAND_SCOPES = [
+  null, // portee par defaut
+  { type: "all_private_chats" },
+  { type: "all_group_chats" },
+  { type: "all_chat_administrators" },
+  { type: "chat", chat_id: AUTO_GROUP_CHAT_ID },
+];
+
+async function registerCommands(bot) {
   const commands = [
     { command: "start", description: "Mode d'emploi" },
     { command: "lit", description: "Passer le colis en LIT (en reponse)" },
@@ -304,12 +325,43 @@ function registerCommands(bot) {
       description: carrier.code === "BJ" ? "BJ (type de colis)" : carrier.label,
     })),
   ];
-  bot.setMyCommands(commands).catch((err) => console.error("[bot] setMyCommands", err.message));
+
+  for (const scope of COMMAND_SCOPES) {
+    try {
+      await bot.setMyCommands(commands, scope ? { scope } : {});
+    } catch (err) {
+      // la portee "chat" echoue si le bot n'est pas (encore) dans le groupe
+      console.error(`[bot] setMyCommands ${scope ? scope.type : "default"} :`, err.message);
+    }
+  }
+  console.log(`[bot] ${commands.length} commandes enregistrees`);
 }
 
 // Dans un groupe a topics, il faut repondre dans le topic d'origine.
 function threadOpts(msg) {
   return msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {};
+}
+
+// Les reponses du bot s'effacent toutes seules : combinees a la suppression
+// de la commande, le fil ne garde que les colis et le recapitulatif.
+const REPLY_TTL_MS = Number(process.env.REPLY_TTL_MS || 2000);
+
+function replyEphemeral(bot, msg, text, extra = {}, ttl = REPLY_TTL_MS) {
+  return bot
+    .sendMessage(msg.chat.id, text, { ...threadOpts(msg), ...extra })
+    .then((sent) => {
+      scheduleDelete(bot, sent.chat.id, sent.message_id, ttl);
+      return sent;
+    })
+    .catch((err) => console.error("[bot] envoi reponse", err.message));
+}
+
+function scheduleDelete(bot, chatId, messageId, ttl = REPLY_TTL_MS) {
+  setTimeout(() => {
+    bot.deleteMessage(chatId, messageId).catch((err) => {
+      console.error("[bot] suppression reponse impossible :", err.message);
+    });
+  }, ttl);
 }
 
 const CARRIER_LIST_HINT = CARRIERS.map((c) => `${c.code} (${c.label})`).join(", ");
@@ -330,7 +382,7 @@ function carrierTarget(msg) {
 function handleCarrierCommand(bot, msg, rawName) {
   const target = carrierTarget(msg);
   if (target.error) {
-    bot.sendMessage(msg.chat.id, target.error, threadOpts(msg));
+    replyEphemeral(bot, msg, target.error);
     return;
   }
 
@@ -346,25 +398,23 @@ function handleCarrierCommand(bot, msg, rawName) {
       );
     }
     const scope = target.kind === "colis" ? "ce colis" : "le dernier lot";
-    bot.sendMessage(msg.chat.id, `Transporteur pour ${scope} ?`, {
-      ...threadOpts(msg),
-      reply_markup: { inline_keyboard: keyboard },
-    });
+    bot
+      .sendMessage(msg.chat.id, `Transporteur pour ${scope} ?`, {
+        ...threadOpts(msg),
+        reply_markup: { inline_keyboard: keyboard },
+      })
+      .catch((err) => console.error("[bot] envoi clavier", err.message));
     return;
   }
 
   const carrier = parseCarrier(rawName);
   if (!carrier) {
-    bot.sendMessage(
-      msg.chat.id,
-      `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`,
-      threadOpts(msg)
-    );
+    replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
     return;
   }
 
   const result = applyCarrier(target, carrier.code);
-  bot.sendMessage(msg.chat.id, result, threadOpts(msg));
+  replyEphemeral(bot, msg, result);
 }
 
 function handleCarrierCallback(bot, query) {
@@ -381,6 +431,7 @@ function handleCarrierCallback(bot, query) {
   bot.answerCallbackQuery(query.id, { text: carrier.label });
   bot
     .editMessageText(result, { chat_id: query.message.chat.id, message_id: query.message.message_id })
+    .then(() => scheduleDelete(bot, query.message.chat.id, query.message.message_id))
     .catch((err) => console.error("[bot] editMessageText", err.message));
 }
 
@@ -408,37 +459,37 @@ function applyCarrier(target, code) {
 function handleSingleType(bot, msg, type) {
   const reply = msg.reply_to_message;
   if (!reply) {
-    bot.sendMessage(msg.chat.id, "Reponds a un message contenant un colis avec /lit ou /unlit.");
+    replyEphemeral(bot, msg, "Reponds a un message contenant un colis avec /lit ou /unlit.");
     return;
   }
   const colis = findColisByMessage(msg.chat.id, reply.message_id);
   if (!colis) {
-    bot.sendMessage(msg.chat.id, "Colis introuvable (deja drope ou pas un colis).");
+    replyEphemeral(bot, msg, "Colis introuvable (deja drope ou pas un colis).");
     return;
   }
   const updated = setColisType(colis.id, type);
   const label = type === "lit" ? "LIT" : "normal";
-  bot.sendMessage(msg.chat.id, `Colis #${updated.id} (${updated.sender_name}) passe en ${label} (${updated.price.toFixed(2)} EUR).`);
+  replyEphemeral(bot, msg, `Colis #${updated.id} (${updated.sender_name}) passe en ${label} (${updated.price.toFixed(2)} EUR).`);
 }
 
 function handleBatchType(bot, msg, type) {
   const batchId = getLatestBatchId(msg.chat.id);
   if (!batchId) {
-    bot.sendMessage(msg.chat.id, "Aucun groupe de colis recent trouve.");
+    replyEphemeral(bot, msg, "Aucun groupe de colis recent trouve.");
     return;
   }
   const count = setBatchType(batchId, type);
   const label = type === "lit" ? "LIT" : "normal";
   if (count === 0) {
-    bot.sendMessage(msg.chat.id, "Aucun colis en attente dans le dernier groupe.");
+    replyEphemeral(bot, msg, "Aucun colis en attente dans le dernier groupe.");
     return;
   }
-  bot.sendMessage(msg.chat.id, `${count} colis passes en ${label}.`);
+  replyEphemeral(bot, msg, `${count} colis passes en ${label}.`);
 }
 
 function handlePrice(bot, msg, price) {
   if (Number.isNaN(price) || price < 0) {
-    bot.sendMessage(msg.chat.id, "Montant invalide. Exemple : /prix 7.5");
+    replyEphemeral(bot, msg, "Montant invalide. Exemple : /prix 7.5");
     return;
   }
 
@@ -446,29 +497,26 @@ function handlePrice(bot, msg, price) {
   if (reply) {
     const colis = findColisByMessage(msg.chat.id, reply.message_id);
     if (!colis) {
-      bot.sendMessage(msg.chat.id, "Colis introuvable (deja drope ou pas un colis).");
+      replyEphemeral(bot, msg, "Colis introuvable (deja drope ou pas un colis).");
       return;
     }
     const updated = setColisPrice(colis.id, price);
-    bot.sendMessage(
-      msg.chat.id,
-      `Colis #${updated.id} (${updated.sender_name}) passe a ${price.toFixed(2)} EUR.`
-    );
+    replyEphemeral(bot, msg, `Colis #${updated.id} (${updated.sender_name}) passe a ${price.toFixed(2)} EUR.`);
     return;
   }
 
   // sans reponse a un colis precis, on applique au dernier groupe recu
   const batchId = getLatestBatchId(msg.chat.id);
   if (!batchId) {
-    bot.sendMessage(msg.chat.id, "Aucun colis recent trouve.");
+    replyEphemeral(bot, msg, "Aucun colis recent trouve.");
     return;
   }
   const count = setBatchPrice(batchId, price);
   if (count === 0) {
-    bot.sendMessage(msg.chat.id, "Aucun colis en attente dans le dernier groupe.");
+    replyEphemeral(bot, msg, "Aucun colis en attente dans le dernier groupe.");
     return;
   }
-  bot.sendMessage(msg.chat.id, `${count} colis passes a ${price.toFixed(2)} EUR.`);
+  replyEphemeral(bot, msg, `${count} colis passes a ${price.toFixed(2)} EUR.`);
 }
 
 // Met a jour l'image de stats deja postee plutot que d'en empiler une
@@ -497,7 +545,11 @@ async function editStatsPhoto(bot, messageId, image) {
 async function updateGroupStatsPhoto(bot, addedCount) {
   try {
     const { count, value } = getPendingSummary();
-    const image = await renderStatsImage({ pendingCount: count, pendingValue: value, addedCount });
+    // rafraichissement depuis le site : on garde le "dernier ajout" du
+    // dernier lot recu plutot que d'afficher +0
+    const added = addedCount === null ? Number(getSetting("last_added_count", 0)) : addedCount;
+    if (addedCount !== null) setSetting("last_added_count", addedCount);
+    const image = await renderStatsImage({ pendingCount: count, pendingValue: value, addedCount: added });
 
     const prevId = getStatsMessageId("group");
     if (prevId && (await editStatsPhoto(bot, prevId, image))) return;
@@ -588,4 +640,17 @@ function pushBatchNotification(batch) {
   });
 }
 
-module.exports = { startBot };
+// Appele par le dashboard apres chaque modification de colis : l'image postee
+// dans le groupe suit ce qu'on fait sur le site. Regroupe les appels rapproches
+// (drop de plusieurs expediteurs a la suite) en une seule edition.
+let refreshTimer = null;
+function refreshGroupStats() {
+  if (!botInstance) return;
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    updateGroupStatsPhoto(botInstance, null);
+  }, 800);
+}
+
+module.exports = { startBot, refreshGroupStats };
