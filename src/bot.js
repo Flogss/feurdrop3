@@ -98,15 +98,36 @@ function colisAttachment(msg) {
   return null;
 }
 
-// Determine le type impose par le topic Telegram (groupe auto-import), ou
-// null si le message n'est pas dans un topic reconnu / n'est pas concerne.
+// Chats inconnus deja signales, pour ne pas repeter le meme avertissement.
+const ignoredChatsLogged = new Set();
+
+// Determine le type impose par le topic Telegram, ou null si le fichier ne
+// doit pas etre compte du tout.
+// Deux sources sont legitimes et deux seulement :
+//   - le groupe configure, dans un des topics suivis ;
+//   - un transfert direct au bot en message prive.
+// Tout le reste (autre groupe, autre canal, ancien groupe ou l'on est encore
+// membre, topic non suivi) est ignore : sinon la moindre photo postee ailleurs
+// se retrouvait comptee comme un colis.
 function resolveForcedType(msg) {
-  if (msg.chat.id !== AUTO_GROUP_CHAT_ID) return undefined;
-  const threadId = msg.message_thread_id;
-  if (AUTO_LIT_TOPIC_IDS.includes(threadId)) return "lit";
-  if (AUTO_NORMAL_TOPIC_IDS.includes(threadId)) return "normal";
-  if (AUTO_BJ_TOPIC_IDS.includes(threadId)) return "bj";
-  return null; // dans ce groupe mais hors des topics suivis : on ignore
+  if (msg.chat.id === AUTO_GROUP_CHAT_ID) {
+    const threadId = msg.message_thread_id;
+    if (AUTO_LIT_TOPIC_IDS.includes(threadId)) return "lit";
+    if (AUTO_NORMAL_TOPIC_IDS.includes(threadId)) return "normal";
+    if (AUTO_BJ_TOPIC_IDS.includes(threadId)) return "bj";
+    return null; // bon groupe, mais topic non suivi
+  }
+
+  if (msg.chat.type === "private") return undefined; // transfert direct au bot
+
+  if (!ignoredChatsLogged.has(msg.chat.id)) {
+    ignoredChatsLogged.add(msg.chat.id);
+    console.log(
+      `[bot] fichiers ignores dans "${msg.chat.title || msg.chat.id}" (id ${msg.chat.id}) :` +
+        ` ce n'est pas le groupe configure (${AUTO_GROUP_CHAT_ID}).`
+    );
+  }
+  return null;
 }
 
 // Reactions : le pouce accuse reception d'un colis, le point d'interrogation
