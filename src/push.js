@@ -89,4 +89,15 @@ function notifyNewColis({ count }) {
   }).catch((err) => console.error("[push] notifyNewColis", err.message));
 }
 
-module.exports = { getPublicKey, sendToAll, notifyNewColis, countSubscriptions };
+// Depart en tournee : rappel de ce qu'on emporte.
+function notifyTourStart() {
+  const pending = getPendingSummary();
+  return sendToAll({
+    title: `🚚 ${pending.value.toFixed(2)} € en cours de drop`,
+    body: `${pending.count} colis dans le sac`,
+    tag: "tour",
+    url: "/",
+  }).catch((err) => console.error("[push] notifyTourStart", err.message));
+}
+
+module.exports = { getPublicKey, sendToAll, notifyNewColis, notifyTourStart, countSubscriptions };

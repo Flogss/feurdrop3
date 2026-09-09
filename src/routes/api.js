@@ -31,7 +31,7 @@ const {
   markPushSeen,
   getPendingSummary,
 } = require("../db");
-const { getPublicKey, sendToAll, countSubscriptions } = require("../push");
+const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart } = require("../push");
 const { refreshGroupStats } = require("../bot");
 
 const router = express.Router();
@@ -115,7 +115,9 @@ router.get("/stats", (req, res) => {
 
 // --- Tournee ----------------------------------------------------------------
 router.post("/tour/start", (req, res) => {
-  res.json({ ok: true, startedAt: startTour() });
+  const startedAt = startTour();
+  notifyTourStart();
+  res.json({ ok: true, startedAt });
 });
 
 router.post("/tour/end", (req, res) => {
