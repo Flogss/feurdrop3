@@ -135,12 +135,26 @@ function queueReaction(bot, chatId, messageId, emoji, fallbackEmoji) {
 }
 
 // Efface la commande de l'utilisateur une fois traitee pour ne pas polluer le
-// fil. Necessite le droit "Supprimer les messages" dans le groupe ; en cas de
-// refus on laisse simplement le message en place.
+// fil. Supprimer le message de QUELQU'UN D'AUTRE exige le droit "Supprimer les
+// messages" (le bot peut toujours effacer ses propres messages, d'ou le cas ou
+// seule la reponse disparait). Si Telegram refuse, on le dit une fois par chat
+// avec le message d'erreur exact plutot que de laisser le doute.
+const deleteRightWarned = new Set();
+
 function deleteCommand(bot, msg) {
-  bot
-    .deleteMessage(msg.chat.id, msg.message_id)
-    .catch((err) => console.error("[bot] suppression commande impossible :", err.message));
+  bot.deleteMessage(msg.chat.id, msg.message_id).catch((err) => {
+    console.error("[bot] suppression commande impossible :", err.message);
+    if (deleteRightWarned.has(msg.chat.id)) return;
+    deleteRightWarned.add(msg.chat.id);
+    replyEphemeral(
+      bot,
+      msg,
+      `Je n'arrive pas a effacer tes commandes : ${err.message}\n` +
+        `Ajoute-moi comme administrateur avec le droit "Supprimer les messages".`,
+      {},
+      20000
+    );
+  });
 }
 
 function batchKey(chatId, threadId) {
