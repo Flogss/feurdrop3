@@ -24,6 +24,8 @@ const {
   getTourStart,
   startTour,
   endTour,
+  recordTour,
+  getDayTours,
   saveLastTour,
   getLastTour,
   clearLastTour,
@@ -37,6 +39,11 @@ const {
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart } = require("../push");
 const { refreshGroupStats } = require("../bot");
+
+// SMIC horaire brut francais, sert de point de comparaison apres une tournee.
+// Revalorise regulierement : surchargeable sans redeploiement de code via la
+// variable d'environnement SMIC_HOURLY.
+const SMIC_HOURLY = Number(process.env.SMIC_HOURLY || 11.88);
 
 const router = express.Router();
 
@@ -144,9 +151,36 @@ router.post("/tour/finish", (req, res) => {
   if (count > 0) adjustStock(-count);
   const endedAt = serverNow();
   endTour();
-  if (startedAt) saveLastTour({ startedAt, endedAt, count, value: bag.value });
 
-  res.json({ ok: true, count, value: bag.value, startedAt, endedAt, stock: getStock() });
+  let summary = null;
+  if (startedAt) {
+    const seconds = Math.max(
+      0,
+      Math.round((Date.parse(`${endedAt.replace(" ", "T")}Z`) - Date.parse(`${startedAt.replace(" ", "T")}Z`)) / 1000)
+    );
+    recordTour({ startedAt, endedAt, seconds, count, value: bag.value });
+
+    // le cumul du jour inclut la tournee qu'on vient d'enregistrer : une
+    // deuxieme sortie s'ajoute a la premiere pour le taux horaire
+    const day = getDayTours(endedAt);
+    summary = {
+      startedAt,
+      endedAt,
+      seconds,
+      count,
+      value: bag.value,
+      smicHourly: SMIC_HOURLY,
+      day: {
+        sessions: day.sessions,
+        seconds: day.seconds,
+        count: day.count,
+        value: day.value,
+      },
+    };
+    saveLastTour(summary);
+  }
+
+  res.json({ ok: true, count, value: bag.value, startedAt, endedAt, summary, stock: getStock() });
 });
 
 // Fermeture du resume de tournee affiche sur le dashboard.

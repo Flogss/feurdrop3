@@ -300,6 +300,13 @@ main { margin-top: 16px; }
 /* resume affiche apres le retour : couleurs cyan pour le distinguer */
 .tour-summary { border-color: rgba(56,247,255,0.3); background: rgba(56,247,255,0.05); }
 .tour-summary-title { font-size: 14px; font-weight: 700; color: var(--cyan); }
+/* taux horaire compare au SMIC */
+.tour-rate { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.tour-rate-hour { font-size: 17px; font-weight: 700; color: var(--text); }
+.tour-rate-smic { font-size: 13px; font-weight: 700; color: var(--lime); }
+.tour-rate-smic.under { color: var(--magenta); }
+.tour-rate-ref { font-size: 10px; color: var(--text-dim); }
+.tour-banner-sub[hidden] { display: none; }
 .tour-banner-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 /* refermer la tournee sans rien dropper (finalement pas parti) */
 .tour-cancel {

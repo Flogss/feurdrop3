@@ -236,12 +236,51 @@ function renderTourSummary(last) {
   box.hidden = !last;
   if (!last) return;
 
-  const seconds = Math.max(0, Math.round((sqlDateToMs(last.endedAt) - sqlDateToMs(last.startedAt)) / 1000));
+  const seconds =
+    last.seconds != null
+      ? last.seconds
+      : Math.max(0, Math.round((sqlDateToMs(last.endedAt) - sqlDateToMs(last.startedAt)) / 1000));
+
   document.getElementById("tour-summary-title").textContent = `Tournée terminée en ${formatDuration(seconds)}`;
   document.getElementById("tour-summary-sub").textContent =
     `${formatTourTime(last.startedAt)} → ${formatTourTime(last.endedAt)} · ${last.count} colis dropé${
       last.count > 1 ? "s" : ""
     } · ${euro(last.value)}`;
+
+  const smic = last.smicHourly || 11.88;
+  document.getElementById("tour-rate").innerHTML = rateHtml(last.value, seconds, smic);
+
+  // deuxieme sortie du jour : on montre aussi le cumul, tournees additionnees
+  const day = last.day;
+  const dayEl = document.getElementById("tour-day");
+  const showDay = day && day.sessions > 1;
+  dayEl.hidden = !showDay;
+  if (showDay) {
+    dayEl.textContent =
+      `Aujourd'hui : ${day.sessions} sessions · ${formatDuration(day.seconds)} · ${euro(day.value)} · ` +
+      `${euro(hourlyRate(day.value, day.seconds))}/h · ${formatSmic(hourlyRate(day.value, day.seconds) / smic)} le SMIC`;
+  }
+}
+
+function hourlyRate(value, seconds) {
+  return seconds > 0 ? (value * 3600) / seconds : 0;
+}
+
+// "3,2×" — on garde une decimale sauf pour les tres gros multiples
+function formatSmic(ratio) {
+  if (!Number.isFinite(ratio)) return "—";
+  return `${ratio >= 10 ? Math.round(ratio) : ratio.toFixed(1).replace(".", ",")}×`;
+}
+
+function rateHtml(value, seconds, smic) {
+  const rate = hourlyRate(value, seconds);
+  const ratio = smic > 0 ? rate / smic : 0;
+  const under = ratio < 1;
+  return (
+    `<span class="tour-rate-hour">${euro(rate)}/h</span>` +
+    `<span class="tour-rate-smic${under ? " under" : ""}">${formatSmic(ratio)} le SMIC</span>` +
+    `<span class="tour-rate-ref">SMIC ${euro(smic)}/h</span>`
+  );
 }
 
 document.getElementById("tour-summary-close").addEventListener("click", async () => {

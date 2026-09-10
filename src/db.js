@@ -72,6 +72,15 @@ db.exec(`
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS tours (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    seconds INTEGER NOT NULL,
+    colis_count INTEGER NOT NULL,
+    value REAL NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_colis_status ON colis(status);
   CREATE INDEX IF NOT EXISTS idx_colis_message ON colis(chat_id, message_id);
   CREATE INDEX IF NOT EXISTS idx_colis_batch ON colis(batch_id);
@@ -248,6 +257,26 @@ function startTour() {
 
 function endTour() {
   db.prepare("DELETE FROM settings WHERE key = 'tour_started_at'").run();
+}
+
+// Historique des tournees : sert au cumul de la journee (une deuxieme sortie
+// s'ajoute a la premiere pour le calcul du taux horaire).
+function recordTour({ startedAt, endedAt, seconds, count, value }) {
+  db.prepare(
+    "INSERT INTO tours (started_at, ended_at, seconds, colis_count, value) VALUES (?, ?, ?, ?, ?)"
+  ).run(startedAt, endedAt, Math.max(0, Math.round(seconds)), count, value);
+}
+
+// Total des tournees terminees le meme jour que `day` (date SQLite).
+function getDayTours(day) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS sessions, COALESCE(SUM(seconds), 0) AS seconds,
+              COALESCE(SUM(colis_count), 0) AS count, COALESCE(SUM(value), 0) AS value
+       FROM tours WHERE date(ended_at) = date(?)`
+    )
+    .get(day);
+  return row;
 }
 
 // Resume de la derniere tournee terminee, affiche sur le dashboard jusqu'a ce
@@ -666,6 +695,8 @@ module.exports = {
   getTourStart,
   startTour,
   endTour,
+  recordTour,
+  getDayTours,
   saveLastTour,
   getLastTour,
   clearLastTour,
