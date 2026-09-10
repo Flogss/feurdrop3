@@ -40,10 +40,12 @@ const {
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart } = require("../push");
 const { refreshGroupStats } = require("../bot");
 
-// SMIC horaire brut francais, sert de point de comparaison apres une tournee.
-// Revalorise regulierement : surchargeable sans redeploiement de code via la
-// variable d'environnement SMIC_HOURLY.
-const SMIC_HOURLY = Number(process.env.SMIC_HOURLY || 11.88);
+// SMIC horaire NET francais, sert de point de comparaison apres une tournee :
+// c'est ce qu'on touche vraiment, donc comparable a l'argent des colis.
+// (~9,40 EUR net pour 11,88 EUR brut depuis novembre 2024.)
+// Revalorise regulierement : surchargeable sans redeploiement via la variable
+// d'environnement SMIC_HOURLY.
+const SMIC_HOURLY = Number(process.env.SMIC_HOURLY || 9.4);
 
 const router = express.Router();
 

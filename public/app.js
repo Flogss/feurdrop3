@@ -247,7 +247,7 @@ function renderTourSummary(last) {
       last.count > 1 ? "s" : ""
     } · ${euro(last.value)}`;
 
-  const smic = last.smicHourly || 11.88;
+  const smic = last.smicHourly || 9.4;
   document.getElementById("tour-rate").innerHTML = rateHtml(last.value, seconds, smic);
 
   // deuxieme sortie du jour : on montre aussi le cumul, tournees additionnees
@@ -279,7 +279,7 @@ function rateHtml(value, seconds, smic) {
   return (
     `<span class="tour-rate-hour">${euro(rate)}/h</span>` +
     `<span class="tour-rate-smic${under ? " under" : ""}">${formatSmic(ratio)} le SMIC</span>` +
-    `<span class="tour-rate-ref">SMIC ${euro(smic)}/h</span>`
+    `<span class="tour-rate-ref">SMIC net ${euro(smic)}/h</span>`
   );
 }
 
