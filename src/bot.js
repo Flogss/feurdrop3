@@ -36,8 +36,6 @@ const { notifyNewColis } = require("./push");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
-// Seul ce compte peut demander une fusion d'etiquettes (/imprime).
-const OWNER_ID = Number(process.env.OWNER_TELEGRAM_ID || 8925708293);
 
 // Groupe Telegram avec topics dedies : les PDF envoyes directement dans ces
 // topics sont comptes automatiquement, sans avoir besoin de forward au bot.
@@ -322,7 +320,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime en prive pour fusionner les etiquettes a imprimer",
+        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -402,7 +400,7 @@ async function registerCommands(bot) {
     { command: "unlitall", description: "Repasser tout le dernier lot en normal" },
     { command: "prix", description: "Forcer le montant, ex: /prix 7.5" },
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
-    { command: "imprime", description: "Fusionner les etiquettes a imprimer (prive)" },
+    { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
     { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
     { command: "regles", description: "Voir ce que le bot a appris" },
@@ -632,13 +630,23 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
 // format exact de l'imprimante thermique 4x6. Reserve au proprietaire et au
 // tete-a-tete avec le bot : c'est un fichier qui contient toutes les
 // etiquettes, il n'a rien a faire dans un groupe.
+// Ouvert a tout le monde, mais pas n'importe ou : en tete-a-tete avec le bot,
+// ou dans le groupe de travail. Le PDF regroupe toutes les etiquettes en
+// attente du transporteur choisi, quel que soit l'expediteur : il n'a rien a
+// faire dans un groupe tiers.
 function canPrint(msg) {
-  return msg.chat.type === "private" && msg.from && msg.from.id === OWNER_ID;
+  return msg.chat.type === "private" || msg.chat.id === AUTO_GROUP_CHAT_ID;
 }
 
 function handlePrintCommand(bot, msg, rawName) {
   if (!canPrint(msg)) {
-    return replyEphemeral(bot, msg, "La commande /imprime ne marche qu'en message prive avec toi.", {}, 8000);
+    return replyEphemeral(
+      bot,
+      msg,
+      "La commande /imprime ne marche qu'en message prive avec le bot ou dans le groupe de travail.",
+      {},
+      8000
+    );
   }
 
   const summary = getPrintableSummary().filter((row) => row.count > 0);
@@ -674,12 +682,15 @@ function handlePrintCommand(bot, msg, rawName) {
 }
 
 function handlePrintCallback(bot, query) {
+  const msg = { chat: query.message.chat, from: query.from };
+  if (!canPrint(msg)) {
+    return bot.answerCallbackQuery(query.id, { text: "Pas ici." }).catch(() => {});
+  }
+
   const code = (query.data || "").slice(3);
   bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
-  bot
-    .deleteMessage(query.message.chat.id, query.message.message_id)
-    .catch(() => {});
-  sendMergedLabels(bot, { chat: query.message.chat, from: query.from, chat_type: "private" }, code);
+  bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
+  sendMergedLabels(bot, msg, code);
 }
 
 // Telecharge les etiquettes une par une (Telegram limite les rafales), les
