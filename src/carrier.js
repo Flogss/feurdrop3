@@ -14,6 +14,7 @@ const CARRIERS = [
   { code: "UPS", label: "UPS", aliases: ["ups"] },
   { code: "DPD", label: "DPD", aliases: ["dpd"] },
   { code: "GLS", label: "GLS", aliases: ["gls"] },
+  { code: "DHL", label: "DHL", aliases: ["dhl"] },
   { code: "BJ", label: "BJ", aliases: ["bj"] },
 ];
 
@@ -64,7 +65,87 @@ function carrierFromToken(token) {
 // Ordre de confiance quand plusieurs numeros sont presents.
 const TOKEN_PRIORITY = ["UPS", "CHRONO", "LP", "DPD", "MR"];
 
-function detectCarrier(fileName, caption) {
+// --- Apprentissage ----------------------------------------------------------
+// Corriger un colis avec /transporteur apprend deux choses : la FORME du
+// numero de suivi et le mot-cle de la description. Les envois suivants qui
+// partagent l'une des deux sont classes tout seuls.
+
+// Signature de la forme d'un jeton : "857030747501" -> "D12",
+// "8R60235771718" -> "D1L1D11", "XT269045554TS" -> "L2D9L2".
+function tokenShape(token) {
+  const runs = normalize(token).match(/(\d+|[A-Z]+)/g);
+  if (!runs) return null;
+  return runs.map((run) => `${/\d/.test(run[0]) ? "D" : "L"}${run.length}`).join("");
+}
+
+// Un jeton ressemble a un numero de suivi s'il est long et contient des
+// chiffres. Les mots seuls (DHL, SCAN) n'en sont pas.
+function looksLikeTracking(token) {
+  return token.length >= 8 && /\d/.test(token) && /^[A-Z0-9]+$/.test(token);
+}
+
+// Mots trop generiques pour identifier un transporteur a eux seuls : on ne les
+// apprend jamais comme mot-cle.
+const GENERIC_WORDS = new Set([
+  "SCAN", "COLIS", "COLISSIMO", "LABEL", "ETIQUETTE", "ETIQUETTES", "PARIS", "FRANCE", "LYON",
+  "MARSEILLE", "PDF", "IMG", "IMAGE", "PHOTO", "DOCUMENT", "RELAIS", "RELAY", "POINT", "SAFARI",
+  "ENVOI", "EXPEDITION", "SUIVI", "NUMERO", "DEPOT", "RETOUR", "BON", "COPIE", "DOWNLOAD", "FILE",
+  "SANS", "TITRE", "NEW", "SCREENSHOT", "CAPTURE", "ECRAN",
+]);
+
+// Ce qu'il y a a retenir d'un colis qu'on vient de corriger a la main.
+function deriveRules(fileName, caption) {
+  const rules = [];
+  const seen = new Set();
+  const add = (kind, value) => {
+    const key = `${kind}:${value}`;
+    if (value && !seen.has(key)) {
+      seen.add(key);
+      rules.push({ kind, value });
+    }
+  };
+
+  // 1. la forme de chaque numero de suivi present
+  for (const token of [...tokensOf(fileName), ...tokensOf(caption)]) {
+    if (looksLikeTracking(token)) add("shape", tokenShape(token));
+  }
+
+  // 2. le premier mot significatif de la description ("DHL SCAN" -> DHL)
+  for (const token of tokensOf(caption)) {
+    if (/^[A-Z]{2,}$/.test(token) && token.length >= 3 && !GENERIC_WORDS.has(token)) {
+      add("keyword", token);
+      break;
+    }
+  }
+
+  return rules;
+}
+
+// Regles apprises, testees avant les regles internes : elles existent
+// justement parce que la detection d'origine s'etait trompee ou avait seche.
+function matchLearnedRules(fileName, caption, rules) {
+  if (!rules || rules.length === 0) return null;
+
+  const keywords = rules.filter((r) => r.kind === "keyword");
+  const shapes = rules.filter((r) => r.kind === "shape");
+  const tokens = [...tokensOf(fileName), ...tokensOf(caption)];
+
+  for (const rule of keywords) {
+    if (tokens.includes(rule.value)) return rule.carrier;
+  }
+  for (const token of tokens) {
+    if (!looksLikeTracking(token)) continue;
+    const shape = tokenShape(token);
+    const found = shapes.find((r) => r.value === shape);
+    if (found) return found.carrier;
+  }
+  return null;
+}
+
+function detectCarrier(fileName, caption, learnedRules) {
+  const learned = matchLearnedRules(fileName, caption, learnedRules);
+  if (learned) return learned;
+
   const combined = `${normalize(fileName)} ${normalize(caption)}`;
 
   // 1. Mention explicite du transporteur, ou motif tres distinctif.
@@ -76,6 +157,7 @@ function detectCarrier(fileName, caption) {
   if (/\bDPD\b/.test(combined)) return "DPD";
   if (/MONDIAL RELAY|\bMR\b/.test(combined)) return "MR";
   if (/\bGLS\b/.test(combined)) return "GLS";
+  if (/\bDHL\b/.test(combined)) return "DHL";
 
   // 2. Motif de numero de suivi, cherche dans le nom ET dans la description.
   const found = [...tokensOf(fileName), ...tokensOf(caption)].map(carrierFromToken).filter(Boolean);
@@ -86,4 +168,4 @@ function detectCarrier(fileName, caption) {
   return null;
 }
 
-module.exports = { detectCarrier, CARRIERS, parseCarrier, carrierLabel };
+module.exports = { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules, tokenShape };

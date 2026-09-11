@@ -72,6 +72,14 @@ db.exec(`
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS carrier_rules (
+    kind TEXT NOT NULL,
+    value TEXT NOT NULL,
+    carrier TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, value)
+  );
+
   CREATE TABLE IF NOT EXISTS tours (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
@@ -100,6 +108,13 @@ if (!colisColumns.includes("price_locked")) {
   db.exec("ALTER TABLE colis ADD COLUMN price_locked INTEGER NOT NULL DEFAULT 0");
 }
 if (!colisColumns.includes("carrier")) db.exec("ALTER TABLE colis ADD COLUMN carrier TEXT");
+// nom de fichier, legende et identifiant Telegram du fichier : indispensables
+// pour apprendre des regles de transporteur apres coup et pour re-telecharger
+// les etiquettes au moment de les imprimer
+if (!colisColumns.includes("file_name")) db.exec("ALTER TABLE colis ADD COLUMN file_name TEXT");
+if (!colisColumns.includes("caption")) db.exec("ALTER TABLE colis ADD COLUMN caption TEXT");
+if (!colisColumns.includes("file_id")) db.exec("ALTER TABLE colis ADD COLUMN file_id TEXT");
+if (!colisColumns.includes("file_kind")) db.exec("ALTER TABLE colis ADD COLUMN file_kind TEXT");
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -221,15 +236,87 @@ function createBatch(chatId) {
   return info.lastInsertRowid;
 }
 
-function addColis(senderName, { chatId, messageId, batchId, type = "normal", carrier = null } = {}) {
+function addColis(
+  senderName,
+  { chatId, messageId, batchId, type = "normal", carrier = null, fileName, caption, fileId, fileKind } = {}
+) {
   const sender = getOrCreateSender(senderName);
   const price = priceForType(sender, type);
   const info = db
     .prepare(
-      "INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)"
+      `INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier,
+                          file_name, caption, file_id, file_kind)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(sender.name, type, price, chatId || null, messageId || null, batchId || null, carrier || null);
+    .run(
+      sender.name,
+      type,
+      price,
+      chatId || null,
+      messageId || null,
+      batchId || null,
+      carrier || null,
+      fileName || null,
+      caption || null,
+      fileId || null,
+      fileKind || null
+    );
   return { id: info.lastInsertRowid, sender_name: sender.name, price, type, carrier };
+}
+
+// --- Regles de transporteur apprises ---------------------------------------
+// Corriger un colis avec /transporteur enseigne au bot la forme du numero de
+// suivi et le mot-cle de la description, pour que les suivants soient reconnus
+// tout seuls.
+function saveCarrierRule(kind, value, carrier) {
+  db.prepare(
+    `INSERT INTO carrier_rules (kind, value, carrier) VALUES (?, ?, ?)
+     ON CONFLICT(kind, value) DO UPDATE SET carrier = excluded.carrier, created_at = datetime('now')`
+  ).run(kind, value, carrier);
+}
+
+function getCarrierRules() {
+  return db.prepare("SELECT kind, value, carrier FROM carrier_rules").all();
+}
+
+function listCarrierRules() {
+  return db.prepare("SELECT kind, value, carrier, created_at FROM carrier_rules ORDER BY created_at DESC").all();
+}
+
+function clearCarrierRules() {
+  return db.prepare("DELETE FROM carrier_rules").run().changes;
+}
+
+// Colis en attente sans transporteur, pour les repasser a la moulinette quand
+// une nouvelle regle vient d'etre apprise.
+function getUnclassifiedPending() {
+  return db
+    .prepare(
+      "SELECT id, file_name, caption FROM colis WHERE status = 'pending' AND carrier IS NULL AND type != 'bj'"
+    )
+    .all();
+}
+
+// Etiquettes en attente pour un transporteur donne, dans l'ordre d'arrivee.
+function getPrintableColis(carrier) {
+  const base =
+    "SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE status = 'pending' AND file_id IS NOT NULL";
+  if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ORDER BY id`).all();
+  if (carrier === "Inconnu") {
+    return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ORDER BY id`).all();
+  }
+  return db.prepare(`${base} AND type != 'bj' AND carrier = ? ORDER BY id`).all(carrier);
+}
+
+// Repartition des etiquettes imprimables (celles dont on a encore le fichier).
+function getPrintableSummary() {
+  return db
+    .prepare(
+      `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count
+       FROM colis WHERE status = 'pending' AND file_id IS NOT NULL
+       GROUP BY ${CARRIER_GROUP_SQL} ORDER BY count DESC`
+    )
+    .all();
 }
 
 // Colis en attente groupes par transporteur detecte (nom de fichier /
@@ -420,6 +507,11 @@ function setBatchCarrier(batchId, carrier) {
   return db
     .prepare("UPDATE colis SET carrier = ? WHERE batch_id = ? AND status = 'pending'")
     .run(carrier, batchId).changes;
+}
+
+// Colis d'un lot, pour apprendre des regles a partir de tout le groupe.
+function getBatchColis(batchId) {
+  return db.prepare("SELECT * FROM colis WHERE batch_id = ? AND status = 'pending'").all(batchId);
 }
 
 function getColisById(id) {
@@ -710,8 +802,16 @@ module.exports = {
   setBatchType,
   setColisPrice,
   setColisCarrier,
+  saveCarrierRule,
+  getCarrierRules,
+  listCarrierRules,
+  clearCarrierRules,
+  getUnclassifiedPending,
+  getPrintableColis,
+  getPrintableSummary,
   setBatchCarrier,
   getColisById,
+  getBatchColis,
   setBatchPrice,
   quickAddColis,
   quickRemoveColis,

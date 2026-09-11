@@ -12,6 +12,7 @@ const CARRIER_LABELS = {
   UPS: "UPS",
   DPD: "DPD",
   GLS: "GLS",
+  DHL: "DHL",
   BJ: "BJ",
   Inconnu: "⚠️ Non reconnu",
 };

@@ -12,7 +12,15 @@ const {
   setColisPrice,
   setColisCarrier,
   setBatchCarrier,
+  saveCarrierRule,
+  getCarrierRules,
+  listCarrierRules,
+  clearCarrierRules,
+  getUnclassifiedPending,
+  getPrintableColis,
+  getPrintableSummary,
   getColisById,
+  getBatchColis,
   setBatchPrice,
   getPendingSummary,
   getStatsMessageId,
@@ -21,11 +29,14 @@ const {
   setSetting,
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
-const { detectCarrier, CARRIERS, parseCarrier, carrierLabel } = require("./carrier");
+const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
+const { mergeLabels, LABEL_WIDTH, LABEL_HEIGHT } = require("./printer");
 const { notifyNewColis } = require("./push");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
+// Seul ce compte peut demander une fusion d'etiquettes (/imprime).
+const OWNER_ID = Number(process.env.OWNER_TELEGRAM_ID || 8925708293);
 
 // Groupe Telegram avec topics dedies : les PDF envoyes directement dans ces
 // topics sont comptes automatiquement, sans avoir besoin de forward au bot.
@@ -89,11 +100,16 @@ function isImageDocument(document) {
 // (compressee : dans ce cas il n'y a pas de nom de fichier, seule la
 // legende peut porter le numero de suivi).
 function colisAttachment(msg) {
-  if (isPdf(msg.document) || isImageDocument(msg.document)) {
-    return { fileName: msg.document.file_name || null };
+  if (isPdf(msg.document)) {
+    return { fileName: msg.document.file_name || null, fileId: msg.document.file_id, kind: "pdf" };
+  }
+  if (isImageDocument(msg.document)) {
+    return { fileName: msg.document.file_name || null, fileId: msg.document.file_id, kind: "image" };
   }
   if (Array.isArray(msg.photo) && msg.photo.length > 0) {
-    return { fileName: null };
+    // on garde la plus grande taille : c'est celle qui imprime correctement
+    const best = msg.photo[msg.photo.length - 1];
+    return { fileName: null, fileId: best.file_id, kind: "image" };
   }
   return null;
 }
@@ -213,7 +229,7 @@ function startBot() {
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
     const senderName = extractSenderName(msg);
-    const carrier = detectCarrier(attachment.fileName, msg.caption);
+    const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
     const threadId = msg.message_thread_id;
     const key = batchKey(msg.chat.id, threadId);
 
@@ -257,6 +273,10 @@ function startBot() {
       batchId: batch.batchId,
       type: forcedType || "normal",
       carrier,
+      fileName: attachment.fileName,
+      caption: msg.caption || null,
+      fileId: attachment.fileId,
+      fileKind: attachment.kind,
     });
 
     // transporteur non reconnu : nouvelle tentative a la fin du lot (la
@@ -332,7 +352,23 @@ function startBot() {
     command((msg, match) => handleCarrierCommand(bot, msg, match[1]))
   );
 
-  bot.on("callback_query", (query) => handleCarrierCallback(bot, query));
+  bot.onText(
+    /^\/imprime(@\w+)?(?:\s+(.+))?$/i,
+    command((msg, match) => handlePrintCommand(bot, msg, match[2]))
+  );
+  bot.onText(/^\/regles(@\w+)?$/i, command((msg) => handleRulesCommand(bot, msg)));
+  bot.onText(
+    /^\/regles_reset(@\w+)?$/i,
+    command((msg) => {
+      const count = clearCarrierRules();
+      replyEphemeral(bot, msg, `${count} regle(s) oubliee(s).`, {}, 8000);
+    })
+  );
+
+  bot.on("callback_query", (query) => {
+    if ((query.data || "").startsWith("pr:")) return handlePrintCallback(bot, query);
+    return handleCarrierCallback(bot, query);
+  });
 
   registerCommands(bot);
 
@@ -362,6 +398,8 @@ async function registerCommands(bot) {
     { command: "unlitall", description: "Repasser tout le dernier lot en normal" },
     { command: "prix", description: "Forcer le montant, ex: /prix 7.5" },
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
+    { command: "imprime", description: "Fusionner les etiquettes a imprimer (prive)" },
+    { command: "regles", description: "Voir ce que le bot a appris" },
     ...CARRIERS.map((carrier) => ({
       command: `transporteur_${carrier.code.toLowerCase()}`,
       description: carrier.code === "BJ" ? "BJ (type de colis)" : carrier.label,
@@ -477,6 +515,51 @@ function handleCarrierCallback(bot, query) {
     .catch((err) => console.error("[bot] editMessageText", err.message));
 }
 
+// Corriger un colis apprend au bot a reconnaitre les suivants : la forme du
+// numero de suivi ("857030747501" -> 12 chiffres) et le mot-cle de la
+// description ("DHL SCAN" -> DHL) deviennent des regles. Les colis en attente
+// encore non classes repassent ensuite a la moulinette.
+function learnFrom(colisList, code) {
+  const learned = [];
+  for (const colis of colisList) {
+    if (!colis) continue;
+    for (const rule of deriveRules(colis.file_name, colis.caption)) {
+      saveCarrierRule(rule.kind, rule.value, code);
+      learned.push(rule);
+    }
+  }
+  if (learned.length === 0) return { learned, reclassified: 0 };
+
+  const rules = getCarrierRules();
+  let reclassified = 0;
+  for (const pending of getUnclassifiedPending()) {
+    const carrier = detectCarrier(pending.file_name, pending.caption, rules);
+    if (!carrier) continue;
+    setColisCarrier(pending.id, carrier);
+    reclassified += 1;
+  }
+  return { learned, reclassified };
+}
+
+function describeLearned(learned, reclassified, code) {
+  if (learned.length === 0) return "";
+  const parts = learned.map((rule) =>
+    rule.kind === "keyword" ? `« ${rule.value} »` : `les numeros en ${describeShape(rule.value)}`
+  );
+  const unique = [...new Set(parts)];
+  return (
+    `\nAppris : ${unique.join(" et ")} = ${carrierLabel(code)}.` +
+    (reclassified > 0 ? ` ${reclassified} colis reclasses.` : "")
+  );
+}
+
+// "D12" -> "12 chiffres", "L2D9L2" -> "2 lettres + 9 chiffres + 2 lettres"
+function describeShape(shape) {
+  return (shape.match(/[DL]\d+/g) || [])
+    .map((run) => `${run.slice(1)} ${run[0] === "D" ? "chiffres" : "lettres"}`)
+    .join(" + ");
+}
+
 // "BJ" n'est pas un transporteur mais un type de colis : il se corrige avec la
 // meme commande parce que c'est une ligne de "compagnies a poster" comme
 // les autres.
@@ -489,13 +572,151 @@ function applyCarrier(target, code) {
     }
     const updated = setColisCarrier(target.id, code);
     if (!updated) return "Colis introuvable.";
-    return `Colis #${updated.id} (${updated.sender_name}) : transporteur ${carrierLabel(code)}.`;
+    const { learned, reclassified } = learnFrom([updated], code);
+    return (
+      `Colis #${updated.id} (${updated.sender_name}) : transporteur ${carrierLabel(code)}.` +
+      describeLearned(learned, reclassified, code)
+    );
   }
 
+  const batchColis = getBatchColis(target.id);
   const count = code === "BJ" ? setBatchType(target.id, "bj") : setBatchCarrier(target.id, code);
   if (count === 0) return "Aucun colis en attente dans le dernier lot.";
   const label = code === "BJ" ? "BJ" : carrierLabel(code);
-  return `${count} colis passes en ${label}.`;
+  const { learned, reclassified } = code === "BJ" ? { learned: [], reclassified: 0 } : learnFrom(batchColis, code);
+  return `${count} colis passes en ${label}.` + describeLearned(learned, reclassified, code);
+}
+
+// --- Impression ------------------------------------------------------------
+// Fusionne les etiquettes en attente d'un transporteur en un seul PDF au
+// format exact de l'imprimante thermique 4x6. Reserve au proprietaire et au
+// tete-a-tete avec le bot : c'est un fichier qui contient toutes les
+// etiquettes, il n'a rien a faire dans un groupe.
+function canPrint(msg) {
+  return msg.chat.type === "private" && msg.from && msg.from.id === OWNER_ID;
+}
+
+function handlePrintCommand(bot, msg, rawName) {
+  if (!canPrint(msg)) {
+    return replyEphemeral(bot, msg, "La commande /imprime ne marche qu'en message prive avec toi.", {}, 8000);
+  }
+
+  const summary = getPrintableSummary().filter((row) => row.count > 0);
+  if (summary.length === 0) {
+    return replyEphemeral(bot, msg, "Aucune etiquette en attente a imprimer.", {}, 8000);
+  }
+
+  if (rawName && rawName.trim()) {
+    const carrier = parseCarrier(rawName);
+    if (!carrier) {
+      return replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
+    }
+    return sendMergedLabels(bot, msg, carrier.code);
+  }
+
+  const keyboard = [];
+  for (let i = 0; i < summary.length; i += 2) {
+    keyboard.push(
+      summary.slice(i, i + 2).map((row) => ({
+        text: `${carrierLabel(row.carrier)} (${row.count})`,
+        callback_data: `pr:${row.carrier}`,
+      }))
+    );
+  }
+  const total = summary.reduce((sum, row) => sum + row.count, 0);
+  keyboard.push([{ text: `Tout (${total})`, callback_data: "pr:*" }]);
+
+  bot
+    .sendMessage(msg.chat.id, "Quelles etiquettes imprimer ?", {
+      reply_markup: { inline_keyboard: keyboard },
+    })
+    .catch((err) => console.error("[bot] clavier impression", err.message));
+}
+
+function handlePrintCallback(bot, query) {
+  const code = (query.data || "").slice(3);
+  bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
+  bot
+    .deleteMessage(query.message.chat.id, query.message.message_id)
+    .catch(() => {});
+  sendMergedLabels(bot, { chat: query.message.chat, from: query.from, chat_type: "private" }, code);
+}
+
+// Telecharge les etiquettes une par une (Telegram limite les rafales), les
+// assemble, puis renvoie le PDF pret a imprimer.
+async function sendMergedLabels(bot, msg, code) {
+  const chatId = msg.chat.id;
+  const rows =
+    code === "*"
+      ? getPrintableSummary().flatMap((row) => getPrintableColis(row.carrier))
+      : getPrintableColis(code);
+
+  if (rows.length === 0) {
+    return replyEphemeral(bot, msg, `Aucune etiquette ${code === "*" ? "" : carrierLabel(code)} a imprimer.`, {}, 8000);
+  }
+
+  const notice = await bot
+    .sendMessage(chatId, `Recuperation de ${rows.length} etiquette${rows.length > 1 ? "s" : ""}...`)
+    .catch(() => null);
+
+  const labels = [];
+  const missing = [];
+  for (const row of rows) {
+    try {
+      const link = await bot.getFileLink(row.file_id);
+      const res = await fetch(link);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      labels.push({
+        bytes: new Uint8Array(await res.arrayBuffer()),
+        kind: row.file_kind === "image" ? "image" : "pdf",
+        label: row.file_name || `colis #${row.id}`,
+      });
+    } catch (err) {
+      missing.push(`#${row.id} ${row.file_name || ""} (${err.message})`);
+    }
+  }
+
+  const { pdf, pages, failed } = await mergeLabels(labels);
+  if (notice) bot.deleteMessage(chatId, notice.message_id).catch(() => {});
+
+  if (!pdf) {
+    return bot.sendMessage(chatId, "Aucune etiquette lisible : rien a imprimer.").catch(() => {});
+  }
+
+  const name = code === "*" ? "toutes" : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
+  const caption =
+    `${pages} etiquette${pages > 1 ? "s" : ""} — ${carrierPrintTitle(code)}\n` +
+    `Format ${(LABEL_WIDTH / 72 * 25.4).toFixed(0)}x${(LABEL_HEIGHT / 72 * 25.4).toFixed(0)} mm (4x6"), imprime en "taille reelle".` +
+    (missing.length > 0 ? `\n⚠️ ${missing.length} fichier(s) introuvable(s) sur Telegram.` : "") +
+    (failed.length > 0 ? `\n⚠️ ${failed.length} fichier(s) illisible(s).` : "");
+
+  await bot
+    .sendDocument(chatId, pdf, { caption }, { filename: `etiquettes-${name}.pdf`, contentType: "application/pdf" })
+    .catch((err) => bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {}));
+}
+
+function carrierPrintTitle(code) {
+  return code === "*" ? "tous transporteurs" : carrierLabel(code);
+}
+
+// Liste ce que le bot a appris, et permet de tout oublier si une regle s'avere
+// fausse.
+function handleRulesCommand(bot, msg) {
+  const rules = listCarrierRules();
+  if (rules.length === 0) {
+    return replyEphemeral(bot, msg, "Aucune regle apprise pour l'instant.", {}, 10000);
+  }
+  const lines = rules
+    .slice(0, 30)
+    .map((r) => `  • ${r.kind === "keyword" ? `« ${r.value} »` : describeShape(r.value)} → ${carrierLabel(r.carrier)}`);
+  const extra = rules.length > 30 ? `\n  … et ${rules.length - 30} autre(s)` : "";
+  replyEphemeral(
+    bot,
+    msg,
+    `${rules.length} regle(s) apprise(s) :\n${lines.join("\n")}${extra}\n\n/regles_reset pour tout oublier.`,
+    {},
+    30000
+  );
 }
 
 function handleSingleType(bot, msg, type) {
@@ -634,7 +855,7 @@ function resolveBatchCarriers(batch) {
     if (colis && colis.type === "bj") continue;
 
     const groupCaption = item.mediaGroupId ? batch.groupCaptions.get(item.mediaGroupId) : null;
-    const carrier = groupCaption ? detectCarrier(item.fileName, groupCaption) : null;
+    const carrier = groupCaption ? detectCarrier(item.fileName, groupCaption, getCarrierRules()) : null;
     if (carrier) setColisCarrier(item.colisId, carrier);
     else stillUnknown.push({ ...item, caption: item.caption || groupCaption });
   }
