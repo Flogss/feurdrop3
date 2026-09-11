@@ -695,9 +695,7 @@ async function sendMergedLabels(bot, msg, code) {
     return replyEphemeral(bot, msg, `Aucune etiquette ${code === "*" ? "" : carrierLabel(code)} a imprimer.`, {}, 8000);
   }
 
-  const notice = await bot
-    .sendMessage(chatId, `Recuperation de ${rows.length} etiquette${rows.length > 1 ? "s" : ""}...`)
-    .catch(() => null);
+  const progress = await startProgress(bot, chatId, rows.length);
 
   const labels = [];
   const missing = [];
@@ -714,10 +712,12 @@ async function sendMergedLabels(bot, msg, code) {
     } catch (err) {
       missing.push(`#${row.id} ${row.file_name || ""} (${err.message})`);
     }
+    await progress.step();
   }
 
+  await progress.finish("Assemblage du PDF...");
   const { pdf, pages, failed } = await mergeLabels(labels);
-  if (notice) bot.deleteMessage(chatId, notice.message_id).catch(() => {});
+  progress.remove();
 
   if (!pdf) {
     return bot.sendMessage(chatId, "Aucune etiquette lisible : rien a imprimer.").catch(() => {});
@@ -733,6 +733,50 @@ async function sendMergedLabels(bot, msg, code) {
   await bot
     .sendDocument(chatId, pdf, { caption }, { filename: `etiquettes-${name}.pdf`, contentType: "application/pdf" })
     .catch((err) => bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {}));
+}
+
+// Barre de progression : un seul message, edite au fil des telechargements.
+// Telegram limite les editions, d'ou le pas minimum d'une seconde entre deux
+// mises a jour (la derniere etape est toujours affichee).
+const PROGRESS_SLOTS = 12;
+const PROGRESS_MIN_INTERVAL_MS = 1000;
+
+function progressBar(done, total) {
+  const ratio = total > 0 ? done / total : 1;
+  const filled = Math.round(ratio * PROGRESS_SLOTS);
+  return `${"█".repeat(filled)}${"░".repeat(PROGRESS_SLOTS - filled)} ${Math.round(ratio * 100)} %`;
+}
+
+async function startProgress(bot, chatId, total) {
+  const text = (done, suffix) =>
+    `Preparation des etiquettes\n${progressBar(done, total)}\n${suffix || `${done}/${total} recuperees`}`;
+
+  const message = await bot.sendMessage(chatId, text(0)).catch(() => null);
+  let done = 0;
+  let lastEdit = 0;
+
+  const edit = async (suffix) => {
+    if (!message) return;
+    await bot
+      .editMessageText(text(done, suffix), { chat_id: chatId, message_id: message.message_id })
+      .catch(() => {});
+    lastEdit = Date.now();
+  };
+
+  return {
+    async step() {
+      done += 1;
+      const last = done >= total;
+      if (!last && Date.now() - lastEdit < PROGRESS_MIN_INTERVAL_MS) return;
+      await edit();
+    },
+    async finish(suffix) {
+      await edit(suffix);
+    },
+    remove() {
+      if (message) bot.deleteMessage(chatId, message.message_id).catch(() => {});
+    },
+  };
 }
 
 function carrierPrintTitle(code) {
