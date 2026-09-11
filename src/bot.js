@@ -21,6 +21,7 @@ const {
   getPrintableSummary,
   getColisById,
   getBatchColis,
+  deleteColis,
   setBatchPrice,
   getPendingSummary,
   getStatsMessageId,
@@ -321,7 +322,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)",
+        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime en prive pour fusionner les etiquettes a imprimer",
         {},
         30000
       );
@@ -356,6 +357,9 @@ function startBot() {
     /^\/imprime(@\w+)?(?:\s+(.+))?$/i,
     command((msg, match) => handlePrintCommand(bot, msg, match[2]))
   );
+  bot.onText(/^\/del(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, true)));
+  bot.onText(/^\/clear(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, false)));
+
   bot.onText(/^\/regles(@\w+)?$/i, command((msg) => handleRulesCommand(bot, msg)));
   bot.onText(
     /^\/regles_reset(@\w+)?$/i,
@@ -399,6 +403,8 @@ async function registerCommands(bot) {
     { command: "prix", description: "Forcer le montant, ex: /prix 7.5" },
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer (prive)" },
+    { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
+    { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
     { command: "regles", description: "Voir ce que le bot a appris" },
     ...CARRIERS.map((carrier) => ({
       command: `transporteur_${carrier.code.toLowerCase()}`,
@@ -585,6 +591,40 @@ function applyCarrier(target, code) {
   const label = code === "BJ" ? "BJ" : carrierLabel(code);
   const { learned, reclassified } = code === "BJ" ? { learned: [], reclassified: 0 } : learnFrom(batchColis, code);
   return `${count} colis passes en ${label}.` + describeLearned(learned, reclassified, code);
+}
+
+// --- Suppression d'un colis -------------------------------------------------
+// /del  : retire le colis du suivi ET efface le fichier du fil Telegram.
+// /clear: retire le colis du suivi (site, compagnies a poster, /imprime) mais
+//         laisse le fichier dans la conversation.
+function handleRemoveColis(bot, msg, alsoDeleteFile) {
+  const reply = msg.reply_to_message;
+  const commande = alsoDeleteFile ? "/del" : "/clear";
+  if (!reply) {
+    return replyEphemeral(bot, msg, `Reponds au fichier a retirer avec ${commande}.`, {}, 8000);
+  }
+
+  const colis = findColisByMessage(msg.chat.id, reply.message_id);
+  if (!colis) {
+    return replyEphemeral(bot, msg, "Ce message n'est pas un colis en attente.", {}, 8000);
+  }
+
+  const removed = deleteColis(colis.id);
+  if (!removed) return replyEphemeral(bot, msg, "Colis introuvable.", {}, 8000);
+
+  if (alsoDeleteFile) {
+    bot
+      .deleteMessage(msg.chat.id, reply.message_id)
+      .catch((err) => console.error("[bot] suppression du fichier impossible :", err.message));
+  }
+
+  refreshGroupStats();
+  replyEphemeral(
+    bot,
+    msg,
+    `Colis #${removed.id} (${removed.sender_name}, ${removed.price.toFixed(2)} EUR) retire du suivi` +
+      `${alsoDeleteFile ? " et efface du fil." : ". Le fichier reste dans la conversation."}`
+  );
 }
 
 // --- Impression ------------------------------------------------------------

@@ -298,9 +298,11 @@ function getUnclassifiedPending() {
 }
 
 // Etiquettes en attente pour un transporteur donne, dans l'ordre d'arrivee.
+// Les LIT sont imprimes a la main : ils sont exclus de /imprime.
+const PRINTABLE_SQL = "status = 'pending' AND file_id IS NOT NULL AND type != 'lit'";
+
 function getPrintableColis(carrier) {
-  const base =
-    "SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE status = 'pending' AND file_id IS NOT NULL";
+  const base = `SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE ${PRINTABLE_SQL}`;
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ORDER BY id`).all();
   if (carrier === "Inconnu") {
     return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ORDER BY id`).all();
@@ -313,7 +315,7 @@ function getPrintableSummary() {
   return db
     .prepare(
       `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count
-       FROM colis WHERE status = 'pending' AND file_id IS NOT NULL
+       FROM colis WHERE ${PRINTABLE_SQL}
        GROUP BY ${CARRIER_GROUP_SQL} ORDER BY count DESC`
     )
     .all();
@@ -507,6 +509,15 @@ function setBatchCarrier(batchId, carrier) {
   return db
     .prepare("UPDATE colis SET carrier = ? WHERE batch_id = ? AND status = 'pending'")
     .run(carrier, batchId).changes;
+}
+
+// Retire un colis du suivi (site, compagnies a poster et file d'impression).
+// Le fichier Telegram, lui, n'est pas touche ici.
+function deleteColis(id) {
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  if (!colis) return null;
+  db.prepare("DELETE FROM colis WHERE id = ?").run(id);
+  return colis;
 }
 
 // Colis d'un lot, pour apprendre des regles a partir de tout le groupe.
@@ -812,6 +823,7 @@ module.exports = {
   setBatchCarrier,
   getColisById,
   getBatchColis,
+  deleteColis,
   setBatchPrice,
   quickAddColis,
   quickRemoveColis,
