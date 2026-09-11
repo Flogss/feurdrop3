@@ -708,23 +708,7 @@ async function sendMergedLabels(bot, msg, code) {
 
   const progress = await startProgress(bot, chatId, rows.length);
 
-  const labels = [];
-  const missing = [];
-  for (const row of rows) {
-    try {
-      const link = await bot.getFileLink(row.file_id);
-      const res = await fetch(link);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      labels.push({
-        bytes: new Uint8Array(await res.arrayBuffer()),
-        kind: row.file_kind === "image" ? "image" : "pdf",
-        label: row.file_name || `colis #${row.id}`,
-      });
-    } catch (err) {
-      missing.push(`#${row.id} ${row.file_name || ""} (${err.message})`);
-    }
-    await progress.step();
-  }
+  const { labels, missing } = await downloadLabels(bot, rows, () => progress.step());
 
   await progress.finish("Assemblage du PDF...");
   const { pdf, pages, failed } = await mergeLabels(labels);
@@ -744,6 +728,43 @@ async function sendMergedLabels(bot, msg, code) {
   await bot
     .sendDocument(chatId, pdf, { caption }, { filename: `etiquettes-${name}.pdf`, contentType: "application/pdf" })
     .catch((err) => bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {}));
+}
+
+// Recupere les fichiers aupres de Telegram. Un fichier introuvable (trop
+// vieux, message supprime) n'interrompt pas le lot : il est juste signale.
+async function downloadLabels(bot, rows, onStep) {
+  const labels = [];
+  const missing = [];
+
+  for (const row of rows) {
+    try {
+      const link = await bot.getFileLink(row.file_id);
+      const res = await fetch(link);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      labels.push({
+        bytes: new Uint8Array(await res.arrayBuffer()),
+        kind: row.file_kind === "image" ? "image" : "pdf",
+        label: row.file_name || `colis #${row.id}`,
+        colisId: row.id,
+      });
+    } catch (err) {
+      missing.push({ id: row.id, label: row.file_name || `colis #${row.id}`, reason: err.message });
+    }
+    if (onStep) await onStep();
+  }
+  return { labels, missing };
+}
+
+// Utilise par le dashboard (impression automatique) : meme chaine que
+// /imprime, sans Telegram autour.
+async function buildLabelsPdf(rows) {
+  if (!botInstance) throw new Error("bot non demarre");
+  const { labels, missing } = await downloadLabels(botInstance, rows);
+  const { pdf, pages, failed } = await mergeLabels(labels);
+  const printedIds = labels
+    .filter((l) => !failed.some((f) => f.label === l.label))
+    .map((l) => l.colisId);
+  return { pdf, pages, printedIds, missing, failed };
 }
 
 // Barre de progression : un seul message, edite au fil des telechargements.
@@ -1004,4 +1025,4 @@ function refreshGroupStats() {
   }, 800);
 }
 
-module.exports = { startBot, refreshGroupStats };
+module.exports = { startBot, refreshGroupStats, buildLabelsPdf };

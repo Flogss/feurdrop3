@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const {
   db,
   DEFAULT_PRICE,
@@ -36,9 +37,15 @@ const {
   deleteSubscription,
   markPushSeen,
   getPendingSummary,
+  isAutoPrintEnabled,
+  setAutoPrintEnabled,
+  getUnprintedLabels,
+  countUnprintedLabels,
+  markPrinted,
+  getPrintToken,
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart } = require("../push");
-const { refreshGroupStats } = require("../bot");
+const { refreshGroupStats, buildLabelsPdf } = require("../bot");
 
 // SMIC horaire NET francais, sert de point de comparaison apres une tournee :
 // c'est ce qu'on touche vraiment, donc comparable a l'argent des colis.
@@ -118,6 +125,7 @@ router.get("/stats", (req, res) => {
     bjPendingValue: bjPending.value,
     bySender,
     byCarrier: getCarrierSummary(),
+    autoPrint: { enabled: isAutoPrintEnabled(), pending: countUnprintedLabels() },
     tour: {
       startedAt: getTourStart(),
       arrivedCount: arrived.count,
@@ -196,6 +204,66 @@ router.post("/tour/dismiss-summary", (req, res) => {
 router.post("/tour/end", (req, res) => {
   endTour();
   res.json({ ok: true, startedAt: null });
+});
+
+// --- Impression automatique -------------------------------------------------
+// Un agent tourne sur le Mac relie a l'imprimante : il demande regulierement
+// s'il y a du nouveau, recupere un PDF deja au format 4x6, l'imprime, puis
+// confirme. Le jeton evite que n'importe qui aspire les etiquettes.
+function checkPrintToken(req, res) {
+  const provided = String(req.get("x-print-token") || req.query.token || "");
+  const expected = getPrintToken();
+  const ok =
+    provided.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+  if (!ok) {
+    res.status(401).json({ error: "Jeton d'impression invalide" });
+    return false;
+  }
+  return true;
+}
+
+// Sondage de l'agent : volontairement minuscule, il tourne toutes les 20 s.
+router.get("/print/queue", (req, res) => {
+  if (!checkPrintToken(req, res)) return;
+  res.json({ enabled: isAutoPrintEnabled(), count: isAutoPrintEnabled() ? countUnprintedLabels() : 0 });
+});
+
+// Le PDF pret a imprimer. Les identifiants partent dans un en-tete : l'agent
+// ne confirmera qu'apres impression reussie, donc rien n'est perdu si le Mac
+// s'eteint au mauvais moment.
+router.get("/print/next", async (req, res) => {
+  if (!checkPrintToken(req, res)) return;
+  if (!isAutoPrintEnabled()) return res.status(409).json({ error: "Impression automatique desactivee" });
+
+  const rows = getUnprintedLabels();
+  if (rows.length === 0) return res.status(204).end();
+
+  try {
+    const { pdf, pages, printedIds } = await buildLabelsPdf(rows);
+    if (!pdf) return res.status(204).end();
+    res.set({
+      "Content-Type": "application/pdf",
+      "X-Drop-Colis-Ids": printedIds.join(","),
+      "X-Drop-Pages": String(pages),
+    });
+    res.send(pdf);
+  } catch (err) {
+    console.error("[print] preparation impossible :", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/print/done", (req, res) => {
+  if (!checkPrintToken(req, res)) return;
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+  res.json({ ok: true, marked: markPrinted(ids) });
+});
+
+// Interrupteur depuis le dashboard (donc depuis le telephone).
+router.post("/print/auto", (req, res) => {
+  const enabled = setAutoPrintEnabled(Boolean(req.body.enabled));
+  res.json({ ok: true, enabled, pending: countUnprintedLabels() });
 });
 
 router.get("/colis", (req, res) => {

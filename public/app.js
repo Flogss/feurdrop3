@@ -157,6 +157,7 @@ async function loadStats(animate, force) {
   document.getElementById("stat-bj-value").textContent = `≈ ${euroCompact(s.bjPendingValue)}`;
   bagSummary = { count: s.pendingCount, value: s.pendingValue };
   renderTour(s.tour || {});
+  renderAutoPrint(s.autoPrint || {});
 
   if (!force && !hasChanged("senders", s.bySender)) return;
 
@@ -192,6 +193,44 @@ async function loadStats(animate, force) {
   renderCarriers(s.byCarrier || []);
   renderDonut(s.bySender, animate);
 }
+
+// Impression automatique : l'interrupteur est cote serveur, donc pilotable
+// depuis le telephone meme si le Mac est ferme.
+let autoPrintEnabled = false;
+
+function renderAutoPrint(state) {
+  const badge = document.getElementById("autoprint-state");
+  const btn = document.getElementById("autoprint-toggle");
+  const hint = document.getElementById("autoprint-hint");
+  if (!badge || !btn) return;
+
+  autoPrintEnabled = Boolean(state.enabled);
+  badge.textContent = autoPrintEnabled ? "activée" : "désactivée";
+  badge.className = `push-state ${autoPrintEnabled ? "push-on" : "push-off"}`;
+  btn.textContent = autoPrintEnabled ? "Désactiver" : "Activer";
+  btn.className = autoPrintEnabled ? "btn btn-ghost" : "btn btn-primary";
+  hint.textContent = autoPrintEnabled
+    ? `${state.pending || 0} étiquette${(state.pending || 0) > 1 ? "s" : ""} en attente d'impression. Les LIT restent à faire à la main.`
+    : "L'agent installé sur le Mac imprime les étiquettes dès qu'elles arrivent. Les LIT ne sont jamais imprimés automatiquement.";
+}
+
+document.getElementById("autoprint-toggle").addEventListener("click", async () => {
+  const next = !autoPrintEnabled;
+  // activer ne doit pas vider un stock entier d'un coup : le serveur considere
+  // tout ce qui est deja en attente comme deja imprime
+  if (next && !confirm("Activer l'impression automatique ?\nLes colis déjà en attente ne seront pas imprimés, seulement les prochains.")) return;
+  try {
+    await fetchJSON("/api/print/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    renderCache.clear();
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 // Tournee : une fois parti poster, tout ce qui est "a dropper" ne concerne
 // plus que le sac. Les colis recus entre-temps attendent la prochaine sortie.

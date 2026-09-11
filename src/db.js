@@ -115,6 +115,9 @@ if (!colisColumns.includes("file_name")) db.exec("ALTER TABLE colis ADD COLUMN f
 if (!colisColumns.includes("caption")) db.exec("ALTER TABLE colis ADD COLUMN caption TEXT");
 if (!colisColumns.includes("file_id")) db.exec("ALTER TABLE colis ADD COLUMN file_id TEXT");
 if (!colisColumns.includes("file_kind")) db.exec("ALTER TABLE colis ADD COLUMN file_kind TEXT");
+// date d'impression automatique : une etiquette deja sortie de l'imprimante ne
+// doit jamais ressortir toute seule
+if (!colisColumns.includes("printed_at")) db.exec("ALTER TABLE colis ADD COLUMN printed_at TEXT");
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -511,6 +514,67 @@ function setBatchCarrier(batchId, carrier) {
     .run(carrier, batchId).changes;
 }
 
+// --- Impression automatique -------------------------------------------------
+// L'agent installe sur le Mac vient chercher ici ce qui n'est pas encore
+// sorti de l'imprimante. Les LIT en sont exclus comme pour /imprime : ils se
+// font a la main.
+const AUTOPRINT_SQL = `${PRINTABLE_SQL} AND printed_at IS NULL`;
+
+function isAutoPrintEnabled() {
+  return getSetting("auto_print", "0") === "1";
+}
+
+// En activant, on considere tout ce qui est deja en attente comme deja
+// imprime : sinon la premiere execution sortirait tout le stock d'un coup.
+function setAutoPrintEnabled(enabled) {
+  if (enabled && !isAutoPrintEnabled()) markPendingAsPrinted();
+  setSetting("auto_print", enabled ? "1" : "0");
+  return isAutoPrintEnabled();
+}
+
+function markPendingAsPrinted() {
+  return db
+    .prepare(`UPDATE colis SET printed_at = datetime('now') WHERE ${AUTOPRINT_SQL}`)
+    .run().changes;
+}
+
+// Triees par transporteur : meme en impression continue, la pile reste
+// groupee par compagnie, ce qui est l'ordre de la tournee.
+function getUnprintedLabels(limit = 40) {
+  return db
+    .prepare(
+      `SELECT id, sender_name, file_id, file_kind, file_name, carrier, type
+       FROM colis WHERE ${AUTOPRINT_SQL}
+       ORDER BY ${CARRIER_GROUP_SQL}, id LIMIT ?`
+    )
+    .all(limit);
+}
+
+function countUnprintedLabels() {
+  return db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${AUTOPRINT_SQL}`).get().c;
+}
+
+function markPrinted(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return 0;
+  const placeholders = ids.map(() => "?").join(",");
+  return db
+    .prepare(`UPDATE colis SET printed_at = datetime('now') WHERE id IN (${placeholders})`)
+    .run(...ids).changes;
+}
+
+// Jeton partage avec l'agent d'impression. Genere au premier demarrage et
+// garde en base, comme les cles VAPID.
+function getPrintToken() {
+  const fromEnv = process.env.PRINT_TOKEN;
+  if (fromEnv) return fromEnv;
+  let token = getSetting("print_token", null);
+  if (!token) {
+    token = require("crypto").randomBytes(24).toString("hex");
+    setSetting("print_token", token);
+  }
+  return token;
+}
+
 // Retire un colis du suivi (site, compagnies a poster et file d'impression).
 // Le fichier Telegram, lui, n'est pas touche ici.
 function deleteColis(id) {
@@ -820,6 +884,12 @@ module.exports = {
   getUnclassifiedPending,
   getPrintableColis,
   getPrintableSummary,
+  isAutoPrintEnabled,
+  setAutoPrintEnabled,
+  getUnprintedLabels,
+  countUnprintedLabels,
+  markPrinted,
+  getPrintToken,
   setBatchCarrier,
   getColisById,
   getBatchColis,
