@@ -17,9 +17,9 @@ if [ ! -f "$HOME/.drop-print.json" ]; then
   cat > "$HOME/.drop-print.json" <<JSON
 {
   "server": "https://feurdrop3-production.up.railway.app",
-  "token": "A_REMPLACER",
-  "printer": null,
-  "pollSeconds": 20
+  "token": "cb3786003c1fe8e9ba9cb2dacd5583c0acbfae238def0ab9",
+  "printer": "ITPP130_Printer_0",
+  "pollSeconds": 10
 }
 JSON
   echo "Configuration creee : $HOME/.drop-print.json"

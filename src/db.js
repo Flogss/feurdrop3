@@ -304,8 +304,17 @@ function getUnclassifiedPending() {
 // Les LIT sont imprimes a la main : ils sont exclus de /imprime.
 const PRINTABLE_SQL = "status = 'pending' AND file_id IS NOT NULL AND type != 'lit'";
 
-function getPrintableColis(carrier) {
-  const base = `SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE ${PRINTABLE_SQL}`;
+// Par defaut on ne propose que ce qui n'est jamais sorti de l'imprimante :
+// apres avoir imprime 10 MR, en recevoir 2 et faire "tout imprimer" ne doit
+// ressortir que les 2. `includePrinted` sert au bouton de reimpression.
+function printableScope(includePrinted) {
+  return includePrinted ? PRINTABLE_SQL : `${PRINTABLE_SQL} AND printed_at IS NULL`;
+}
+
+function getPrintableColis(carrier, { includePrinted = false } = {}) {
+  const base = `SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE ${printableScope(
+    includePrinted
+  )}`;
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ORDER BY id`).all();
   if (carrier === "Inconnu") {
     return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ORDER BY id`).all();
@@ -313,12 +322,20 @@ function getPrintableColis(carrier) {
   return db.prepare(`${base} AND type != 'bj' AND carrier = ? ORDER BY id`).all(carrier);
 }
 
+// Combien d'etiquettes en attente ont deja ete imprimees une fois : sert a
+// proposer (ou non) la reimpression.
+function countAlreadyPrinted() {
+  return db
+    .prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${PRINTABLE_SQL} AND printed_at IS NOT NULL`)
+    .get().c;
+}
+
 // Repartition des etiquettes imprimables (celles dont on a encore le fichier).
-function getPrintableSummary() {
+function getPrintableSummary({ includePrinted = false } = {}) {
   return db
     .prepare(
       `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count
-       FROM colis WHERE ${PRINTABLE_SQL}
+       FROM colis WHERE ${printableScope(includePrinted)}
        GROUP BY ${CARRIER_GROUP_SQL} ORDER BY count DESC`
     )
     .all();
@@ -884,6 +901,7 @@ module.exports = {
   getUnclassifiedPending,
   getPrintableColis,
   getPrintableSummary,
+  countAlreadyPrinted,
   isAutoPrintEnabled,
   setAutoPrintEnabled,
   getUnprintedLabels,

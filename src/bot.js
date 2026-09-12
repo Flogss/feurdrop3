@@ -19,6 +19,8 @@ const {
   getUnclassifiedPending,
   getPrintableColis,
   getPrintableSummary,
+  countAlreadyPrinted,
+  markPrinted,
   getColisById,
   getBatchColis,
   deleteColis,
@@ -368,7 +370,7 @@ function startBot() {
   );
 
   bot.on("callback_query", (query) => {
-    if ((query.data || "").startsWith("pr:")) return handlePrintCallback(bot, query);
+    if (/^pra?:|^prmenu:/.test(query.data || "")) return handlePrintCallback(bot, query);
     return handleCarrierCallback(bot, query);
   });
 
@@ -649,33 +651,60 @@ function handlePrintCommand(bot, msg, rawName) {
     );
   }
 
-  const summary = getPrintableSummary().filter((row) => row.count > 0);
-  if (summary.length === 0) {
-    return replyEphemeral(bot, msg, "Aucune etiquette en attente a imprimer.", {}, 8000);
-  }
-
   if (rawName && rawName.trim()) {
     const carrier = parseCarrier(rawName);
     if (!carrier) {
       return replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
     }
-    return sendMergedLabels(bot, msg, carrier.code);
+    return sendMergedLabels(bot, msg, carrier.code, false);
   }
 
+  sendPrintMenu(bot, msg.chat.id, false);
+}
+
+// Menu des etiquettes a imprimer. Par defaut il ne montre que celles qui ne
+// sont jamais sorties de l'imprimante : imprimer 10 MR, en recevoir 2 puis
+// faire "Tout" ne doit ressortir que les 2. Le bouton de reglage donne acces
+// aux deja imprimees pour les cas de bourrage ou d'etiquette perdue.
+function sendPrintMenu(bot, chatId, includePrinted) {
+  const summary = getPrintableSummary({ includePrinted }).filter((row) => row.count > 0);
+  const alreadyPrinted = countAlreadyPrinted();
+
+  if (summary.length === 0) {
+    const text = includePrinted
+      ? "Aucune etiquette en attente."
+      : alreadyPrinted > 0
+        ? `Rien de nouveau a imprimer.\n${alreadyPrinted} etiquette(s) en attente ont deja ete imprimees.`
+        : "Aucune etiquette en attente a imprimer.";
+    const opts =
+      !includePrinted && alreadyPrinted > 0
+        ? {
+            reply_markup: {
+              inline_keyboard: [[{ text: `⚙️ Reimprimer (${alreadyPrinted})`, callback_data: "prmenu:all" }]],
+            },
+          }
+        : {};
+    return bot.sendMessage(chatId, text, opts).catch((err) => console.error("[bot] menu impression", err.message));
+  }
+
+  const prefix = includePrinted ? "pra" : "pr";
   const keyboard = [];
   for (let i = 0; i < summary.length; i += 2) {
     keyboard.push(
       summary.slice(i, i + 2).map((row) => ({
         text: `${carrierLabel(row.carrier)} (${row.count})`,
-        callback_data: `pr:${row.carrier}`,
+        callback_data: `${prefix}:${row.carrier}`,
       }))
     );
   }
   const total = summary.reduce((sum, row) => sum + row.count, 0);
-  keyboard.push([{ text: `Tout (${total})`, callback_data: "pr:*" }]);
+  keyboard.push([{ text: `Tout (${total})`, callback_data: `${prefix}:*` }]);
+  if (!includePrinted && alreadyPrinted > 0) {
+    keyboard.push([{ text: `⚙️ Reimprimer (${alreadyPrinted} deja sorties)`, callback_data: "prmenu:all" }]);
+  }
 
   bot
-    .sendMessage(msg.chat.id, "Quelles etiquettes imprimer ?", {
+    .sendMessage(chatId, includePrinted ? "Reimprimer quoi ?" : "Quelles nouvelles etiquettes imprimer ?", {
       reply_markup: { inline_keyboard: keyboard },
     })
     .catch((err) => console.error("[bot] clavier impression", err.message));
@@ -687,20 +716,29 @@ function handlePrintCallback(bot, query) {
     return bot.answerCallbackQuery(query.id, { text: "Pas ici." }).catch(() => {});
   }
 
-  const code = (query.data || "").slice(3);
-  bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
+  const data = query.data || "";
   bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
-  sendMergedLabels(bot, msg, code);
+
+  if (data === "prmenu:all") {
+    bot.answerCallbackQuery(query.id).catch(() => {});
+    return sendPrintMenu(bot, query.message.chat.id, true);
+  }
+
+  const includePrinted = data.startsWith("pra:");
+  const code = data.slice(data.indexOf(":") + 1);
+  bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
+  sendMergedLabels(bot, msg, code, includePrinted);
 }
 
 // Telecharge les etiquettes une par une (Telegram limite les rafales), les
 // assemble, puis renvoie le PDF pret a imprimer.
-async function sendMergedLabels(bot, msg, code) {
+async function sendMergedLabels(bot, msg, code, includePrinted = false) {
   const chatId = msg.chat.id;
+  const scope = { includePrinted };
   const rows =
     code === "*"
-      ? getPrintableSummary().flatMap((row) => getPrintableColis(row.carrier))
-      : getPrintableColis(code);
+      ? getPrintableSummary(scope).flatMap((row) => getPrintableColis(row.carrier, scope))
+      : getPrintableColis(code, scope);
 
   if (rows.length === 0) {
     return replyEphemeral(bot, msg, `Aucune etiquette ${code === "*" ? "" : carrierLabel(code)} a imprimer.`, {}, 8000);
@@ -725,9 +763,19 @@ async function sendMergedLabels(bot, msg, code) {
     (missing.length > 0 ? `\n⚠️ ${missing.length} fichier(s) introuvable(s) sur Telegram.` : "") +
     (failed.length > 0 ? `\n⚠️ ${failed.length} fichier(s) illisible(s).` : "");
 
-  await bot
-    .sendDocument(chatId, pdf, { caption }, { filename: `etiquettes-${name}.pdf`, contentType: "application/pdf" })
-    .catch((err) => bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {}));
+  try {
+    await bot.sendDocument(
+      chatId,
+      pdf,
+      { caption },
+      { filename: `etiquettes-${name}.pdf`, contentType: "application/pdf" }
+    );
+    // le PDF est parti : ces etiquettes ne reviendront plus dans le menu, ni
+    // dans la file de l'impression automatique
+    markPrinted(labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId));
+  } catch (err) {
+    bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {});
+  }
 }
 
 // Recupere les fichiers aupres de Telegram. Un fichier introuvable (trop
