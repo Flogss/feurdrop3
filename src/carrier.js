@@ -15,6 +15,7 @@ const CARRIERS = [
   { code: "DPD", label: "DPD", aliases: ["dpd"] },
   { code: "GLS", label: "GLS", aliases: ["gls"] },
   { code: "DHL", label: "DHL", aliases: ["dhl"] },
+  { code: "FEDEX", label: "FedEx", aliases: ["fedex", "fdx", "federalexpress"] },
   { code: "BJ", label: "BJ", aliases: ["bj"] },
 ];
 
@@ -158,6 +159,10 @@ function detectCarrier(fileName, caption, learnedRules) {
   if (/MONDIAL RELAY|\bMR\b/.test(combined)) return "MR";
   if (/\bGLS\b/.test(combined)) return "GLS";
   if (/\bDHL\b/.test(combined)) return "DHL";
+  // FedEx n'est reconnu que par son nom : ses numeros de suivi a 12 chiffres
+  // ont exactement la meme forme que ceux de Mondial Relay. Corriger un colis
+  // avec /transporteur apprend la difference au cas par cas.
+  if (/FEDEX|FED EX|FEDERAL EXPRESS/.test(combined)) return "FEDEX";
 
   // 2. Motif de numero de suivi, cherche dans le nom ET dans la description.
   const found = [...tokensOf(fileName), ...tokensOf(caption)].map(carrierFromToken).filter(Boolean);

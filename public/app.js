@@ -13,7 +13,8 @@ const CARRIER_LABELS = {
   DPD: "DPD",
   GLS: "GLS",
   DHL: "DHL",
-  BJ: "BJ",
+  FEDEX: "FedEx",
+  BJ: "BJ (boîtes jaunes)",
   Inconnu: "⚠️ Non reconnu",
 };
 
@@ -1474,7 +1475,7 @@ setInterval(refreshAll, 5000);
 // inconnus", jamais en vert.
 
 const TRUST_DOT = { verified: "🟢", unverified: "🟠", rejected: "🔴" };
-const STATE_DOT = { open: "🟢", closed: "🔴", unknown: "⚪" };
+const STATE_DOT = { open: "🟢", closed: "🔴", late: "🟠", unknown: "⚪" };
 
 const planState = {
   start: null,
@@ -1758,14 +1759,23 @@ document.getElementById("plan-stops").addEventListener("click", async (e) => {
   }
 });
 
+// Nom lisible de chaque source de points.
+const SOURCE_LABELS = {
+  "mr-idf": "Mondial Relay — ta liste",
+  laposte: "Bureaux et relais La Poste — officiel",
+  boitejaune: "Boîtes aux lettres — officiel",
+  fedex: "Points FedEx",
+  osm: "OpenStreetMap — à vérifier",
+};
+
 async function loadPlanPoints() {
-  const { points, counts } = await fetchJSON("/api/plan/points");
+  const { points, counts, bySource } = await fetchJSON("/api/plan/points");
   document.getElementById("plan-points-count").textContent =
     `${counts.verified} 🟢 · ${counts.unverified} 🟠${counts.rejected ? ` · ${counts.rejected} 🔴` : ""}`;
 
   const box = document.getElementById("plan-points");
-  if (points.length === 0) {
-    box.innerHTML = `<div class="empty-row">Aucun point enregistré. Lance un calcul : les bureaux de poste du secteur se chargent tout seuls.</div>`;
+  if (counts.total === 0) {
+    box.innerHTML = `<div class="empty-row">Aucun point enregistré. Lance un calcul : les bureaux de poste et les boîtes aux lettres du secteur se chargent tout seuls.</div>`;
     return;
   }
 
@@ -1773,8 +1783,7 @@ async function loadPlanPoints() {
   // a corriger. Les bureaux de poste charges tout seuls se comptent, ils ne se
   // listent pas -- il y en a des dizaines, et ils reviendraient au prochain
   // calcul meme si on les supprimait.
-  const mine = points.filter((p) => p.source === "manuel" || p.source === "import");
-  const auto = points.length - mine.length;
+  const mine = points;
 
   const rows = mine
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -1791,16 +1800,21 @@ async function loadPlanPoints() {
     )
     .join("");
 
-  const autoRow = auto
-    ? `<div class="row row-off">
+  // les autres points ne se listent pas -- il y en a plus d'un millier -- mais
+  // on dit toujours d'ou ils viennent
+  const sources = (bySource || [])
+    .filter((s) => s.source !== "manuel" && s.source !== "import")
+    .map(
+      (s) => `<div class="row row-off">
          <div class="row-main">
-           <div class="row-title">${auto} point${auto > 1 ? "s" : ""} charg\u00e9${auto > 1 ? "s" : ""} automatiquement</div>
-           <div class="row-sub">R\u00e9seau La Poste et OpenStreetMap, autour de tes d\u00e9parts</div>
+           <div class="row-title">${s.count} point${s.count > 1 ? "s" : ""}</div>
+           <div class="row-sub">${escapeHtml(SOURCE_LABELS[s.source] || s.source)}</div>
          </div>
        </div>`
-    : "";
+    )
+    .join("");
 
-  box.innerHTML = rows + autoRow || `<div class="empty-row">Aucun point pour l'instant.</div>`;
+  box.innerHTML = rows + sources || `<div class="empty-row">Aucun point pour l'instant.</div>`;
 }
 
 document.getElementById("plan-points").addEventListener("click", async (e) => {

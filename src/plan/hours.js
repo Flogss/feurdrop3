@@ -112,6 +112,15 @@ function statusAt(hours, minutes, carrier) {
   if (parsed.length === 0) return { state: "closed", label: "ferme ce jour-la" };
 
   const limit = deadline(hours, carrier);
+
+  // Boite aux lettres : l'echeance est une levee, pas une fermeture. Arriver
+  // apres ne ferme aucune porte, ca decale le depart d'un jour.
+  if (hours.soft) {
+    if (limit === null || limit === undefined) return { state: "unknown", label: "levee inconnue" };
+    return minutes <= limit
+      ? { state: "open", label: `levee a ${toClock(limit)}`, until: toClock(limit) }
+      : { state: "late", label: `levee passee (${toClock(limit)}) — depart demain` };
+  }
   const open = parsed.find((r) => minutes >= r.start && minutes < r.end);
   const cutoff = toMinutes(carrier === "CHRONO" ? hours.cutoffChrono : hours.cutoffColis);
 

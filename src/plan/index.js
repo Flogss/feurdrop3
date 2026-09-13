@@ -1,6 +1,8 @@
 const store = require("./store");
 const laposte = require("./sources/laposte");
 const osm = require("./sources/osm");
+const boites = require("./sources/boitesjaunes");
+const fedex = require("./sources/fedex");
 const { statusAt, deadline, toMinutes, toClock } = require("./hours");
 const { haversine, estimateMatrix, optimize } = require("./route");
 
@@ -73,6 +75,39 @@ async function refreshOsm(start, day) {
   }
 }
 
+// Boites aux lettres de rue autour du depart, avec leur heure de levee.
+// Meme statut que les bureaux de poste : c'est le referentiel de La Poste.
+async function refreshBoitesJaunes(start, day) {
+  const found = await boites.searchPoints({ ...start, radius: 1500, day });
+  for (const point of found) {
+    const stored = store.upsertPoint({ ...point, trust: store.TRUST.verified });
+    if (point.hours) store.saveHours(stored.id, day, point.hours);
+  }
+  return found.length;
+}
+
+// Points de depot FedEx. Source eteinte tant que la cle n'est pas posee : on
+// le signale au lieu de faire croire qu'il n'y a rien.
+async function refreshFedex(start, day) {
+  if (!fedex.isConfigured()) return null;
+  const { cell, fresh } = store.sweptRecently("fedex", start.lat, start.lng);
+  if (fresh) return 0;
+  store.markSwept(cell, 1);
+
+  const found = await fedex.searchPoints({
+    address: start.street || start.label,
+    postalCode: start.postcode,
+    city: start.city,
+    day,
+  });
+  for (const point of found) {
+    const stored = store.upsertPoint({ ...point, trust: store.TRUST.verified });
+    if (point.hours) store.saveHours(stored.id, day, point.hours);
+  }
+  store.markSwept(cell, 24);
+  return found.length;
+}
+
 // Points utilisables pour un transporteur, du plus proche au plus loin.
 //
 // Deux filtres, dans cet ordre :
@@ -91,6 +126,9 @@ function candidatesFor(carrier, start, day, departAt, excluded = new Set()) {
       hours: store.getHours(point.id, day),
     }))
     .filter((point) => {
+      // une levee ratee n'empeche pas de poster : on ne retire jamais une
+      // boite aux lettres du choix
+      if (point.hours && point.hours.soft) return true;
       const limit = deadline(point.hours, carrier);
       return limit === null || limit === undefined || limit > departAt;
     })
@@ -164,6 +202,12 @@ function stopDeadline(stop) {
   return limits.length > 0 ? Math.min(...limits) : null;
 }
 
+// Un arret "souple" : une boite aux lettres, dont la levee se rate sans
+// consequence autre qu'un jour de plus.
+function isSoft(stop) {
+  return Boolean(stop.point.hours && stop.point.hours.soft);
+}
+
 async function buildPlan({ start, needs, day = today(), departAt = null, refresh = true, useOsm = true }) {
   if (!start || typeof start.lat !== "number" || typeof start.lng !== "number") {
     throw new Error("position de depart manquante");
@@ -171,15 +215,34 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
   const wanted = (needs || []).filter((n) => n.carrier && n.count > 0);
   if (wanted.length === 0) throw new Error("aucun colis a deposer");
 
-  const sources = { laposte: 0, osm: 0, pending: false, errors: [] };
+  const sources = { laposte: 0, boites: 0, fedex: 0, osm: 0, pending: false, errors: [] };
   if (refresh) {
     // La Poste repond en une seconde : on l'attend. Overpass met parfois une
     // minute ou ne repond pas du tout ; on ne fait pas patienter quelqu'un qui
     // a des colis dans les bras pour une source de secours. Elle se met a jour
     // en tache de fond et servira au calcul suivant.
-    await refreshLaPoste(start, day)
-      .then((n) => (sources.laposte = n))
-      .catch((err) => sources.errors.push(`La Poste : ${err.message}`));
+    const asks = (code) => wanted.some((n) => n.carrier === code);
+
+    await Promise.all([
+      asks("LP") || asks("CHRONO")
+        ? refreshLaPoste(start, day)
+            .then((n) => (sources.laposte = n))
+            .catch((err) => sources.errors.push(`La Poste : ${err.message}`))
+        : Promise.resolve(),
+      asks("BJ")
+        ? refreshBoitesJaunes(start, day)
+            .then((n) => (sources.boites = n))
+            .catch((err) => sources.errors.push(`Boites aux lettres : ${err.message}`))
+        : Promise.resolve(),
+      asks("FEDEX")
+        ? refreshFedex(start, day)
+            .then((n) => {
+              if (n === null) sources.errors.push("FedEx : cle API non configuree");
+              else sources.fedex = n;
+            })
+            .catch((err) => sources.errors.push(`FedEx : ${err.message}`))
+        : Promise.resolve(),
+    ]);
 
     if (useOsm && !store.sweptRecently("osm", start.lat, start.lng).fresh) {
       sources.pending = true;
@@ -201,7 +264,11 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
       wanted.map((n) => [n.carrier, candidatesFor(n.carrier, start, day, depart, excluded)])
     );
     const { stops, unserved } = chooseStops(wanted, pools);
-    const withDeadline = stops.map((stop) => ({ ...stop, deadline: stopDeadline(stop) }));
+    const withDeadline = stops.map((stop) => ({
+      ...stop,
+      deadline: stopDeadline(stop),
+      soft: isSoft(stop),
+    }));
     const matrix = estimateMatrix([start, ...withDeadline.map((s) => s.point)]);
     const run = optimize({ stops: withDeadline, matrix, departAt: depart });
 
@@ -214,6 +281,7 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
       .map((index, rank) => ({ index, arrival: run.arrivals[rank] }))
       .filter(({ index, arrival }) => {
         const stop = withDeadline[index];
+        if (stop.soft) return false; // une levee ratee ne justifie pas de changer de boite
         return stop.deadline !== null && stop.deadline !== undefined && arrival > stop.deadline;
       });
     if (late.length === 0) break;
@@ -234,7 +302,7 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
       arrival: toClock(Math.round(arrival)),
       arrivalMinutes: Math.round(arrival),
       status,
-      late: stop.deadline !== null && arrival > stop.deadline,
+      late: !stop.soft && stop.deadline !== null && arrival > stop.deadline,
       legMeters: matrix.meters[rank === 0 ? 0 : run.order[rank - 1] + 1][index + 1],
     };
   });
@@ -296,6 +364,8 @@ function mapsLinks(start, stops) {
 module.exports = {
   buildPlan,
   refreshLaPoste,
+  refreshBoitesJaunes,
+  refreshFedex,
   refreshOsm,
   candidatesFor,
   today,

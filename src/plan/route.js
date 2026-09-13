@@ -48,6 +48,7 @@ function simulate(order, matrix, stops, departAt, serviceMinutes) {
   let from = 0;
   let meters = 0;
   let late = 0;
+  let softLate = 0;
   const arrivals = [];
 
   for (const index of order) {
@@ -57,19 +58,27 @@ function simulate(order, matrix, stops, departAt, serviceMinutes) {
     arrivals.push(clock);
 
     const stop = stops[index];
-    if (stop.deadline !== null && stop.deadline !== undefined && clock > stop.deadline) late += 1;
+    // une echeance "souple" (levee d'une boite aux lettres) se rate sans
+    // gravite : on la compte a part et elle ne sert qu'a departager
+    if (stop.deadline !== null && stop.deadline !== undefined && clock > stop.deadline) {
+      if (stop.soft) softLate += 1;
+      else late += 1;
+    }
     // on n'attend pas une ouverture : dans la journee de travail, arriver
     // avant l'ouverture d'un point veut dire qu'on l'a mal place dans l'ordre
     clock += serviceMinutes;
     from = index + 1;
   }
 
-  return { arrivals, meters, minutes: clock - departAt, late };
+  return { arrivals, meters, minutes: clock - departAt, late, softLate };
 }
 
+// Un trajet est meilleur qu'un autre s'il rate moins de fermetures ; a egalite,
+// s'il rate moins de levees ; a egalite encore, s'il roule moins.
 function better(a, b) {
   if (!a) return true;
   if (b.late !== a.late) return b.late < a.late;
+  if (b.softLate !== a.softLate) return b.softLate < a.softLate;
   return b.meters < a.meters - 1;
 }
 
@@ -91,7 +100,9 @@ const EXACT_LIMIT = 8;
 
 function optimize({ stops, matrix, departAt = 9 * 60, serviceMinutes = 4 }) {
   const indexes = stops.map((_, i) => i);
-  if (indexes.length === 0) return { order: [], arrivals: [], meters: 0, minutes: 0, late: 0 };
+  if (indexes.length === 0) {
+    return { order: [], arrivals: [], meters: 0, minutes: 0, late: 0, softLate: 0 };
+  }
 
   let best = null;
   let bestOrder = null;

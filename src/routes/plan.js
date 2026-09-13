@@ -2,14 +2,19 @@ const express = require("express");
 const { getCarrierSummary } = require("../db");
 const { carrierLabel, CARRIERS } = require("../carrier");
 const plan = require("../plan");
+const { loadSeeds } = require("../plan/seed");
 const store = require("../plan/store");
 const geocode = require("../plan/geocode");
 
 const router = express.Router();
 
-// "BJ" est un type de colis, pas un reseau de depot ; "Inconnu" attend encore
-// son transporteur. Ni l'un ni l'autre ne peut etre route vers un point relais.
-const NOT_ROUTABLE = new Set(["BJ", "Inconnu"]);
+// listes livrees avec le code (Mondial Relay), chargees au premier demarrage
+loadSeeds();
+
+// "Inconnu" attend encore son transporteur : impossible de lui trouver un
+// point de depot. Les BJ, eux, sont routables : ce sont des lettres, et leur
+// point de depot est une boite aux lettres de rue.
+const NOT_ROUTABLE = new Set(["Inconnu"]);
 const KNOWN = new Set(CARRIERS.map((c) => c.code));
 
 function fail(res, err, status = 400) {
@@ -57,8 +62,12 @@ router.get("/reverse", async (req, res) => {
 
 router.get("/points", (req, res) => {
   const { carrier } = req.query;
-  const points = carrier ? store.pointsForCarrier(carrier) : store.allPoints();
-  res.json({ points, counts: store.countPoints() });
+  // la liste complete fait plus d'un millier de points : l'interface n'a
+  // besoin en detail que de ceux ajoutes a la main, le reste se compte
+  const points = carrier
+    ? store.pointsForCarrier(carrier)
+    : store.allPoints().filter((p) => p.source === "manuel" || p.source === "import");
+  res.json({ points, counts: store.countPoints(), bySource: store.sourceCounts() });
 });
 
 // Ajout manuel. Sans coordonnees, on geocode l'adresse : un point sans

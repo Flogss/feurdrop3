@@ -70,6 +70,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_relay_networks ON relay_networks(carrier);
 `);
 
+// Une boite aux lettres n'a pas d'horaire d'ouverture : elle a une heure de
+// LEVEE. Passer apres n'empeche pas de poster, la lettre part le lendemain.
+// Cette nuance merite sa colonne : sans elle on afficherait "ferme" en rouge
+// devant une boite parfaitement utilisable.
+const hoursColumns = db.prepare("PRAGMA table_info(relay_hours)").all().map((c) => c.name);
+if (!hoursColumns.includes("soft")) {
+  db.exec("ALTER TABLE relay_hours ADD COLUMN soft INTEGER NOT NULL DEFAULT 0");
+}
+
 const TRUST = { verified: "verified", unverified: "unverified", rejected: "rejected" };
 
 // --- Lecture ----------------------------------------------------------------
@@ -107,6 +116,18 @@ function pointsForCarrier(carrier) {
 
 function allPoints() {
   return db.prepare("SELECT * FROM relay_points ORDER BY name").all().map(hydrate);
+}
+
+function countBySource(source) {
+  return db.prepare("SELECT COUNT(*) AS n FROM relay_points WHERE source = ?").get(source).n;
+}
+
+// Repartition par source, pour que l'interface puisse dire d'ou vient chaque
+// point plutot que de tout melanger.
+function sourceCounts() {
+  return db
+    .prepare("SELECT source, COUNT(*) AS count FROM relay_points GROUP BY source ORDER BY count DESC")
+    .all();
 }
 
 function countPoints() {
@@ -229,18 +250,19 @@ function lastVisits(pointId, limit = 5) {
 
 function saveHours(pointId, day, hours) {
   db.prepare(
-    `INSERT INTO relay_hours (point_id, day, ranges, cutoff_colis, cutoff_chrono, source, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO relay_hours (point_id, day, ranges, cutoff_colis, cutoff_chrono, soft, source, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(point_id, day) DO UPDATE SET
        ranges = excluded.ranges, cutoff_colis = excluded.cutoff_colis,
-       cutoff_chrono = excluded.cutoff_chrono, source = excluded.source,
-       fetched_at = excluded.fetched_at`
+       cutoff_chrono = excluded.cutoff_chrono, soft = excluded.soft,
+       source = excluded.source, fetched_at = excluded.fetched_at`
   ).run(
     pointId,
     day,
     hours.ranges ? JSON.stringify(hours.ranges) : null,
     hours.cutoffColis || null,
     hours.cutoffChrono || null,
+    hours.soft ? 1 : 0,
     hours.source || null
   );
 }
@@ -254,6 +276,7 @@ function getHours(pointId, day) {
     ranges: row.ranges ? JSON.parse(row.ranges) : null,
     cutoffColis: row.cutoff_colis,
     cutoffChrono: row.cutoff_chrono,
+    soft: Boolean(row.soft),
     source: row.source,
     fetchedAt: row.fetched_at,
   };
@@ -288,6 +311,8 @@ module.exports = {
   pointsForCarrier,
   allPoints,
   countPoints,
+  countBySource,
+  sourceCounts,
   upsertPoint,
   addNetworks,
   setTrust,
