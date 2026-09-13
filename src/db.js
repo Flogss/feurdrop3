@@ -349,9 +349,8 @@ function printableScope(scope) {
 }
 
 function getPrintableColis(carrier, { scope = "new" } = {}) {
-  const base = `SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE ${printableScope(
-    scope
-  )}`;
+  const base = `SELECT id, sender_name, file_id, file_kind, file_name, ${CARRIER_GROUP_SQL} AS carrier_group
+                FROM colis WHERE ${printableScope(scope)}`;
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ORDER BY id`).all();
   if (carrier === "Inconnu") {
     return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ORDER BY id`).all();
@@ -645,7 +644,7 @@ function getPrintJobs(limit = 8) {
 function getPrintJobColis(job) {
   return db
     .prepare(
-      `SELECT id, sender_name, file_id, file_kind, file_name
+      `SELECT id, sender_name, file_id, file_kind, file_name, ${CARRIER_GROUP_SQL} AS carrier_group
        FROM colis WHERE ${PRINTABLE_SQL} AND print_job = ? ORDER BY id`
     )
     .all(job);

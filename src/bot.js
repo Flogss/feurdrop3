@@ -35,7 +35,7 @@ const {
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
-const { mergeLabels, LABEL_WIDTH, LABEL_HEIGHT } = require("./printer");
+const { mergeLabels } = require("./printer");
 const { notifyNewColis } = require("./push");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
@@ -713,9 +713,7 @@ function sendPrintMenu(bot, chatId) {
   const lines = summary.map(
     (row) => `${carrierDot(row.carrier)} <b>${carrierLabel(row.carrier)}</b> — ${row.count}`
   );
-  const text =
-    `🖨 <b>Nouvelles etiquettes</b>\n\n${lines.join("\n")}\n\n` +
-    `<i>${total} au total · format 10x15, pret a imprimer</i>`;
+  const text = `<b>${total} etiquette${total > 1 ? "s" : ""}</b>\n\n${lines.join("\n")}`;
 
   const keyboard = [];
   for (let i = 0; i < summary.length; i += 2) {
@@ -866,9 +864,9 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
     : code === "*"
       ? "toutes"
       : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
+  const printedIds = labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId);
   const caption =
-    `${pages} etiquette${pages > 1 ? "s" : ""} — ${job ? "reimpression" : carrierPrintTitle(code)}\n` +
-    `Format ${(LABEL_WIDTH / 72 * 25.4).toFixed(0)}x${(LABEL_HEIGHT / 72 * 25.4).toFixed(0)} mm (4x6"), imprime en "taille reelle".` +
+    captionFor(rows, printedIds) +
     (missing.length > 0 ? `\n⚠️ ${missing.length} fichier(s) introuvable(s) sur Telegram.` : "") +
     (failed.length > 0 ? `\n⚠️ ${failed.length} fichier(s) illisible(s).` : "");
 
@@ -881,10 +879,7 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
     );
     // le PDF est parti : ces etiquettes ne reviendront plus dans le menu, ni
     // dans la file de l'impression automatique
-    markPrinted(
-      labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId),
-      printerName(msg)
-    );
+    markPrinted(printedIds, printerName(msg));
   } catch (err) {
     bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {});
   }
@@ -971,6 +966,23 @@ async function startProgress(bot, chatId, total) {
   };
 }
 
+// Ce que contient le PDF, en une ligne : "🩷 6 MR · 🟤 3 UPS".
+function captionFor(rows, printedIds) {
+  const kept = new Set(printedIds);
+  const counts = new Map();
+  for (const row of rows) {
+    if (!kept.has(row.id)) continue;
+    const code = row.carrier_group || "Inconnu";
+    counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  if (counts.size === 0) return "Aucune etiquette lisible.";
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, count]) => `${carrierDot(code)} ${count} ${code === "Inconnu" ? "?" : code}`)
+    .join("  ·  ");
+}
+
 // Nom affiche dans le menu de reimpression.
 function printerName(msg) {
   const from = msg && msg.from;
@@ -978,9 +990,6 @@ function printerName(msg) {
   return from.username ? `@${from.username}` : from.first_name || `#${from.id}`;
 }
 
-function carrierPrintTitle(code) {
-  return code === "*" ? "tous transporteurs" : carrierLabel(code);
-}
 
 // Liste ce que le bot a appris, et permet de tout oublier si une regle s'avere
 // fausse.
