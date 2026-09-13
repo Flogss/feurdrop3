@@ -17,6 +17,7 @@
     "express": "^4.19.2",
     "node-telegram-bot-api": "^0.66.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
     "web-push": "^3.6.7"
   }
 }

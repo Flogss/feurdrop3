@@ -151,6 +151,7 @@ function lookupXObject(context, resources, name) {
 // chaque image. Descend dans les XObject de type Form, ou l'etiquette est
 // parfois encapsulee.
 const PAINT_OPS = new Set(["n", "f", "F", "f*", "S", "s", "B", "B*", "b", "b*"]);
+const TEXT_OPS = new Set(["Tj", "TJ", "'", '"']);
 
 function collectBoxes(context, streamBytes, resources, ctm, depth, out) {
   if (depth > 3) return;
@@ -158,6 +159,7 @@ function collectBoxes(context, streamBytes, resources, ctm, depth, out) {
   const stack = [];
   let current = ctm;
   let pendingRects = [];
+  let textMatrix = [1, 0, 0, 1, 0, 0];
 
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -170,7 +172,20 @@ function collectBoxes(context, streamBytes, resources, ctm, depth, out) {
       // le chemin en cours devient la zone de decoupe
       for (const rect of pendingRects) out.push({ kind: "clip", ...rect });
     } else if (PAINT_OPS.has(token.value)) {
+      // rectangles reellement dessines : les barres d'un code-barres en sont,
+      // et c'est ce qui distingue une etiquette d'un bloc d'instructions
+      if (token.value !== "n") for (const rect of pendingRects) out.push({ kind: "paint", ...rect });
       pendingRects = [];
+    } else if (TEXT_OPS.has(token.value)) {
+      out.push({ kind: "text", ...transformRect(multiply(textMatrix, current), 0, 0, 1, 1) });
+    } else if (token.value === "BT") {
+      textMatrix = [1, 0, 0, 1, 0, 0];
+    } else if (token.value === "Tm") {
+      const m = numbersBefore(tokens, i, 6);
+      if (m) textMatrix = m;
+    } else if (token.value === "Td" || token.value === "TD") {
+      const t = numbersBefore(tokens, i, 2);
+      if (t) textMatrix = multiply([1, 0, 0, 1, t[0], t[1]], textMatrix);
     }
 
     if (token.value === "q") {

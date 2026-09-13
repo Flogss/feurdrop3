@@ -334,8 +334,11 @@ function getUnclassifiedPending() {
 }
 
 // Etiquettes en attente pour un transporteur donne, dans l'ordre d'arrivee.
-// Les LIT sont imprimes a la main : ils sont exclus de /imprime.
-const PRINTABLE_SQL = "status = 'pending' AND file_id IS NOT NULL AND type != 'lit'";
+// Les LIT ont leur propre file : colis trop gros pour l'imprimante thermique,
+// ils sortent sur le rouleau 210 mm. Les deux files sont donc disjointes.
+const HAS_FILE_SQL = "status = 'pending' AND file_id IS NOT NULL";
+const PRINTABLE_SQL = `${HAS_FILE_SQL} AND type != 'lit'`;
+const LIT_PRINTABLE_SQL = `${HAS_FILE_SQL} AND type = 'lit'`;
 
 // Trois lectures de la file d'impression :
 //   "new"     (defaut) ce qui n'est jamais sorti de l'imprimante. Imprimer
@@ -356,6 +359,26 @@ function getPrintableColis(carrier, { scope = "new" } = {}) {
     return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ORDER BY id`).all();
   }
   return db.prepare(`${base} AND type != 'bj' AND carrier = ? ORDER BY id`).all(carrier);
+}
+
+// File d'impression des LIT, meme logique de scope que la file thermique.
+function litScope(scope) {
+  if (scope === "all") return LIT_PRINTABLE_SQL;
+  if (scope === "printed") return `${LIT_PRINTABLE_SQL} AND printed_at IS NOT NULL`;
+  return `${LIT_PRINTABLE_SQL} AND printed_at IS NULL`;
+}
+
+function getLitPrintable({ scope = "new" } = {}) {
+  return db
+    .prepare(
+      `SELECT id, sender_name, file_id, file_kind, file_name, 'LIT' AS carrier_group
+       FROM colis WHERE ${litScope(scope)} ORDER BY id`
+    )
+    .all();
+}
+
+function countLitPrintable({ scope = "new" } = {}) {
+  return db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${litScope(scope)}`).get().c;
 }
 
 // Combien d'etiquettes en attente ont deja ete imprimees une fois : sert a
@@ -631,9 +654,10 @@ function getPrintJobs(limit = 8) {
               MAX(printed_at) AS printed_at,
               COALESCE(printed_by, 'Inconnu') AS printed_by,
               COUNT(*) AS count,
-              GROUP_CONCAT(DISTINCT ${CARRIER_GROUP_SQL}) AS carriers
+              MAX(CASE WHEN type = 'lit' THEN 1 ELSE 0 END) AS lit,
+              GROUP_CONCAT(DISTINCT CASE WHEN type = 'lit' THEN 'LIT' ELSE ${CARRIER_GROUP_SQL} END) AS carriers
        FROM colis
-       WHERE ${PRINTABLE_SQL} AND print_job IS NOT NULL
+       WHERE ${HAS_FILE_SQL} AND print_job IS NOT NULL
        GROUP BY print_job
        ORDER BY printed_at DESC
        LIMIT ?`
@@ -644,8 +668,9 @@ function getPrintJobs(limit = 8) {
 function getPrintJobColis(job) {
   return db
     .prepare(
-      `SELECT id, sender_name, file_id, file_kind, file_name, ${CARRIER_GROUP_SQL} AS carrier_group
-       FROM colis WHERE ${PRINTABLE_SQL} AND print_job = ? ORDER BY id`
+      `SELECT id, sender_name, file_id, file_kind, file_name, type,
+              CASE WHEN type = 'lit' THEN 'LIT' ELSE ${CARRIER_GROUP_SQL} END AS carrier_group
+       FROM colis WHERE ${HAS_FILE_SQL} AND print_job = ? ORDER BY id`
     )
     .all(job);
 }
@@ -976,6 +1001,8 @@ module.exports = {
   getPrintableColis,
   getPrintableSummary,
   countAlreadyPrinted,
+  getLitPrintable,
+  countLitPrintable,
   isAutoPrintEnabled,
   setAutoPrintEnabled,
   getUnprintedLabels,

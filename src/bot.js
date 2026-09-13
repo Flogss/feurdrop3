@@ -20,6 +20,8 @@ const {
   getPrintableColis,
   getPrintableSummary,
   countAlreadyPrinted,
+  getLitPrintable,
+  countLitPrintable,
   markPrinted,
   getPrintJobs,
   getPrintJobColis,
@@ -36,6 +38,7 @@ const {
 const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
 const { mergeLabels } = require("./printer");
+const { buildRoll } = require("./rollPrinter");
 const { notifyNewColis } = require("./push");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
@@ -654,6 +657,8 @@ function handlePrintCommand(bot, msg, rawName) {
   }
 
   if (rawName && rawName.trim()) {
+    // "lit" n'est pas un transporteur mais une file d'impression a part
+    if (/^lits?$/i.test(rawName.trim())) return sendMergedLabels(bot, msg, "LIT");
     const carrier = parseCarrier(rawName);
     if (!carrier) {
       return replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
@@ -680,6 +685,7 @@ const CARRIER_DOTS = {
   GLS: "🔵",
   DHL: "🟠",
   BJ: "🟨",
+  LIT: "🧻",
   Inconnu: "⚠️",
 };
 
@@ -693,9 +699,9 @@ function carrierDot(code) {
 // aux deja imprimees.
 function sendPrintMenu(bot, chatId) {
   const summary = getPrintableSummary().filter((row) => row.count > 0);
-  const alreadyPrinted = countAlreadyPrinted();
+  const alreadyPrinted = countAlreadyPrinted() + countLitPrintable({ scope: "printed" });
 
-  if (summary.length === 0) {
+  if (summary.length === 0 && countLitPrintable() === 0) {
     const text =
       alreadyPrinted > 0
         ? `🖨 <b>Rien de nouveau a imprimer</b>\n\n${alreadyPrinted} etiquette(s) en attente sont deja sorties de l'imprimante.`
@@ -709,10 +715,12 @@ function sendPrintMenu(bot, chatId) {
     return bot.sendMessage(chatId, text, opts).catch((err) => console.error("[bot] menu impression", err.message));
   }
 
-  const total = summary.reduce((sum, row) => sum + row.count, 0);
+  const lit = countLitPrintable();
+  const total = summary.reduce((sum, row) => sum + row.count, 0) + lit;
   const lines = summary.map(
     (row) => `${carrierDot(row.carrier)} <b>${carrierLabel(row.carrier)}</b> — ${row.count}`
   );
+  if (lit > 0) lines.push(`🧻 <b>LIT</b> — ${lit} <i>(rouleau)</i>`);
   const text = `<b>${total} etiquette${total > 1 ? "s" : ""}</b>\n\n${lines.join("\n")}`;
 
   const keyboard = [];
@@ -724,7 +732,11 @@ function sendPrintMenu(bot, chatId) {
       }))
     );
   }
-  keyboard.push([{ text: `🖨 Tout imprimer · ${total}`, callback_data: "pr:*" }]);
+  if (lit > 0) keyboard.push([{ text: `🧻 LIT · ${lit} — rouleau 210 mm`, callback_data: "pr:LIT" }]);
+  if (summary.length > 0) {
+    const thermiques = total - lit;
+    keyboard.push([{ text: `🖨 Tout imprimer · ${thermiques}`, callback_data: "pr:*" }]);
+  }
   if (alreadyPrinted > 0) {
     keyboard.push([{ text: `↻ Deja imprimees · ${alreadyPrinted}`, callback_data: "prmenu:all" }]);
   }
@@ -739,7 +751,8 @@ function sendPrintMenu(bot, chatId) {
 function sendReprintMenu(bot, chatId) {
   const jobs = getPrintJobs();
   const summary = getPrintableSummary({ scope: "printed" }).filter((row) => row.count > 0);
-  const alreadyPrinted = countAlreadyPrinted();
+  const litPrinted = countLitPrintable({ scope: "printed" });
+  const alreadyPrinted = countAlreadyPrinted() + litPrinted;
 
   if (alreadyPrinted === 0) {
     return bot
@@ -779,7 +792,12 @@ function sendReprintMenu(bot, chatId) {
       }))
     );
   }
-  keyboard.push([{ text: `↻ Tout reimprimer · ${alreadyPrinted}`, callback_data: "pra:*" }]);
+  if (litPrinted > 0) {
+    keyboard.push([{ text: `🧻 LIT · ${litPrinted} — rouleau`, callback_data: "pra:LIT" }]);
+  }
+  if (summary.length > 0) {
+    keyboard.push([{ text: `↻ Tout reimprimer · ${alreadyPrinted - litPrinted}`, callback_data: "pra:*" }]);
+  }
   keyboard.push([{ text: "← Retour", callback_data: "prmenu:new" }]);
 
   bot
@@ -839,9 +857,14 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
   const scope = { scope: includePrinted ? "printed" : "new" };
   const rows = job
     ? getPrintJobColis(job)
-    : code === "*"
-      ? getPrintableSummary(scope).flatMap((row) => getPrintableColis(row.carrier, scope))
-      : getPrintableColis(code, scope);
+    : code === "LIT"
+      ? getLitPrintable(scope)
+      : code === "*"
+        ? getPrintableSummary(scope).flatMap((row) => getPrintableColis(row.carrier, scope))
+        : getPrintableColis(code, scope);
+
+  // les LIT sortent sur le rouleau 210 mm, pas sur la thermique 4x6
+  const onRoll = code === "LIT" || (job && rows.length > 0 && rows.every((r) => r.type === "lit"));
 
   if (rows.length === 0) {
     return replyEphemeral(bot, msg, `Aucune etiquette ${code === "*" ? "" : carrierLabel(code)} a imprimer.`, {}, 8000);
@@ -851,22 +874,32 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
 
   const { labels, missing } = await downloadLabels(bot, rows, () => progress.step());
 
-  await progress.finish("Assemblage du PDF...");
-  const { pdf, pages, failed } = await mergeLabels(labels);
+  await progress.finish(onRoll ? "Mise en page du rouleau..." : "Assemblage du PDF...");
+  const assembled = onRoll ? await buildRoll(labels) : await mergeLabels(labels);
+  const { pdf, failed } = assembled;
   progress.remove();
 
   if (!pdf) {
     return bot.sendMessage(chatId, "Aucune etiquette lisible : rien a imprimer.").catch(() => {});
   }
 
-  const name = job
-    ? "reimpression"
-    : code === "*"
-      ? "toutes"
-      : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
+  const name = onRoll
+    ? "lit-rouleau"
+    : job
+      ? "reimpression"
+      : code === "*"
+        ? "toutes"
+        : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
   const printedIds = labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId);
   const caption =
     captionFor(rows, printedIds) +
+    (onRoll
+      ? `\n📏 ${assembled.rows} rangee${assembled.rows > 1 ? "s" : ""} de rouleau` +
+        (assembled.trimmed > 0
+          ? ` · ${assembled.trimmed} bloc${assembled.trimmed > 1 ? "s" : ""} d'instructions retire${assembled.trimmed > 1 ? "s" : ""}`
+          : "") +
+        `\n✂️ Decoupe le long des pointilles`
+      : "") +
     (missing.length > 0 ? `\n⚠️ ${missing.length} fichier(s) introuvable(s) sur Telegram.` : "") +
     (failed.length > 0 ? `\n⚠️ ${failed.length} fichier(s) illisible(s).` : "");
 
