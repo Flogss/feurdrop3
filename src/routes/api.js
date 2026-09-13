@@ -261,7 +261,10 @@ router.get("/print/next", async (req, res) => {
 router.post("/print/done", (req, res) => {
   if (!checkPrintToken(req, res)) return;
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
-  res.json({ ok: true, marked: markPrinted(ids) });
+  // l'agent du Mac n'a pas d'utilisateur : il apparait comme tel dans le menu
+  // de reimpression
+  const job = markPrinted(ids, "Impression auto");
+  res.json({ ok: true, marked: ids.length, job });
 });
 
 // Interrupteur depuis le dashboard (donc depuis le telephone).

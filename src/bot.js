@@ -21,6 +21,8 @@ const {
   getPrintableSummary,
   countAlreadyPrinted,
   markPrinted,
+  getPrintJobs,
+  getPrintJobColis,
   getColisById,
   getBatchColis,
   deleteColis,
@@ -370,7 +372,7 @@ function startBot() {
   );
 
   bot.on("callback_query", (query) => {
-    if (/^pra?:|^prmenu:/.test(query.data || "")) return handlePrintCallback(bot, query);
+    if (/^pra?:|^prmenu:|^prjob:/.test(query.data || "")) return handlePrintCallback(bot, query);
     return handleCarrierCallback(bot, query);
   });
 
@@ -656,58 +658,151 @@ function handlePrintCommand(bot, msg, rawName) {
     if (!carrier) {
       return replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
     }
-    return sendMergedLabels(bot, msg, carrier.code, false);
+    return sendMergedLabels(bot, msg, carrier.code);
   }
 
-  sendPrintMenu(bot, msg.chat.id, false);
+  sendPrintMenu(bot, msg.chat.id);
+}
+
+// Pastilles reprenant les couleurs du dashboard, pour repérer une compagnie
+// d'un coup d'oeil dans le menu.
+// Les noms Telegram peuvent contenir < ou & : le mode HTML exige de les fuir.
+function escapeHtml(text) {
+  return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const CARRIER_DOTS = {
+  MR: "🩷",
+  LP: "🟡",
+  CHRONO: "🟢",
+  UPS: "🟤",
+  DPD: "🔴",
+  GLS: "🔵",
+  DHL: "🟠",
+  BJ: "🟨",
+  Inconnu: "⚠️",
+};
+
+function carrierDot(code) {
+  return CARRIER_DOTS[code] || "⬜";
 }
 
 // Menu des etiquettes a imprimer. Par defaut il ne montre que celles qui ne
 // sont jamais sorties de l'imprimante : imprimer 10 MR, en recevoir 2 puis
 // faire "Tout" ne doit ressortir que les 2. Le bouton de reglage donne acces
-// aux deja imprimees pour les cas de bourrage ou d'etiquette perdue.
-function sendPrintMenu(bot, chatId, includePrinted) {
-  const summary = getPrintableSummary({ includePrinted }).filter((row) => row.count > 0);
+// aux deja imprimees.
+function sendPrintMenu(bot, chatId) {
+  const summary = getPrintableSummary().filter((row) => row.count > 0);
   const alreadyPrinted = countAlreadyPrinted();
 
   if (summary.length === 0) {
-    const text = includePrinted
-      ? "Aucune etiquette en attente."
-      : alreadyPrinted > 0
-        ? `Rien de nouveau a imprimer.\n${alreadyPrinted} etiquette(s) en attente ont deja ete imprimees.`
-        : "Aucune etiquette en attente a imprimer.";
-    const opts =
-      !includePrinted && alreadyPrinted > 0
-        ? {
-            reply_markup: {
-              inline_keyboard: [[{ text: `⚙️ Reimprimer (${alreadyPrinted})`, callback_data: "prmenu:all" }]],
-            },
-          }
-        : {};
+    const text =
+      alreadyPrinted > 0
+        ? `🖨 <b>Rien de nouveau a imprimer</b>\n\n${alreadyPrinted} etiquette(s) en attente sont deja sorties de l'imprimante.`
+        : "🖨 <b>Aucune etiquette a imprimer</b>\n\nTout est a jour.";
+    const opts = { parse_mode: "HTML" };
+    if (alreadyPrinted > 0) {
+      opts.reply_markup = {
+        inline_keyboard: [[{ text: `↻ Reimprimer (${alreadyPrinted})`, callback_data: "prmenu:all" }]],
+      };
+    }
     return bot.sendMessage(chatId, text, opts).catch((err) => console.error("[bot] menu impression", err.message));
   }
 
-  const prefix = includePrinted ? "pra" : "pr";
+  const total = summary.reduce((sum, row) => sum + row.count, 0);
+  const lines = summary.map(
+    (row) => `${carrierDot(row.carrier)} <b>${carrierLabel(row.carrier)}</b> — ${row.count}`
+  );
+  const text =
+    `🖨 <b>Nouvelles etiquettes</b>\n\n${lines.join("\n")}\n\n` +
+    `<i>${total} au total · format 10x15, pret a imprimer</i>`;
+
   const keyboard = [];
   for (let i = 0; i < summary.length; i += 2) {
     keyboard.push(
       summary.slice(i, i + 2).map((row) => ({
-        text: `${carrierLabel(row.carrier)} (${row.count})`,
-        callback_data: `${prefix}:${row.carrier}`,
+        text: `${carrierDot(row.carrier)} ${carrierLabel(row.carrier)} · ${row.count}`,
+        callback_data: `pr:${row.carrier}`,
       }))
     );
   }
-  const total = summary.reduce((sum, row) => sum + row.count, 0);
-  keyboard.push([{ text: `Tout (${total})`, callback_data: `${prefix}:*` }]);
-  if (!includePrinted && alreadyPrinted > 0) {
-    keyboard.push([{ text: `⚙️ Reimprimer (${alreadyPrinted} deja sorties)`, callback_data: "prmenu:all" }]);
+  keyboard.push([{ text: `🖨 Tout imprimer · ${total}`, callback_data: "pr:*" }]);
+  if (alreadyPrinted > 0) {
+    keyboard.push([{ text: `↻ Deja imprimees · ${alreadyPrinted}`, callback_data: "prmenu:all" }]);
   }
 
   bot
-    .sendMessage(chatId, includePrinted ? "Reimprimer quoi ?" : "Quelles nouvelles etiquettes imprimer ?", {
-      reply_markup: { inline_keyboard: keyboard },
-    })
+    .sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } })
     .catch((err) => console.error("[bot] clavier impression", err.message));
+}
+
+// Menu de reimpression : on y voit qui a imprime quoi et quand, parce qu'on
+// est plusieurs a travailler sur les memes colis.
+function sendReprintMenu(bot, chatId) {
+  const jobs = getPrintJobs();
+  const summary = getPrintableSummary({ scope: "printed" }).filter((row) => row.count > 0);
+  const alreadyPrinted = countAlreadyPrinted();
+
+  if (alreadyPrinted === 0) {
+    return bot
+      .sendMessage(chatId, "↻ <b>Rien a reimprimer</b>\n\nAucune etiquette en attente n'est deja sortie.", {
+        parse_mode: "HTML",
+      })
+      .catch(() => {});
+  }
+
+  const lines = jobs.map((job) => {
+    const carriers = String(job.carriers || "")
+      .split(",")
+      .map((code) => `${carrierDot(code)} ${carrierLabel(code)}`)
+      .join(", ");
+    return `${jobIcon(job)} <b>${escapeHtml(job.printed_by)}</b> · ${jobWhen(job.printed_at)}\n     ${job.count} etiquette${
+      job.count > 1 ? "s" : ""
+    } — ${carriers}`;
+  });
+
+  const text =
+    `↻ <b>Deja imprimees</b>\n\n${
+      lines.length > 0 ? lines.join("\n\n") : `${alreadyPrinted} etiquette(s), impressions d'avant le suivi.`
+    }\n\n<i>Choisis une fournee a refaire, ou passe par les compagnies.</i>`;
+
+  const keyboard = jobs.map((job) => [
+    {
+      text: `${jobIcon(job)} ${job.printed_by} · ${jobWhen(job.printed_at)} · ${job.count}`,
+      callback_data: `prjob:${job.job}`,
+    },
+  ]);
+
+  for (let i = 0; i < summary.length; i += 2) {
+    keyboard.push(
+      summary.slice(i, i + 2).map((row) => ({
+        text: `${carrierDot(row.carrier)} ${carrierLabel(row.carrier)} · ${row.count}`,
+        callback_data: `pra:${row.carrier}`,
+      }))
+    );
+  }
+  keyboard.push([{ text: `↻ Tout reimprimer · ${alreadyPrinted}`, callback_data: "pra:*" }]);
+  keyboard.push([{ text: "← Retour", callback_data: "prmenu:new" }]);
+
+  bot
+    .sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } })
+    .catch((err) => console.error("[bot] clavier reimpression", err.message));
+}
+
+// L'agent du Mac imprime sans utilisateur : on le distingue d'un humain.
+function jobIcon(job) {
+  return /auto/i.test(job.printed_by || "") ? "🤖" : "👤";
+}
+
+// "14:32", "hier 18:40", "lun 09:15" — les dates SQLite sont en UTC.
+function jobWhen(sqlDate) {
+  const date = new Date(`${String(sqlDate).replace(" ", "T")}Z`);
+  if (Number.isNaN(date.getTime())) return "?";
+  const heure = date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const jours = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (jours === 0) return heure;
+  if (jours === 1) return `hier ${heure}`;
+  return `${date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" })} ${heure}`;
 }
 
 function handlePrintCallback(bot, query) {
@@ -721,22 +816,32 @@ function handlePrintCallback(bot, query) {
 
   if (data === "prmenu:all") {
     bot.answerCallbackQuery(query.id).catch(() => {});
-    return sendPrintMenu(bot, query.message.chat.id, true);
+    return sendReprintMenu(bot, query.message.chat.id);
+  }
+  if (data === "prmenu:new") {
+    bot.answerCallbackQuery(query.id).catch(() => {});
+    return sendPrintMenu(bot, query.message.chat.id);
+  }
+
+  bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
+
+  if (data.startsWith("prjob:")) {
+    return sendMergedLabels(bot, msg, null, { job: data.slice(6) });
   }
 
   const includePrinted = data.startsWith("pra:");
   const code = data.slice(data.indexOf(":") + 1);
-  bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
-  sendMergedLabels(bot, msg, code, includePrinted);
+  sendMergedLabels(bot, msg, code, { includePrinted });
 }
 
 // Telecharge les etiquettes une par une (Telegram limite les rafales), les
 // assemble, puis renvoie le PDF pret a imprimer.
-async function sendMergedLabels(bot, msg, code, includePrinted = false) {
+async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = null } = {}) {
   const chatId = msg.chat.id;
-  const scope = { includePrinted };
-  const rows =
-    code === "*"
+  const scope = { scope: includePrinted ? "printed" : "new" };
+  const rows = job
+    ? getPrintJobColis(job)
+    : code === "*"
       ? getPrintableSummary(scope).flatMap((row) => getPrintableColis(row.carrier, scope))
       : getPrintableColis(code, scope);
 
@@ -756,9 +861,13 @@ async function sendMergedLabels(bot, msg, code, includePrinted = false) {
     return bot.sendMessage(chatId, "Aucune etiquette lisible : rien a imprimer.").catch(() => {});
   }
 
-  const name = code === "*" ? "toutes" : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
+  const name = job
+    ? "reimpression"
+    : code === "*"
+      ? "toutes"
+      : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
   const caption =
-    `${pages} etiquette${pages > 1 ? "s" : ""} — ${carrierPrintTitle(code)}\n` +
+    `${pages} etiquette${pages > 1 ? "s" : ""} — ${job ? "reimpression" : carrierPrintTitle(code)}\n` +
     `Format ${(LABEL_WIDTH / 72 * 25.4).toFixed(0)}x${(LABEL_HEIGHT / 72 * 25.4).toFixed(0)} mm (4x6"), imprime en "taille reelle".` +
     (missing.length > 0 ? `\n⚠️ ${missing.length} fichier(s) introuvable(s) sur Telegram.` : "") +
     (failed.length > 0 ? `\n⚠️ ${failed.length} fichier(s) illisible(s).` : "");
@@ -772,7 +881,10 @@ async function sendMergedLabels(bot, msg, code, includePrinted = false) {
     );
     // le PDF est parti : ces etiquettes ne reviendront plus dans le menu, ni
     // dans la file de l'impression automatique
-    markPrinted(labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId));
+    markPrinted(
+      labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId),
+      printerName(msg)
+    );
   } catch (err) {
     bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {});
   }
@@ -857,6 +969,13 @@ async function startProgress(bot, chatId, total) {
       if (message) bot.deleteMessage(chatId, message.message_id).catch(() => {});
     },
   };
+}
+
+// Nom affiche dans le menu de reimpression.
+function printerName(msg) {
+  const from = msg && msg.from;
+  if (!from) return "Inconnu";
+  return from.username ? `@${from.username}` : from.first_name || `#${from.id}`;
 }
 
 function carrierPrintTitle(code) {

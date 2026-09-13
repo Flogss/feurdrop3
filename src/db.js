@@ -118,6 +118,11 @@ if (!colisColumns.includes("file_kind")) db.exec("ALTER TABLE colis ADD COLUMN f
 // date d'impression automatique : une etiquette deja sortie de l'imprimante ne
 // doit jamais ressortir toute seule
 if (!colisColumns.includes("printed_at")) db.exec("ALTER TABLE colis ADD COLUMN printed_at TEXT");
+// qui a imprime quoi : on est plusieurs a bosser dessus, et le menu de
+// reimpression doit pouvoir le dire. print_job regroupe les etiquettes sorties
+// dans une meme fournee.
+if (!colisColumns.includes("printed_by")) db.exec("ALTER TABLE colis ADD COLUMN printed_by TEXT");
+if (!colisColumns.includes("print_job")) db.exec("ALTER TABLE colis ADD COLUMN print_job TEXT");
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -332,16 +337,20 @@ function getUnclassifiedPending() {
 // Les LIT sont imprimes a la main : ils sont exclus de /imprime.
 const PRINTABLE_SQL = "status = 'pending' AND file_id IS NOT NULL AND type != 'lit'";
 
-// Par defaut on ne propose que ce qui n'est jamais sorti de l'imprimante :
-// apres avoir imprime 10 MR, en recevoir 2 et faire "tout imprimer" ne doit
-// ressortir que les 2. `includePrinted` sert au bouton de reimpression.
-function printableScope(includePrinted) {
-  return includePrinted ? PRINTABLE_SQL : `${PRINTABLE_SQL} AND printed_at IS NULL`;
+// Trois lectures de la file d'impression :
+//   "new"     (defaut) ce qui n'est jamais sorti de l'imprimante. Imprimer
+//             10 MR, en recevoir 2 et faire "tout" ne ressort que les 2 ;
+//   "printed" ce qui est deja sorti, pour le menu de reimpression ;
+//   "all"     les deux.
+function printableScope(scope) {
+  if (scope === "all") return PRINTABLE_SQL;
+  if (scope === "printed") return `${PRINTABLE_SQL} AND printed_at IS NOT NULL`;
+  return `${PRINTABLE_SQL} AND printed_at IS NULL`;
 }
 
-function getPrintableColis(carrier, { includePrinted = false } = {}) {
+function getPrintableColis(carrier, { scope = "new" } = {}) {
   const base = `SELECT id, sender_name, file_id, file_kind, file_name FROM colis WHERE ${printableScope(
-    includePrinted
+    scope
   )}`;
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ORDER BY id`).all();
   if (carrier === "Inconnu") {
@@ -359,11 +368,11 @@ function countAlreadyPrinted() {
 }
 
 // Repartition des etiquettes imprimables (celles dont on a encore le fichier).
-function getPrintableSummary({ includePrinted = false } = {}) {
+function getPrintableSummary({ scope = "new" } = {}) {
   return db
     .prepare(
       `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count
-       FROM colis WHERE ${printableScope(includePrinted)}
+       FROM colis WHERE ${printableScope(scope)}
        GROUP BY ${CARRIER_GROUP_SQL} ORDER BY count DESC`
     )
     .all();
@@ -600,12 +609,46 @@ function countUnprintedLabels() {
   return db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${AUTOPRINT_SQL}`).get().c;
 }
 
-function markPrinted(ids) {
-  if (!Array.isArray(ids) || ids.length === 0) return 0;
+// Marque une fournee comme imprimee. `by` est le nom affiche dans le menu de
+// reimpression ("Flo", "Impression auto"...). Renvoie l'identifiant de la
+// fournee, qui permet de la reimprimer telle quelle.
+function markPrinted(ids, by = null) {
+  if (!Array.isArray(ids) || ids.length === 0) return null;
+  const job = require("crypto").randomBytes(6).toString("hex");
   const placeholders = ids.map(() => "?").join(",");
+  db.prepare(
+    `UPDATE colis SET printed_at = datetime('now'), printed_by = ?, print_job = ?
+     WHERE id IN (${placeholders})`
+  ).run(by, job, ...ids);
+  return job;
+}
+
+// Fournees deja imprimees encore en attente de depot : qui, quand, combien et
+// pour quelles compagnies.
+function getPrintJobs(limit = 8) {
   return db
-    .prepare(`UPDATE colis SET printed_at = datetime('now') WHERE id IN (${placeholders})`)
-    .run(...ids).changes;
+    .prepare(
+      `SELECT print_job AS job,
+              MAX(printed_at) AS printed_at,
+              COALESCE(printed_by, 'Inconnu') AS printed_by,
+              COUNT(*) AS count,
+              GROUP_CONCAT(DISTINCT ${CARRIER_GROUP_SQL}) AS carriers
+       FROM colis
+       WHERE ${PRINTABLE_SQL} AND print_job IS NOT NULL
+       GROUP BY print_job
+       ORDER BY printed_at DESC
+       LIMIT ?`
+    )
+    .all(limit);
+}
+
+function getPrintJobColis(job) {
+  return db
+    .prepare(
+      `SELECT id, sender_name, file_id, file_kind, file_name
+       FROM colis WHERE ${PRINTABLE_SQL} AND print_job = ? ORDER BY id`
+    )
+    .all(job);
 }
 
 // Jeton partage avec l'agent d'impression. Genere au premier demarrage et
@@ -939,6 +982,8 @@ module.exports = {
   getUnprintedLabels,
   countUnprintedLabels,
   markPrinted,
+  getPrintJobs,
+  getPrintJobColis,
   getPrintToken,
   setBatchCarrier,
   getColisById,
