@@ -47,6 +47,7 @@ function loadSeeds() {
         lat: point.lat,
         lng: point.lng,
         kind: point.kind,
+        locker: point.kind === "Locker",
         carriers: [data.reseau],
         trust: point.trust === "verified" ? store.TRUST.verified : store.TRUST.unverified,
       });

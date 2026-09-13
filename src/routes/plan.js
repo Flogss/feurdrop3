@@ -190,7 +190,7 @@ router.post("/visit", (req, res) => {
 // --- Calcul du trajet --------------------------------------------------------
 
 router.post("/compute", async (req, res) => {
-  const { start, needs, day, departAt, useOsm } = req.body || {};
+  const { start, needs, day, departAt, useOsm, lockers } = req.body || {};
   try {
     const result = await plan.buildPlan({
       start,
@@ -198,6 +198,7 @@ router.post("/compute", async (req, res) => {
       day: day || plan.today(),
       departAt: Number.isFinite(departAt) ? departAt : null,
       useOsm: useOsm !== false,
+      includeLockers: lockers === true,
     });
     res.json(result);
   } catch (err) {

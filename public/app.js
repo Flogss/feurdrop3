@@ -1659,6 +1659,7 @@ document.getElementById("plan-compute").addEventListener("click", async () => {
         needs,
         day: document.getElementById("plan-day").value || undefined,
         departAt: departMinutes(),
+        lockers: document.getElementById("plan-lockers").checked,
       }),
     });
     planState.result = result;
@@ -1698,7 +1699,7 @@ function renderPlanResult(result) {
             <span class="plan-carrier">📦 ${escapeHtml(counts)}</span>
             <span class="plan-trust">${TRUST_DOT[stop.point.trust] || ""}</span>
           </div>
-          <div class="plan-stop-name">${escapeHtml(stop.point.name)}</div>
+          <div class="plan-stop-name">${stop.point.locker ? "🔒 " : ""}${escapeHtml(stop.point.name)}</div>
           <div class="plan-stop-address">${escapeHtml(address)}</div>
           <div class="plan-stop-status">${dot} ${escapeHtml(stop.status.label)}${cutoff} · arrivée ${escapeHtml(stop.arrival)}</div>
           ${stop.late ? `<div class="plan-stop-warn">Trop tard pour ce point : passe-le en premier, ou garde ces colis pour demain.</div>` : ""}
@@ -1729,6 +1730,9 @@ function renderPlanResult(result) {
         .map((c) => CARRIER_LABELS[c] || c)
         .join(", ")}. Ajoute-les plus bas ou importe ta liste.`
     );
+  }
+  if (!result.includeLockers) {
+    notes.push("Les lockers sont écartés : coche la case pour les autoriser (UPS et Mondial Relay).");
   }
   if (result.sources.pending) {
     notes.push("Recherche OpenStreetMap lancée en arrière-plan : relance le calcul dans un instant pour en tenir compte.");

@@ -1,4 +1,5 @@
 const { db } = require("../db");
+const { looksLikeLocker } = require("./lockers");
 
 // Base des points de depot. Le principe directeur : on ne fait jamais dire a
 // un point ce qu'on ne sait pas de lui. Chaque point porte sa SOURCE et son
@@ -79,16 +80,34 @@ if (!hoursColumns.includes("soft")) {
   db.exec("ALTER TABLE relay_hours ADD COLUMN soft INTEGER NOT NULL DEFAULT 0");
 }
 
+// Casier automatique ou commerce : la distinction change ce qu'on propose,
+// voir lockers.js. La colonne est remplie a l'enregistrement ; les points
+// deja en base sont reclasses une fois, sur leur libelle.
+const pointColumns = db.prepare("PRAGMA table_info(relay_points)").all().map((c) => c.name);
+if (!pointColumns.includes("locker")) {
+  db.exec("ALTER TABLE relay_points ADD COLUMN locker INTEGER NOT NULL DEFAULT 0");
+  db.exec(
+    `UPDATE relay_points SET locker = 1
+     WHERE name LIKE '%LOCKER%' OR name LIKE '%locker%' OR name LIKE '%onsigne%'
+        OR name LIKE '%asier%' OR kind LIKE '%asier%' OR kind LIKE '%ocker%'`
+  );
+}
+
 const TRUST = { verified: "verified", unverified: "unverified", rejected: "rejected" };
 
 // --- Lecture ----------------------------------------------------------------
+
+// La source sait parfois qu'il s'agit d'un casier ; sinon on lit le libelle.
+function isLocker(point) {
+  return point.locker !== undefined ? Boolean(point.locker) : looksLikeLocker(point);
+}
 
 function hydrate(row) {
   if (!row) return null;
   const carriers = db
     .prepare("SELECT carrier, confirmed FROM relay_networks WHERE point_id = ?")
     .all(row.id);
-  return { ...row, carriers: carriers.map((c) => c.carrier), networks: carriers };
+  return { ...row, locker: Boolean(row.locker), carriers: carriers.map((c) => c.carrier), networks: carriers };
 }
 
 function getPoint(id) {
@@ -154,6 +173,7 @@ function upsertPoint(point) {
     db.prepare(
       `UPDATE relay_points
        SET name = ?, address = ?, postal_code = ?, city = ?, lat = ?, lng = ?, kind = ?,
+           locker = ?,
            trust = CASE WHEN trust = 'rejected' THEN 'rejected'
                         WHEN trust = 'verified' THEN 'verified'
                         ELSE ? END,
@@ -167,6 +187,7 @@ function upsertPoint(point) {
       point.lat ?? null,
       point.lng ?? null,
       point.kind || null,
+      isLocker(point) ? 1 : 0,
       point.trust || TRUST.unverified,
       existing.id
     );
@@ -176,8 +197,8 @@ function upsertPoint(point) {
 
   const info = db
     .prepare(
-      `INSERT INTO relay_points (source, source_ref, name, address, postal_code, city, lat, lng, kind, trust, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO relay_points (source, source_ref, name, address, postal_code, city, lat, lng, kind, locker, trust, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       point.source,
@@ -189,6 +210,7 @@ function upsertPoint(point) {
       point.lat ?? null,
       point.lng ?? null,
       point.kind || null,
+      isLocker(point) ? 1 : 0,
       point.trust || TRUST.unverified,
       point.note || null
     );

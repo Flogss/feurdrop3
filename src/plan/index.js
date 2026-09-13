@@ -3,8 +3,10 @@ const laposte = require("./sources/laposte");
 const osm = require("./sources/osm");
 const boites = require("./sources/boitesjaunes");
 const fedex = require("./sources/fedex");
+const ups = require("./sources/ups");
 const { statusAt, deadline, toMinutes, toClock } = require("./hours");
 const { haversine, estimateMatrix, optimize } = require("./route");
+const { allowedFor, LOCKER_CARRIERS } = require("./lockers");
 
 // Construction d'une tournee de depot.
 //
@@ -108,6 +110,22 @@ async function refreshFedex(start, day) {
   return found.length;
 }
 
+// Points de depot UPS. Meme regle que FedEx : eteinte sans identifiants.
+async function refreshUps(start, day) {
+  if (!ups.isConfigured()) return null;
+  const { cell, fresh } = store.sweptRecently("ups", start.lat, start.lng);
+  if (fresh) return 0;
+  store.markSwept(cell, 1);
+
+  const found = await ups.searchPoints({ lat: start.lat, lng: start.lng, day });
+  for (const point of found) {
+    const stored = store.upsertPoint({ ...point, trust: store.TRUST.verified });
+    if (point.hours) store.saveHours(stored.id, day, point.hours);
+  }
+  store.markSwept(cell, 24);
+  return found.length;
+}
+
 // Points utilisables pour un transporteur, du plus proche au plus loin.
 //
 // Deux filtres, dans cet ordre :
@@ -116,10 +134,13 @@ async function refreshFedex(start, day) {
 //     Un point dont on ignore les horaires est garde -- on ne l'ecarte pas
 //     sur une supposition ;
 //   - regle 11 : si un point verifie existe, les points "a verifier" sortent.
-function candidatesFor(carrier, start, day, departAt, excluded = new Set()) {
+function candidatesFor(carrier, start, day, departAt, excluded = new Set(), includeLockers = false) {
   const all = store
     .pointsForCarrier(carrier)
     .filter((point) => !excluded.has(point.id))
+    // par defaut aucun casier automatique, et jamais pour un reseau ou le
+    // depot en casier n'existe pas (voir lockers.js)
+    .filter((point) => allowedFor(point, carrier, includeLockers))
     .map((point) => ({
       ...point,
       distance: distanceFrom(start, point),
@@ -208,14 +229,22 @@ function isSoft(stop) {
   return Boolean(stop.point.hours && stop.point.hours.soft);
 }
 
-async function buildPlan({ start, needs, day = today(), departAt = null, refresh = true, useOsm = true }) {
+async function buildPlan({
+  start,
+  needs,
+  day = today(),
+  departAt = null,
+  refresh = true,
+  useOsm = true,
+  includeLockers = false,
+}) {
   if (!start || typeof start.lat !== "number" || typeof start.lng !== "number") {
     throw new Error("position de depart manquante");
   }
   const wanted = (needs || []).filter((n) => n.carrier && n.count > 0);
   if (wanted.length === 0) throw new Error("aucun colis a deposer");
 
-  const sources = { laposte: 0, boites: 0, fedex: 0, osm: 0, pending: false, errors: [] };
+  const sources = { laposte: 0, boites: 0, fedex: 0, ups: 0, osm: 0, pending: false, errors: [] };
   if (refresh) {
     // La Poste repond en une seconde : on l'attend. Overpass met parfois une
     // minute ou ne repond pas du tout ; on ne fait pas patienter quelqu'un qui
@@ -242,6 +271,14 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
             })
             .catch((err) => sources.errors.push(`FedEx : ${err.message}`))
         : Promise.resolve(),
+      asks("UPS")
+        ? refreshUps(start, day)
+            .then((n) => {
+              if (n === null) sources.errors.push("UPS : identifiants API non configures");
+              else sources.ups = n;
+            })
+            .catch((err) => sources.errors.push(`UPS : ${err.message}`))
+        : Promise.resolve(),
     ]);
 
     if (useOsm && !store.sweptRecently("osm", start.lat, start.lng).fresh) {
@@ -261,7 +298,10 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const pools = new Map(
-      wanted.map((n) => [n.carrier, candidatesFor(n.carrier, start, day, depart, excluded)])
+      wanted.map((n) => [
+        n.carrier,
+        candidatesFor(n.carrier, start, day, depart, excluded, includeLockers),
+      ])
     );
     const { stops, unserved } = chooseStops(wanted, pools);
     const withDeadline = stops.map((stop) => ({
@@ -310,6 +350,7 @@ async function buildPlan({ start, needs, day = today(), departAt = null, refresh
   return {
     day,
     departAt: toClock(depart),
+    includeLockers,
     start,
     stops: ordered,
     unserved,
@@ -366,6 +407,7 @@ module.exports = {
   refreshLaPoste,
   refreshBoitesJaunes,
   refreshFedex,
+  refreshUps,
   refreshOsm,
   candidatesFor,
   today,

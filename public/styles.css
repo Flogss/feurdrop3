@@ -1075,3 +1075,5 @@ main { margin-top: 16px; }
   font-size: 11.5px;
 }
 .plan-when input:focus { outline: none; border-color: rgba(56,247,255,0.45); }
+.plan-lockers { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--panel-border); }
+.plan-lockers em { font-style: normal; color: var(--text-dim); opacity: 0.75; }

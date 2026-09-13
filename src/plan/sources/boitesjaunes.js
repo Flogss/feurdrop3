@@ -59,6 +59,7 @@ async function searchPoints({ lat, lng, radius = 1500, limit = 25, day }) {
         source_ref: row.co_mup,
         name: `Boite jaune — ${street}`,
         kind: "Boite aux lettres",
+        locker: false,
         address: street,
         postal_code: row.co_postal,
         city: row.lb_com,

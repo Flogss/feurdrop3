@@ -93,6 +93,7 @@ async function searchPoints({ lat, lng, radius = 2500, day = new Date() }) {
       source_ref: `${element.type}/${element.id}`,
       name: tags.name || tags.brand || tags.operator || "Point relais",
       kind: tags.amenity === "parcel_locker" ? "Casier automatique" : "Commerce",
+      locker: tags.amenity === "parcel_locker",
       address: [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" "),
       postal_code: tags["addr:postcode"] || null,
       city: tags["addr:city"] || null,
