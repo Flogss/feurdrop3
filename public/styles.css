@@ -923,3 +923,155 @@ main { margin-top: 16px; }
 @media (min-width: 900px) {
   .app { max-width: 1180px; }
 }
+
+/* --- Reglages accessibles depuis le dashboard ---------------------------- */
+.settings-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.015);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+}
+.settings-link:hover { color: var(--text); border-color: rgba(56,247,255,0.28); background: rgba(56,247,255,0.05); }
+.settings-link svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+.view-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.view-head h1 { font-size: 15px; margin: 0; letter-spacing: 0.04em; }
+
+/* --- Onglet Plan --------------------------------------------------------- */
+.plan-search { display: flex; gap: 8px; margin-bottom: 10px; }
+.plan-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.plan-search input:focus { outline: none; border-color: rgba(56,247,255,0.45); }
+
+.row-pick { cursor: pointer; }
+.row-pickable { cursor: pointer; }
+.row-pickable input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--cyan); }
+.row-off { opacity: 0.45; }
+
+.plan-start {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(56,247,255,0.25);
+  border-radius: 10px;
+  background: rgba(56,247,255,0.06);
+  font-size: 12.5px;
+}
+.plan-start-label { overflow: hidden; text-overflow: ellipsis; }
+
+.plan-time { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-dim); }
+.plan-time input {
+  padding: 4px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.plan-go { width: 100%; margin-bottom: 14px; padding: 13px; font-size: 13px; }
+
+.plan-stops { display: flex; flex-direction: column; }
+.plan-stop {
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: rgba(255,255,255,0.015);
+}
+.plan-stop-start { border-color: rgba(56,247,255,0.25); background: rgba(56,247,255,0.05); }
+.plan-stop-late { border-color: rgba(255,62,203,0.45); background: rgba(255,62,203,0.06); }
+.plan-stop-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.plan-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(56,247,255,0.14);
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.plan-carrier { font-size: 12.5px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.plan-trust { font-size: 11px; flex-shrink: 0; }
+.plan-stop-name { font-size: 12.5px; font-weight: 600; }
+.plan-stop-address { font-size: 10.5px; color: var(--text-dim); margin-top: 1px; }
+.plan-stop-status { font-size: 11px; margin-top: 6px; }
+.plan-stop-warn { font-size: 10.5px; color: var(--magenta); margin-top: 5px; line-height: 1.4; }
+.plan-stop-actions { display: flex; gap: 6px; margin-top: 9px; }
+
+/* le trait entre deux arrets porte la distance */
+.plan-leg {
+  position: relative;
+  padding: 7px 0 7px 26px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.plan-leg::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(56,247,255,0.35), rgba(56,247,255,0.08));
+}
+
+.plan-actions { display: flex; gap: 8px; margin-top: 14px; }
+.plan-actions .btn { flex: 1; text-align: center; text-decoration: none; }
+
+.plan-add { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.plan-add-row { display: flex; gap: 8px; }
+.plan-add input, .plan-add select {
+  padding: 9px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.plan-add-row input { flex: 1; }
+.plan-add-row select { flex: 1; }
+.plan-add input:focus, .plan-add select:focus { outline: none; border-color: rgba(56,247,255,0.45); }
+.plan-check { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-dim); }
+.plan-check input { width: 16px; height: 16px; accent-color: var(--cyan); }
+/* display:flex l'emporte sur l'attribut hidden : il faut le dire explicitement */
+.plan-start[hidden] { display: none; }
+.plan-when { display: flex; gap: 6px; align-items: center; }
+.plan-when input {
+  padding: 4px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+.plan-when input:focus { outline: none; border-color: rgba(56,247,255,0.45); }

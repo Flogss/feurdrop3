@@ -28,6 +28,12 @@ function switchView(view) {
   if (view === "stats" && currentView !== "stats") {
     playStatsReveal();
   }
+  // l'onglet Plan interroge des services exterieurs : on ne charge qu'en y
+  // arrivant, jamais dans le rafraichissement de fond
+  if (view === "plan" && currentView !== "plan") {
+    loadPlanNeeds().catch(() => {});
+    loadPlanPoints().catch(() => {});
+  }
   currentView = view;
 }
 
@@ -1461,3 +1467,395 @@ initPush();
 
 refreshAll();
 setInterval(refreshAll, 5000);
+
+// --- Plan : tournee de depot -------------------------------------------------
+// Regle qui gouverne tout cet ecran : ne jamais afficher une certitude qu'on
+// n'a pas. Un point sans horaires connus s'affiche en blanc "horaires
+// inconnus", jamais en vert.
+
+const TRUST_DOT = { verified: "🟢", unverified: "🟠", rejected: "🔴" };
+const STATE_DOT = { open: "🟢", closed: "🔴", unknown: "⚪" };
+
+const planState = {
+  start: null,
+  needs: [],
+  selected: new Set(),
+  result: null,
+  busy: false,
+};
+
+function loadStoredStart() {
+  try {
+    const raw = localStorage.getItem("plan.start");
+    if (raw) planState.start = JSON.parse(raw);
+  } catch (err) {
+    planState.start = null;
+  }
+  renderStart();
+}
+
+function setStart(place) {
+  planState.start = place;
+  localStorage.setItem("plan.start", JSON.stringify(place));
+  document.getElementById("plan-start-results").innerHTML = "";
+  document.getElementById("plan-start-input").value = "";
+  renderStart();
+}
+
+function renderStart() {
+  const box = document.getElementById("plan-start-current");
+  const label = document.getElementById("plan-start-label");
+  if (!planState.start) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  label.textContent = planState.start.label;
+}
+
+document.getElementById("plan-start-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const query = document.getElementById("plan-start-input").value.trim();
+  const box = document.getElementById("plan-start-results");
+  if (query.length < 3) return;
+
+  box.innerHTML = `<div class="row row-inline"><div class="row-main"><div class="row-title">Recherche…</div></div></div>`;
+  try {
+    const { results } = await fetchJSON(`/api/plan/geocode?q=${encodeURIComponent(query)}`);
+    if (results.length === 0) {
+      box.innerHTML = `<div class="row row-inline"><div class="row-main"><div class="row-title">Aucune adresse trouvée en Île-de-France.</div></div></div>`;
+      return;
+    }
+    box.innerHTML = results
+      .map(
+        (r, i) =>
+          `<div class="row row-inline row-pick" data-start-index="${i}">
+             <div class="row-main"><div class="row-title">${escapeHtml(r.label)}</div></div>
+           </div>`
+      )
+      .join("");
+    box.dataset.results = JSON.stringify(results);
+  } catch (err) {
+    box.innerHTML = `<div class="row row-inline"><div class="row-main"><div class="row-title">Recherche impossible : ${escapeHtml(err.message)}</div></div></div>`;
+  }
+});
+
+document.getElementById("plan-start-results").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-start-index]");
+  if (!btn) return;
+  const results = JSON.parse(e.currentTarget.dataset.results || "[]");
+  const place = results[Number(btn.dataset.startIndex)];
+  if (place) setStart(place);
+});
+
+document.getElementById("plan-locate").addEventListener("click", () => {
+  if (!navigator.geolocation) return alert("Ce navigateur ne donne pas la position.");
+  const btn = document.getElementById("plan-locate");
+  btn.disabled = true;
+  btn.textContent = "📍 …";
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const { place } = await fetchJSON(`/api/plan/reverse?lat=${latitude}&lng=${longitude}`);
+        setStart(place || { label: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, lat: latitude, lng: longitude });
+      } catch (err) {
+        alert(`Position trouvée mais adresse introuvable : ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "📍 Me localiser";
+      }
+    },
+    (err) => {
+      btn.disabled = false;
+      btn.textContent = "📍 Me localiser";
+      alert(`Localisation refusée ou indisponible (${err.message}).`);
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+
+async function loadPlanNeeds() {
+  const { needs } = await fetchJSON("/api/plan/needs");
+  planState.needs = needs;
+  // au premier chargement, tout ce qui est routable est coche
+  if (planState.selected.size === 0) {
+    needs.filter((n) => n.routable).forEach((n) => planState.selected.add(n.carrier));
+  }
+  renderNeeds();
+}
+
+function renderNeeds() {
+  const box = document.getElementById("plan-needs");
+  if (planState.needs.length === 0) {
+    box.innerHTML = `<div class="empty-row">Aucun colis en attente.</div>`;
+    return;
+  }
+
+  box.innerHTML = planState.needs
+    .map((need) => {
+      const label = escapeHtml(CARRIER_LABELS[need.carrier] || need.carrier);
+      if (!need.routable) {
+        return `<div class="row row-off">
+          <div class="row-main">
+            <div class="row-title">${label}</div>
+            <div class="row-sub">×${need.count} · pas de réseau de dépôt</div>
+          </div>
+        </div>`;
+      }
+      const checked = planState.selected.has(need.carrier) ? "checked" : "";
+      const known =
+        need.known > 0
+          ? `${need.known} point${need.known > 1 ? "s" : ""} connu${need.known > 1 ? "s" : ""}`
+          : "aucun point connu";
+      return `<label class="row row-pickable">
+        <div class="row-main">
+          <div class="row-title">${label}</div>
+          <div class="row-sub">×${need.count} · ${known}</div>
+        </div>
+        <div class="row-actions">
+          <input type="checkbox" data-need="${escapeAttr(need.carrier)}" ${checked} />
+        </div>
+      </label>`;
+    })
+    .join("");
+}
+
+document.getElementById("plan-needs").addEventListener("change", (e) => {
+  const input = e.target.closest("[data-need]");
+  if (!input) return;
+  if (input.checked) planState.selected.add(input.dataset.need);
+  else planState.selected.delete(input.dataset.need);
+});
+
+function departMinutes() {
+  const value = document.getElementById("plan-depart").value;
+  if (!value) return null;
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
+
+document.getElementById("plan-compute").addEventListener("click", async () => {
+  if (planState.busy) return;
+  if (!planState.start) return alert("Indique d'abord ta position de départ.");
+
+  const needs = planState.needs
+    .filter((n) => n.routable && planState.selected.has(n.carrier))
+    .map((n) => ({ carrier: n.carrier, count: n.count }));
+  if (needs.length === 0) return alert("Coche au moins un transporteur à déposer.");
+
+  const btn = document.getElementById("plan-compute");
+  planState.busy = true;
+  btn.disabled = true;
+  btn.textContent = "Recherche des points et calcul…";
+
+  try {
+    const result = await fetchJSON("/api/plan/compute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start: planState.start,
+        needs,
+        day: document.getElementById("plan-day").value || undefined,
+        departAt: departMinutes(),
+      }),
+    });
+    planState.result = result;
+    renderPlanResult(result);
+    loadPlanPoints();
+  } catch (err) {
+    alert(`Calcul impossible : ${err.message}`);
+  } finally {
+    planState.busy = false;
+    btn.disabled = false;
+    btn.textContent = "Calculer la tournée";
+  }
+});
+
+function renderPlanResult(result) {
+  const panel = document.getElementById("plan-result");
+  panel.hidden = false;
+
+  const km = (result.summary.meters / 1000).toFixed(1);
+  document.getElementById("plan-summary").textContent =
+    `${result.summary.stops} arrêt${result.summary.stops > 1 ? "s" : ""} · ${km} km · ~${result.summary.minutes} min`;
+
+  const legs = result.stops
+    .map((stop) => {
+      const counts = stop.counts
+        .map((c) => `${CARRIER_LABELS[c.carrier] || c.carrier} ×${c.count}`)
+        .join(" + ");
+      const dot = STATE_DOT[stop.status.state] || "⚪";
+      const cutoff = stop.status.cutoff ? ` · dépôt jusqu'à ${escapeHtml(stop.status.cutoff)}` : "";
+      const address = [stop.point.address, stop.point.postal_code, stop.point.city]
+        .filter(Boolean)
+        .join(", ");
+      return `<div class="plan-leg">${(stop.legMeters / 1000).toFixed(1)} km</div>
+        <div class="plan-stop${stop.late ? " plan-stop-late" : ""}">
+          <div class="plan-stop-head">
+            <span class="plan-rank">${stop.rank}</span>
+            <span class="plan-carrier">📦 ${escapeHtml(counts)}</span>
+            <span class="plan-trust">${TRUST_DOT[stop.point.trust] || ""}</span>
+          </div>
+          <div class="plan-stop-name">${escapeHtml(stop.point.name)}</div>
+          <div class="plan-stop-address">${escapeHtml(address)}</div>
+          <div class="plan-stop-status">${dot} ${escapeHtml(stop.status.label)}${cutoff} · arrivée ${escapeHtml(stop.arrival)}</div>
+          ${stop.late ? `<div class="plan-stop-warn">Trop tard pour ce point : passe-le en premier, ou garde ces colis pour demain.</div>` : ""}
+          <div class="plan-stop-actions">
+            <button class="btn btn-ghost btn-small" data-visit="ok" data-point="${stop.point.id}" data-carrier="${escapeAttr(stop.carriers[0])}">✅ Déposé</button>
+            <button class="btn btn-ghost btn-small" data-visit="refuse" data-point="${stop.point.id}" data-carrier="${escapeAttr(stop.carriers[0])}">🔴 Refuse mes colis</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+
+  document.getElementById("plan-stops").innerHTML =
+    `<div class="plan-stop plan-stop-start">
+       <div class="plan-stop-head"><span class="plan-rank">📍</span><span class="plan-carrier">Départ ${escapeHtml(result.departAt)}</span></div>
+       <div class="plan-stop-address">${escapeHtml(result.start.label || "position actuelle")}</div>
+     </div>` + legs;
+
+  document.getElementById("plan-google").href = result.links.google || "#";
+  document.getElementById("plan-apple").href = result.links.apple || "#";
+
+  const notes = [];
+  if (result.summary.estimated) {
+    notes.push("Distance et durée sont estimées à vol d'oiseau corrigé : Google Maps donnera le temps réel.");
+  }
+  if (result.unserved.length > 0) {
+    notes.push(
+      `Aucun point de dépôt connu pour : ${result.unserved
+        .map((c) => CARRIER_LABELS[c] || c)
+        .join(", ")}. Ajoute-les plus bas ou importe ta liste.`
+    );
+  }
+  if (result.sources.pending) {
+    notes.push("Recherche OpenStreetMap lancée en arrière-plan : relance le calcul dans un instant pour en tenir compte.");
+  }
+  if (result.sources.errors.length > 0) notes.push(`Sources indisponibles — ${result.sources.errors.join(" ; ")}`);
+  document.getElementById("plan-notes").textContent = notes.join(" ");
+}
+
+document.getElementById("plan-stops").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-visit]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    await fetchJSON("/api/plan/visit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pointId: Number(btn.dataset.point),
+        carrier: btn.dataset.carrier,
+        result: btn.dataset.visit,
+      }),
+    });
+    btn.textContent = btn.dataset.visit === "ok" ? "✅ Vérifié" : "🔴 Écarté";
+    loadPlanPoints();
+  } catch (err) {
+    btn.disabled = false;
+    alert(err.message);
+  }
+});
+
+async function loadPlanPoints() {
+  const { points, counts } = await fetchJSON("/api/plan/points");
+  document.getElementById("plan-points-count").textContent =
+    `${counts.verified} 🟢 · ${counts.unverified} 🟠${counts.rejected ? ` · ${counts.rejected} 🔴` : ""}`;
+
+  const box = document.getElementById("plan-points");
+  if (points.length === 0) {
+    box.innerHTML = `<div class="empty-row">Aucun point enregistré. Lance un calcul : les bureaux de poste du secteur se chargent tout seuls.</div>`;
+    return;
+  }
+
+  // Les points a soi d'abord : ce sont les seuls qu'on ait interet a relire ou
+  // a corriger. Les bureaux de poste charges tout seuls se comptent, ils ne se
+  // listent pas -- il y en a des dizaines, et ils reviendraient au prochain
+  // calcul meme si on les supprimait.
+  const mine = points.filter((p) => p.source === "manuel" || p.source === "import");
+  const auto = points.length - mine.length;
+
+  const rows = mine
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(
+      (p) => `<div class="row">
+        <div class="row-main">
+          <div class="row-title">${TRUST_DOT[p.trust] || ""} ${escapeHtml(p.name)}</div>
+          <div class="row-sub">${escapeHtml(p.carriers.map((c) => CARRIER_LABELS[c] || c).join(", ") || "—")} · ${escapeHtml(p.city || "")}</div>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-small" data-point-delete="${p.id}">✕</button>
+        </div>
+      </div>`
+    )
+    .join("");
+
+  const autoRow = auto
+    ? `<div class="row row-off">
+         <div class="row-main">
+           <div class="row-title">${auto} point${auto > 1 ? "s" : ""} charg\u00e9${auto > 1 ? "s" : ""} automatiquement</div>
+           <div class="row-sub">R\u00e9seau La Poste et OpenStreetMap, autour de tes d\u00e9parts</div>
+         </div>
+       </div>`
+    : "";
+
+  box.innerHTML = rows + autoRow || `<div class="empty-row">Aucun point pour l'instant.</div>`;
+}
+
+document.getElementById("plan-points").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-point-delete]");
+  if (!btn) return;
+  if (!confirm("Supprimer ce point de dépôt ?")) return;
+  await fetchJSON(`/api/plan/points/${btn.dataset.pointDelete}`, { method: "DELETE" });
+  loadPlanPoints();
+});
+
+document.getElementById("plan-point-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    name: document.getElementById("plan-point-name").value.trim(),
+    address: document.getElementById("plan-point-address").value.trim(),
+    postal_code: document.getElementById("plan-point-postal").value.trim(),
+    city: document.getElementById("plan-point-city").value.trim(),
+    carriers: [document.getElementById("plan-point-carrier").value],
+    trust: document.getElementById("plan-point-verified").checked ? "verified" : "unverified",
+  };
+  try {
+    await fetchJSON("/api/plan/points", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    e.target.reset();
+    document.getElementById("plan-point-verified").checked = true;
+    loadPlanPoints();
+    loadPlanNeeds();
+  } catch (err) {
+    alert(`Ajout impossible : ${err.message}`);
+  }
+});
+
+function initPlan() {
+  const select = document.getElementById("plan-point-carrier");
+  select.innerHTML = Object.entries(CARRIER_LABELS)
+    .filter(([code]) => code !== "BJ" && code !== "Inconnu")
+    .map(([code, label]) => `<option value="${code}">${label}</option>`)
+    .join("");
+
+  const now = new Date();
+  document.getElementById("plan-depart").value =
+    `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  // le jour compte autant que l'heure : les horaires de depot ne sont pas les
+  // memes le dimanche
+  document.getElementById("plan-day").value = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
+
+  loadStoredStart();
+}
+
+document.getElementById("settings-link").addEventListener("click", () => switchView("colis"));
+document.getElementById("settings-back").addEventListener("click", () => switchView("dashboard"));
+
+initPlan();

@@ -150,9 +150,19 @@
         </div>
         <div id="sender-rows" class="rows rows-dense"></div>
       </div>
+
+      <button class="settings-link" id="settings-link" type="button">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5v.2a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H2.9a2 2 0 010-4H3a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.2a2 2 0 010 4H21a1.7 1.7 0 00-1.5 1z"/></svg>
+        <span>Réglages</span>
+      </button>
     </section>
 
     <section id="view-colis" class="view">
+      <div class="view-head">
+        <button class="btn btn-ghost btn-small" id="settings-back" type="button">← Dashboard</button>
+        <h1>Réglages</h1>
+      </div>
+
       <div class="panel" id="push-panel" hidden>
         <div class="panel-head">
           <h2>Notifications</h2>
@@ -232,6 +242,77 @@
       </div>
     </section>
 
+    <section id="view-plan" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Position de départ</h2>
+          <button class="btn btn-ghost btn-small" id="plan-locate" type="button">📍 Me localiser</button>
+        </div>
+        <form class="plan-search" id="plan-start-form">
+          <input type="text" id="plan-start-input" placeholder="Adresse, ville, code postal…" autocomplete="off" />
+          <button type="submit" class="btn btn-primary btn-small">Chercher</button>
+        </form>
+        <div id="plan-start-results" class="rows rows-dense"></div>
+        <div class="plan-start" id="plan-start-current" hidden>
+          <span class="plan-start-pin">📍</span>
+          <span class="plan-start-label" id="plan-start-label">—</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Colis à déposer</h2>
+          <div class="plan-when">
+            <input type="date" id="plan-day" aria-label="Jour du dépôt" />
+            <input type="time" id="plan-depart" aria-label="Heure de départ" />
+          </div>
+        </div>
+        <div id="plan-needs" class="rows rows-dense"></div>
+      </div>
+
+      <button class="btn btn-primary plan-go" id="plan-compute" type="button">Calculer la tournée</button>
+
+      <div class="panel plan-result" id="plan-result" hidden>
+        <div class="panel-head">
+          <h2>Trajet</h2>
+          <span class="chart-range" id="plan-summary">—</span>
+        </div>
+        <div class="plan-stops" id="plan-stops"></div>
+        <div class="plan-actions">
+          <a class="btn btn-primary" id="plan-google" target="_blank" rel="noopener">🗺️ Google Maps</a>
+          <a class="btn btn-ghost" id="plan-apple" target="_blank" rel="noopener">Plans</a>
+        </div>
+        <p class="hint" id="plan-notes"></p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Mes points de dépôt</h2>
+          <span class="chart-range" id="plan-points-count">—</span>
+        </div>
+        <p class="hint">
+          Un point passe en 🟢 vérifié quand tu y as réellement déposé. Les points 🟠 viennent
+          d'OpenStreetMap ou d'un import : ils ne sont utilisés que si aucun point vérifié ne fait
+          l'affaire.
+        </p>
+        <div id="plan-points" class="rows rows-dense"></div>
+        <form class="plan-add" id="plan-point-form">
+          <input type="text" id="plan-point-name" placeholder="Nom du point relais" required />
+          <input type="text" id="plan-point-address" placeholder="Adresse" required />
+          <div class="plan-add-row">
+            <input type="text" id="plan-point-postal" placeholder="CP" />
+            <input type="text" id="plan-point-city" placeholder="Ville" />
+            <select id="plan-point-carrier"></select>
+          </div>
+          <label class="plan-check">
+            <input type="checkbox" id="plan-point-verified" checked />
+            <span>Je l'ai déjà utilisé (🟢 vérifié)</span>
+          </label>
+          <button type="submit" class="btn btn-primary btn-small">Ajouter ce point</button>
+        </form>
+      </div>
+    </section>
+
     <section id="view-stats" class="view">
       <div class="stat-grid stat-grid-single">
         <div class="stat-card glow-magenta" id="best-day-card">
@@ -272,9 +353,9 @@
       <svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10"/></svg>
       <span>Dashboard</span>
     </button>
-    <button class="tab" data-view="colis">
-      <svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/></svg>
-      <span>Colis</span>
+    <button class="tab" data-view="plan">
+      <svg viewBox="0 0 24 24"><path d="M9 20l-6-3V4l6 3m0 13l6-3m-6 3V7m6 10l6 3V7l-6-3m0 13V4m0 0L9 7"/></svg>
+      <span>Plan</span>
     </button>
     <button class="tab" data-view="stats">
       <svg viewBox="0 0 24 24"><path d="M4 19V10M12 19V5M20 19v-7"/></svg>

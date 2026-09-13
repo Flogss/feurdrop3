@@ -2,12 +2,14 @@ require("dotenv").config();
 const path = require("path");
 const express = require("express");
 const apiRouter = require("./routes/api");
+const planRouter = require("./routes/plan");
 const { startBot } = require("./bot");
 const { getPrintToken } = require("./db");
 
 const app = express();
 app.use(express.json());
 app.use("/api", apiRouter);
+app.use("/api/plan", planRouter);
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 const PORT = process.env.PORT || 3000;
