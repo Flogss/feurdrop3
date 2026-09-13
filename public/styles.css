@@ -644,8 +644,15 @@ main { margin-top: 16px; }
 }
 
 /* stock panel */
+/* les deux stocks cote a cote : les pochettes normales et les BJ sont deux
+   cartons differents, chacun son compteur */
+.stock-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stock-grid .panel { margin-bottom: 14px; }
+.stock-panel-bj { --glow: 255, 214, 51; border-color: rgba(255,214,51,0.28); }
+.stock-panel-bj .stock-value { color: #ffd633; text-shadow: 0 0 18px rgba(255,214,51,0.45); }
+
 .stock-panel .panel-head { margin-bottom: 8px; }
-.stock-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.stock-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
 .stock-value {
   font-size: 30px;
   font-weight: 700;
@@ -667,7 +674,9 @@ main { margin-top: 16px; }
 @media (prefers-reduced-motion: reduce) {
   .stock-value.stock-low { animation: none; }
 }
-.stock-custom-form { display: flex; gap: 8px; align-items: center; margin-left: 6px; flex: 1; min-width: 150px; }
+.stock-custom-form { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+.stock-custom-form input { flex: 1; min-width: 0; }
+.stock-custom-form .btn { flex-shrink: 0; }
 .stock-custom-form input {
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--panel-border);

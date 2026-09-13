@@ -104,17 +104,34 @@
         <span class="tour-banner-sub" id="tour-day" hidden>—</span>
       </div>
 
-      <div class="panel stock-panel">
-        <div class="panel-head">
-          <h2>Stock restant</h2>
+      <div class="stock-grid">
+        <div class="panel stock-panel">
+          <div class="panel-head">
+            <h2>Stock restant</h2>
+          </div>
+          <div class="stock-row">
+            <button class="btn btn-round btn-ghost" data-stock="normal" data-delta="-1" title="-1">−</button>
+            <div class="stock-value" id="stock-value">0</div>
+            <button class="btn btn-round btn-primary" data-stock="normal" data-delta="1" title="+1">+</button>
+          </div>
+          <form class="stock-custom-form" data-stock-form="normal">
+            <input type="number" placeholder="± qté" step="1" required />
+            <button type="submit" class="btn btn-primary btn-small">Ajouter</button>
+          </form>
         </div>
-        <div class="stock-row">
-          <button class="btn btn-round btn-ghost" id="stock-minus1" title="-1">−</button>
-          <div class="stock-value" id="stock-value">0</div>
-          <button class="btn btn-round btn-primary" id="stock-plus1" title="+1">+</button>
-          <form id="stock-custom-form" class="stock-custom-form">
-            <input type="number" id="stock-custom-amount" placeholder="± quantité" step="1" required />
-            <button type="button" class="btn btn-primary btn-small" id="stock-custom-add">Ajouter</button>
+
+        <div class="panel stock-panel stock-panel-bj">
+          <div class="panel-head">
+            <h2>Stock BJ</h2>
+          </div>
+          <div class="stock-row">
+            <button class="btn btn-round btn-ghost" data-stock="bj" data-delta="-1" title="-1">−</button>
+            <div class="stock-value" id="stock-bj-value">0</div>
+            <button class="btn btn-round btn-primary" data-stock="bj" data-delta="1" title="+1">+</button>
+          </div>
+          <form class="stock-custom-form" data-stock-form="bj">
+            <input type="number" placeholder="± qté" step="1" required />
+            <button type="submit" class="btn btn-primary btn-small">Ajouter</button>
           </form>
         </div>
       </div>

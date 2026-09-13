@@ -641,17 +641,23 @@ function updateMergeButtonState() {
 const LOW_STOCK_THRESHOLD = 5;
 
 async function loadStock() {
-  const { stock } = await fetchJSON("/api/stock");
-  const el = document.getElementById("stock-value");
-  animateValue(el, String(stock));
-  el.classList.toggle("stock-low", stock <= LOW_STOCK_THRESHOLD);
+  const stocks = await fetchJSON("/api/stock");
+  for (const [kind, id] of [["normal", "stock-value"], ["bj", "stock-bj-value"]]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const value = stocks[kind] || 0;
+    animateValue(el, String(value));
+    el.classList.toggle("stock-low", value <= LOW_STOCK_THRESHOLD);
+  }
 }
 
-async function adjustStock(delta) {
+// Les deux stocks sont independants : dropper un BJ retire du stock BJ, un
+// colis normal du stock normal.
+async function adjustStock(delta, kind = "normal") {
   await fetchJSON("/api/stock/adjust", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ delta }),
+    body: JSON.stringify({ delta, kind }),
   });
   refreshAll();
 }
@@ -1269,14 +1275,19 @@ document.getElementById("merge-to-other-btn").addEventListener("click", async ()
   refreshAll();
 });
 
-document.getElementById("stock-custom-form").addEventListener("submit", (e) => e.preventDefault());
-document.getElementById("stock-plus1").addEventListener("click", () => adjustStock(1));
-document.getElementById("stock-minus1").addEventListener("click", () => adjustStock(-1));
-document.getElementById("stock-custom-add").addEventListener("click", () => {
-  const n = Number(document.getElementById("stock-custom-amount").value);
-  if (!n) return;
-  adjustStock(n);
-  document.getElementById("stock-custom-amount").value = "";
+document.querySelectorAll("[data-stock]").forEach((btn) => {
+  btn.addEventListener("click", () => adjustStock(Number(btn.dataset.delta), btn.dataset.stock));
+});
+
+document.querySelectorAll("[data-stock-form]").forEach((form) => {
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = form.querySelector("input");
+    const n = Number(input.value);
+    if (!n) return;
+    adjustStock(n, form.dataset.stockForm);
+    input.value = "";
+  });
 });
 
 document.getElementById("add-sender-form").addEventListener("submit", async (e) => {

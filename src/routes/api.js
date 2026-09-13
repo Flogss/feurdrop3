@@ -14,7 +14,9 @@ const {
   getDebtsBySender,
   markSenderPaid,
   getStock,
+  getStocks,
   adjustStock,
+  consumeStock,
   getMergeCandidates,
   mergeSendersIntoOther,
   mergeSenderInto,
@@ -22,6 +24,7 @@ const {
   dropByCarrier,
   dropAll,
   dropBySender,
+  dropColis,
   getTourStart,
   startTour,
   endTour,
@@ -157,8 +160,9 @@ router.post("/tour/finish", (req, res) => {
     )
     .get(...(startedAt ? [startedAt] : []));
 
-  const count = dropAll();
-  if (count > 0) adjustStock(-count);
+  const dropped = dropAll();
+  const count = dropped.count;
+  consumeStock(dropped);
   const endedAt = serverNow();
   endTour();
 
@@ -190,7 +194,7 @@ router.post("/tour/finish", (req, res) => {
     saveLastTour(summary);
   }
 
-  res.json({ ok: true, count, value: bag.value, startedAt, endedAt, summary, stock: getStock() });
+  res.json({ ok: true, count, value: bag.value, startedAt, endedAt, summary, stocks: getStocks() });
 });
 
 // Fermeture du resume de tournee affiche sur le dashboard.
@@ -275,11 +279,9 @@ router.get("/colis", (req, res) => {
 });
 
 router.post("/colis/:id/drop", (req, res) => {
-  const info = db
-    .prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE id = ? AND status = 'pending'")
-    .run(req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: "Colis introuvable ou deja drope" });
-  res.json({ ok: true });
+  const dropped = dropColis(req.params.id);
+  if (!dropped) return res.status(404).json({ error: "Colis introuvable ou deja drope" });
+  res.json({ ok: true, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/:id/type", (req, res) => {
@@ -290,21 +292,18 @@ router.post("/colis/:id/type", (req, res) => {
 });
 
 router.post("/colis/drop-all", (req, res) => {
-  const count = dropAll();
-  if (count > 0) adjustStock(-count);
-  res.json({ ok: true, count, stock: getStock() });
+  const dropped = dropAll();
+  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/drop-sender/:name", (req, res) => {
-  const count = dropBySender(req.params.name);
-  if (count > 0) adjustStock(-count);
-  res.json({ ok: true, count, stock: getStock() });
+  const dropped = dropBySender(req.params.name);
+  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/drop-carrier/:carrier", (req, res) => {
-  const count = dropByCarrier(req.params.carrier);
-  if (count > 0) adjustStock(-count);
-  res.json({ ok: true, count, stock: getStock() });
+  const dropped = dropByCarrier(req.params.carrier);
+  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/quick-add/:sender", (req, res) => {
@@ -319,13 +318,15 @@ router.post("/colis/quick-remove/:sender", (req, res) => {
 });
 
 router.get("/stock", (req, res) => {
-  res.json({ stock: getStock() });
+  res.json(getStocks());
 });
 
 router.post("/stock/adjust", (req, res) => {
   const delta = Number(req.body.delta);
+  const kind = req.body.kind === "bj" ? "bj" : "normal";
   if (Number.isNaN(delta)) return res.status(400).json({ error: "Quantite invalide" });
-  res.json({ stock: adjustStock(delta) });
+  adjustStock(delta, kind);
+  res.json(getStocks());
 });
 
 router.get("/debts", (req, res) => {

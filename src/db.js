@@ -169,14 +169,42 @@ function priceForType(sender, type) {
   return sender.price;
 }
 
-function getStock() {
-  return Number(getSetting("stock", 0));
+// Jour comptable : rien ne se poste le dimanche, donc l'argent fait ce jour-la
+// est compte sur le lundi qui suit. La courbe quotidienne n'a d'ailleurs pas de
+// colonne dimanche : sans ce report, ces gains disparaissaient purement et
+// simplement des statistiques.
+const BUSINESS_DAY_SQL =
+  "date(dropped_at, CASE strftime('%w', dropped_at) WHEN '0' THEN '+1 day' ELSE '+0 day' END)";
+
+// Deux stocks independants : les pochettes normales et les BJ ne se piochent
+// pas dans le meme carton.
+const STOCK_KEYS = { normal: "stock", bj: "stock_bj" };
+
+function stockKey(kind) {
+  return STOCK_KEYS[kind] || STOCK_KEYS.normal;
 }
 
-function adjustStock(delta) {
-  const next = getStock() + Number(delta);
-  setSetting("stock", next);
+function getStock(kind = "normal") {
+  return Number(getSetting(stockKey(kind), 0));
+}
+
+function getStocks() {
+  return { normal: getStock("normal"), bj: getStock("bj") };
+}
+
+function adjustStock(delta, kind = "normal") {
+  const next = getStock(kind) + Number(delta);
+  setSetting(stockKey(kind), next);
   return next;
+}
+
+// Retire du stock ce qui vient d'etre drope, chaque type sur son propre
+// compteur.
+function consumeStock({ count = 0, bj = 0 } = {}) {
+  const normal = count - bj;
+  if (normal > 0) adjustStock(-normal, "normal");
+  if (bj > 0) adjustStock(-bj, "bj");
+  return getStocks();
 }
 
 function getPendingSummary() {
@@ -456,43 +484,44 @@ function getCarrierSummary() {
     .all(...params);
 }
 
-function dropByCarrier(carrier) {
+// Toutes les operations de drop renvoient { count, bj } : le stock normal et
+// le stock BJ se decrementent separement.
+function dropWhere(extraSql, extraParams = []) {
   const { clause, params } = tourScope();
-  const base = "UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'";
+  const where = `status = 'pending'${extraSql}${clause}`;
+  const args = [...extraParams, ...params];
 
-  let info;
-  if (carrier === "BJ") {
-    info = db.prepare(`${base} AND type = 'bj'${clause}`).run(...params);
-  } else if (carrier === "Inconnu") {
-    info = db.prepare(`${base} AND type != 'bj' AND carrier IS NULL${clause}`).run(...params);
-  } else {
-    info = db.prepare(`${base} AND type != 'bj' AND carrier = ?${clause}`).run(carrier, ...params);
-  }
+  const bj = db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${where} AND type = 'bj'`).get(...args).c;
+  const info = db
+    .prepare(`UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE ${where}`)
+    .run(...args);
+
   endTourIfEmpty();
-  return info.changes;
+  return { count: info.changes, bj };
+}
+
+function dropByCarrier(carrier) {
+  if (carrier === "BJ") return dropWhere(" AND type = 'bj'");
+  if (carrier === "Inconnu") return dropWhere(" AND type != 'bj' AND carrier IS NULL");
+  return dropWhere(" AND type != 'bj' AND carrier = ?", [carrier]);
 }
 
 // Drop de tous les colis du sac (ou de tout ce qui est en attente hors tournee).
 function dropAll() {
-  const { clause, params } = tourScope();
-  const info = db
-    .prepare(
-      `UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending'${clause}`
-    )
-    .run(...params);
-  endTourIfEmpty();
-  return info.changes;
+  return dropWhere("");
 }
 
 function dropBySender(name) {
-  const { clause, params } = tourScope();
-  const info = db
-    .prepare(
-      `UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE status = 'pending' AND sender_name = ?${clause}`
-    )
-    .run(name, ...params);
+  return dropWhere(" AND sender_name = ?", [name]);
+}
+
+// Drop d'un seul colis, depuis la liste du site.
+function dropColis(id) {
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ? AND status = 'pending'").get(id);
+  if (!colis) return null;
+  db.prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE id = ?").run(id);
   endTourIfEmpty();
-  return info.changes;
+  return { count: 1, bj: colis.type === "bj" ? 1 : 0 };
 }
 
 function findColisByMessage(chatId, messageId) {
@@ -649,7 +678,9 @@ function mondayOf(dateStr) {
 }
 
 function getEarliestDroppedDate() {
-  const row = db.prepare("SELECT MIN(date(dropped_at)) AS d FROM colis WHERE status = 'dropped'").get();
+  const row = db
+    .prepare(`SELECT MIN(${BUSINESS_DAY_SQL}) AS d FROM colis WHERE status = 'dropped'`)
+    .get();
   return row.d;
 }
 
@@ -672,8 +703,8 @@ function getDailySeries() {
   if (capped.length === 0) return { days: [] };
   const rows = db
     .prepare(
-      `SELECT date(dropped_at) AS d, SUM(price) AS value, COUNT(*) AS count
-       FROM colis WHERE status = 'dropped' AND date(dropped_at) BETWEEN ? AND ?
+      `SELECT ${BUSINESS_DAY_SQL} AS d, SUM(price) AS value, COUNT(*) AS count
+       FROM colis WHERE status = 'dropped' AND ${BUSINESS_DAY_SQL} BETWEEN ? AND ?
        GROUP BY d`
     )
     .all(capped[0], capped[capped.length - 1]);
@@ -706,7 +737,7 @@ function getWeeklySeries() {
     const row = db
       .prepare(
         `SELECT SUM(price) AS value, COUNT(*) AS count FROM colis
-         WHERE status = 'dropped' AND date(dropped_at) BETWEEN ? AND ?`
+         WHERE status = 'dropped' AND ${BUSINESS_DAY_SQL} BETWEEN ? AND ?`
       )
       .get(w.start, w.end);
     return { start: w.start, end: w.end, value: row.value || 0, count: row.count || 0 };
@@ -717,7 +748,7 @@ function getWeeklySeries() {
 function getBestDay() {
   return db
     .prepare(
-      `SELECT date(dropped_at) AS date, SUM(price) AS value, COUNT(*) AS count
+      `SELECT ${BUSINESS_DAY_SQL} AS date, SUM(price) AS value, COUNT(*) AS count
        FROM colis WHERE status = 'dropped' GROUP BY date ORDER BY value DESC LIMIT 1`
     )
     .get();
@@ -876,6 +907,7 @@ module.exports = {
   dropByCarrier,
   dropAll,
   dropBySender,
+  dropColis,
   getTourStart,
   startTour,
   endTour,
@@ -921,7 +953,9 @@ module.exports = {
   getDebtsBySender,
   markSenderPaid,
   getStock,
+  getStocks,
   adjustStock,
+  consumeStock,
   getPendingSummary,
   getStatsMessageId,
   setStatsMessageId,
