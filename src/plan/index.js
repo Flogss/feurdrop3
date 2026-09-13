@@ -4,6 +4,7 @@ const osm = require("./sources/osm");
 const boites = require("./sources/boitesjaunes");
 const fedex = require("./sources/fedex");
 const ups = require("./sources/ups");
+const dhl = require("./sources/dhl");
 const { statusAt, deadline, toMinutes, toClock } = require("./hours");
 const { haversine, estimateMatrix, optimize } = require("./route");
 const { allowedFor, LOCKER_CARRIERS } = require("./lockers");
@@ -146,6 +147,22 @@ async function refreshUps(start, day) {
   store.markSwept(cell, 1);
 
   const found = await ups.searchPoints({ lat: start.lat, lng: start.lng, day });
+  for (const point of found) {
+    const stored = store.upsertPoint({ ...point, trust: store.TRUST.verified });
+    if (point.hours) store.saveHours(stored.id, day, point.hours);
+  }
+  store.markSwept(cell, 24);
+  return found.length;
+}
+
+// Points de depot DHL. Meme regle que FedEx et UPS : eteinte sans cle.
+async function refreshDhl(start, day) {
+  if (!dhl.isConfigured()) return null;
+  const { cell, fresh } = store.sweptRecently("dhl", start.lat, start.lng);
+  if (fresh) return 0;
+  store.markSwept(cell, 1);
+
+  const found = await dhl.searchPoints({ lat: start.lat, lng: start.lng, day });
   for (const point of found) {
     const stored = store.upsertPoint({ ...point, trust: store.TRUST.verified });
     if (point.hours) store.saveHours(stored.id, day, point.hours);
@@ -308,7 +325,7 @@ async function buildPlan({
   const wanted = (needs || []).filter((n) => n.carrier && n.count > 0);
   if (wanted.length === 0) throw new Error("aucun colis a deposer");
 
-  const sources = { laposte: 0, boites: 0, fedex: 0, ups: 0, osm: 0, pending: false, errors: [] };
+  const sources = { laposte: 0, boites: 0, fedex: 0, ups: 0, dhl: 0, osm: 0, pending: false, errors: [] };
   if (refresh) {
     // La Poste repond en une seconde : on l'attend. Overpass met parfois une
     // minute ou ne repond pas du tout ; on ne fait pas patienter quelqu'un qui
@@ -345,6 +362,14 @@ async function buildPlan({
               else sources.ups = n;
             })
             .catch((err) => sources.errors.push(`UPS : ${err.message}`))
+        : Promise.resolve(),
+      asks("DHL")
+        ? refreshDhl(start, day)
+            .then((n) => {
+              if (n === null) sources.errors.push("DHL : cle API non configuree");
+              else sources.dhl = n;
+            })
+            .catch((err) => sources.errors.push(`DHL : ${err.message}`))
         : Promise.resolve(),
     ]);
 
@@ -477,6 +502,7 @@ module.exports = {
   refreshBoitesJaunes,
   refreshFedex,
   refreshUps,
+  refreshDhl,
   refreshOsm,
   candidatesFor,
   today,
