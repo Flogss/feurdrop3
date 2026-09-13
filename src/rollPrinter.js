@@ -20,9 +20,13 @@ const USABLE_WIDTH = ROLL_WIDTH - MARGIN * 2;
 const COLUMN_WIDTH = (USABLE_WIDTH - COLUMN_GAP) / 2;
 const PAIR_MIN_SCALE = 0.8; // on ne reduit pas un bordereau de plus de 20 % pour l'apparier
 
-// Oriente et met a l'echelle un bordereau pour un emplacement donne. On
-// n'agrandit jamais : un code-barres agrandi ne se lit pas mieux, et le papier
-// coute plus cher que les millimetres gagnes.
+// Oriente et met a l'echelle un bordereau pour un emplacement donne.
+// Sur un rouleau, ce qui coute c'est la LONGUEUR : a lisibilite egale, on
+// choisit l'orientation qui consomme le moins de papier, pas celle qui fait le
+// plus gros bordereau. On n'agrandit jamais, et on ne descend pas sous
+// MIN_SCALE pour ne pas rendre un code-barres douteux.
+const MIN_SCALE = 0.7;
+
 function fitInto(width, height, slotWidth) {
   const options = [
     { rotation: 0, w: width, h: height },
@@ -32,8 +36,10 @@ function fitInto(width, height, slotWidth) {
     return { ...option, scale, drawnW: option.w * scale, drawnH: option.h * scale };
   });
 
-  // a egalite d'echelle, on garde l'orientation d'origine
-  return options.reduce((a, b) => (b.scale > a.scale + 1e-6 ? b : a));
+  const lisibles = options.filter((o) => o.scale >= MIN_SCALE);
+  if (lisibles.length === 0) return options.reduce((a, b) => (b.scale > a.scale + 1e-6 ? b : a));
+  // le plus court sur le rouleau ; a egalite, l'orientation d'origine
+  return lisibles.reduce((a, b) => (b.drawnH < a.drawnH - 1e-6 ? b : a));
 }
 
 // Trait de coupe discret entre deux bordereaux.

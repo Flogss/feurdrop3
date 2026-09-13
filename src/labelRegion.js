@@ -43,10 +43,70 @@ function unitBounds(m) {
   };
 }
 
+// --- Encre reelle d'une image ------------------------------------------------
+// Certains transporteurs livrent toute la page en bitmap : l'image couvre alors
+// la feuille entiere alors que le bordereau n'en occupe qu'un coin. Sans
+// regarder les pixels, on recadrerait sur du blanc. pdfjs decode deja ces
+// images pour le rendu, on se sert de ses donnees.
+const WHITE = 245; // au-dessus, on considere que c'est du papier
+const SCAN_STEP = 2; // un pixel sur deux suffit pour trouver les bords
+
+// Rectangle d'encre dans le carre unite de l'image (origine en bas a gauche,
+// comme en PDF), ou null si l'image est inexploitable ou entierement blanche.
+function imageInkRect(image) {
+  const { width, height, kind, data } = image;
+  if (!data || !width || !height) return null;
+  // 2 = RGB, 3 = RGBA ; les autres formats sont rares, on garde l'image entiere
+  const channels = kind === 2 ? 3 : kind === 3 ? 4 : 0;
+  if (!channels) return null;
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += SCAN_STEP) {
+    const row = y * width * channels;
+    for (let x = 0; x < width; x += SCAN_STEP) {
+      const i = row + x * channels;
+      if (channels === 4 && data[i + 3] < 16) continue; // transparent
+      if (data[i] > WHITE && data[i + 1] > WHITE && data[i + 2] > WHITE) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) return null;
+
+  // la ligne 0 d'une image est en HAUT, alors que le carre unite a son origine
+  // en bas : l'axe vertical s'inverse
+  return {
+    u0: Math.max(0, minX - SCAN_STEP) / width,
+    u1: Math.min(width, maxX + SCAN_STEP + 1) / width,
+    v0: 1 - Math.min(height, maxY + SCAN_STEP + 1) / height,
+    v1: 1 - Math.max(0, minY - SCAN_STEP) / height,
+  };
+}
+
+function subRectBounds(ctm, r) {
+  const pts = [[r.u0, r.v0], [r.u1, r.v0], [r.u0, r.v1], [r.u1, r.v1]].map(([x, y]) => [
+    ctm[0] * x + ctm[2] * y + ctm[4],
+    ctm[1] * x + ctm[3] * y + ctm[5],
+  ]);
+  return {
+    left: Math.min(...pts.map((p) => p[0])),
+    bottom: Math.min(...pts.map((p) => p[1])),
+    right: Math.max(...pts.map((p) => p[0])),
+    top: Math.max(...pts.map((p) => p[1])),
+  };
+}
+
 // Une barre de code-barres : un trait tres fin et nettement allonge. Les
 // bibliotheques PDF dessinent souvent tout un code-barres en un seul chemin,
 // donc il suffit d'en trouver un.
 function isBarcodeBar(box) {
+  if (box.kind === "text") return false;
   const w = (box.right - box.left) / MM;
   const h = (box.top - box.bottom) / MM;
   return (w < 3 && h > 6) || (h < 3 && w > 6);
@@ -88,7 +148,19 @@ async function collectInk(page, pdfjs) {
       fn === OPS.paintInlineImageXObject ||
       fn === OPS.paintJpegXObject
     ) {
-      items.push({ kind: "draw", ...unitBounds(ctm) });
+      // on recadre l'image sur son encre : une page entiere livree en bitmap
+      // ne doit pas compter comme de l'encre du bord au bord
+      let box = unitBounds(ctm);
+      const id = args[0];
+      try {
+        if (typeof id === "string" && page.objs.has(id)) {
+          const rect = imageInkRect(page.objs.get(id));
+          if (rect) box = subRectBounds(ctm, rect);
+        }
+      } catch (err) {
+        // image non decodee : on garde son emprise complete
+      }
+      items.push({ kind: "image", ...box });
     } else if (fn === OPS.constructPath) {
       const coords = args[1];
       let minX = Infinity;
@@ -106,7 +178,7 @@ async function collectInk(page, pdfjs) {
       const [x1, y1] = project(minX, minY);
       const [x2, y2] = project(maxX, maxY);
       items.push({
-        kind: "draw",
+        kind: "path",
         left: Math.min(x1, x2),
         bottom: Math.min(y1, y2),
         right: Math.max(x1, x2),
@@ -118,8 +190,12 @@ async function collectInk(page, pdfjs) {
   const pageArea = viewport.width * viewport.height;
   return items.filter((b) => {
     if (b.right <= b.left || b.top <= b.bottom) return false;
-    // les fonds et grands cadres masqueraient toute separation
-    if (b.kind === "draw" && (b.right - b.left) * (b.top - b.bottom) > pageArea * BACKGROUND_AREA) return false;
+    // Un grand TRACE qui couvre la page est un fond ou un cadre : il
+    // masquerait toute separation. Une grande IMAGE, au contraire, EST
+    // l'etiquette : certains transporteurs livrent toute la page en bitmap.
+    if (b.kind === "path" && (b.right - b.left) * (b.top - b.bottom) > pageArea * BACKGROUND_AREA) {
+      return false;
+    }
     return true;
   });
 }
