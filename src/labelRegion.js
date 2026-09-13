@@ -1,16 +1,27 @@
-// Trouve la zone utile d'une page d'etiquette : l'encre, debarrassee des fonds
-// de page, et surtout debarrassee du bloc "INSTRUCTIONS D'EMBALLAGE /
-// PROCEDURE DETAILLEE" que certains transporteurs collent a cote du bordereau.
+// Trouve la zone utile d'une page d'etiquette : l'encre reellement visible,
+// debarrassee du bloc "INSTRUCTIONS D'EMBALLAGE / PROCEDURE DETAILLEE" que
+// certains transporteurs collent a cote du bordereau.
 //
-// La regle de decoupe est volontairement prudente : on ne jette un morceau de
-// page que s'il est separe du reste par une vraie gouttiere ET qu'il ne
-// contient aucun code-barres. Un bordereau porte toujours un code-barres ; un
-// bloc d'instructions, jamais. Dans le doute, on garde tout : perdre du papier
-// est sans consequence, couper un code-barres fait perdre le colis.
+// Deux pieges que cette analyse evite, parce qu'ils gonflent la zone gardee et
+// font imprimer des metres de blanc :
+//
+//   - un trace n'est pas forcement dessine. La plupart des PDF d'etiquettes
+//     commencent par un rectangle de la taille de la page qui sert uniquement
+//     de zone de decoupe (clip). Il faut regarder l'operation qui SUIT le
+//     trace pour savoir s'il est peint ;
+//   - une image ne contient pas de l'encre partout. Chronopost livre la feuille
+//     entiere en un seul JPEG dont la moitie gauche est blanche : sans regarder
+//     les pixels, on recadre sur du papier.
+//
+// La regle de decoupe reste prudente : on ne jette un morceau de page que s'il
+// est separe du reste par une vraie gouttiere ET qu'il ne contient aucun
+// code-barres. Un bordereau porte toujours un code-barres ; un bloc
+// d'instructions, jamais. Dans le doute on garde tout : perdre du papier est
+// sans consequence, couper un code-barres fait perdre le colis.
 
 const MM = 72 / 25.4;
 const MIN_GUTTER = 6 * MM; // en-deca, c'est une simple marge entre deux blocs
-const BACKGROUND_AREA = 0.5; // un dessin couvrant plus de la moitie de la page est un fond
+const BACKGROUND_AREA = 0.5; // un aplat couvrant plus de la moitie de la page est un fond
 const MARGIN = 1.5 * MM; // air autour de la zone gardee
 
 let pdfjsPromise = null;
@@ -30,35 +41,55 @@ function multiply(m, n) {
   ];
 }
 
-function unitBounds(m) {
-  const pts = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([x, y]) => [
-    m[0] * x + m[2] * y + m[4],
-    m[1] * x + m[3] * y + m[5],
-  ]);
+function boundsOf(points) {
   return {
-    left: Math.min(...pts.map((p) => p[0])),
-    bottom: Math.min(...pts.map((p) => p[1])),
-    right: Math.max(...pts.map((p) => p[0])),
-    top: Math.max(...pts.map((p) => p[1])),
+    left: Math.min(...points.map((p) => p[0])),
+    bottom: Math.min(...points.map((p) => p[1])),
+    right: Math.max(...points.map((p) => p[0])),
+    top: Math.max(...points.map((p) => p[1])),
   };
 }
 
+// Emprise d'un rectangle du repere unite (une image) une fois transforme.
+function rectBounds(ctm, r) {
+  return boundsOf(
+    [[r.u0, r.v0], [r.u1, r.v0], [r.u0, r.v1], [r.u1, r.v1]].map(([x, y]) => [
+      ctm[0] * x + ctm[2] * y + ctm[4],
+      ctm[1] * x + ctm[3] * y + ctm[5],
+    ])
+  );
+}
+
+function intersect(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    left: Math.max(a.left, b.left),
+    bottom: Math.max(a.bottom, b.bottom),
+    right: Math.min(a.right, b.right),
+    top: Math.min(a.top, b.top),
+  };
+}
+
+function isEmpty(box) {
+  return !box || box.right <= box.left || box.top <= box.bottom;
+}
+
 // --- Encre reelle d'une image ------------------------------------------------
-// Certains transporteurs livrent toute la page en bitmap : l'image couvre alors
-// la feuille entiere alors que le bordereau n'en occupe qu'un coin. Sans
-// regarder les pixels, on recadrerait sur du blanc. pdfjs decode deja ces
-// images pour le rendu, on se sert de ses donnees.
+// pdfjs decode deja ces images pour le rendu, on se sert de ses donnees.
 const WHITE = 245; // au-dessus, on considere que c'est du papier
+const ALPHA = 40; // en-dessous, le pixel est trop transparent pour se voir
 const SCAN_STEP = 2; // un pixel sur deux suffit pour trouver les bords
 
 // Rectangle d'encre dans le carre unite de l'image (origine en bas a gauche,
-// comme en PDF), ou null si l'image est inexploitable ou entierement blanche.
+// comme en PDF). Renvoie null si l'image est illisible (on gardera alors son
+// emprise complete) et { blank: true } si elle est entierement blanche.
 function imageInkRect(image) {
   const { width, height, kind, data } = image;
   if (!data || !width || !height) return null;
-  // 2 = RGB, 3 = RGBA ; les autres formats sont rares, on garde l'image entiere
+  // 2 = RGB, 3 = RGBA ; les autres formats sont rares, on ne prend pas de risque
   const channels = kind === 2 ? 3 : kind === 3 ? 4 : 0;
-  if (!channels) return null;
+  if (!channels || data.length < width * height * channels) return null;
 
   let minX = width;
   let minY = height;
@@ -69,7 +100,7 @@ function imageInkRect(image) {
     const row = y * width * channels;
     for (let x = 0; x < width; x += SCAN_STEP) {
       const i = row + x * channels;
-      if (channels === 4 && data[i + 3] < 16) continue; // transparent
+      if (channels === 4 && data[i + 3] < ALPHA) continue;
       if (data[i] > WHITE && data[i + 1] > WHITE && data[i + 2] > WHITE) continue;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
@@ -77,7 +108,7 @@ function imageInkRect(image) {
       if (y > maxY) maxY = y;
     }
   }
-  if (maxX < 0) return null;
+  if (maxX < 0) return { blank: true };
 
   // la ligne 0 d'une image est en HAUT, alors que le carre unite a son origine
   // en bas : l'axe vertical s'inverse
@@ -89,19 +120,6 @@ function imageInkRect(image) {
   };
 }
 
-function subRectBounds(ctm, r) {
-  const pts = [[r.u0, r.v0], [r.u1, r.v0], [r.u0, r.v1], [r.u1, r.v1]].map(([x, y]) => [
-    ctm[0] * x + ctm[2] * y + ctm[4],
-    ctm[1] * x + ctm[3] * y + ctm[5],
-  ]);
-  return {
-    left: Math.min(...pts.map((p) => p[0])),
-    bottom: Math.min(...pts.map((p) => p[1])),
-    right: Math.max(...pts.map((p) => p[0])),
-    top: Math.max(...pts.map((p) => p[1])),
-  };
-}
-
 // Une barre de code-barres : un trait tres fin et nettement allonge. Les
 // bibliotheques PDF dessinent souvent tout un code-barres en un seul chemin,
 // donc il suffit d'en trouver un.
@@ -110,6 +128,14 @@ function isBarcodeBar(box) {
   const w = (box.right - box.left) / MM;
   const h = (box.top - box.bottom) / MM;
   return (w < 3 && h > 6) || (h < 3 && w > 6);
+}
+
+// Un aplat blanc sans contour ne se voit pas sur du papier blanc.
+function isInvisible(color) {
+  if (!color) return false;
+  const [r, g, b] = color;
+  const max = Math.max(r, g, b) > 1 ? 255 : 1;
+  return r / max > 0.97 && g / max > 0.97 && b / max > 0.97;
 }
 
 // Tout ce qui est dessine sur la page : textes (position et taille) et traces.
@@ -133,34 +159,66 @@ async function collectInk(page, pdfjs) {
 
   const ops = await page.getOperatorList();
   const { OPS } = pdfjs;
+  const PAINTS = new Set(
+    [
+      OPS.fill,
+      OPS.eoFill,
+      OPS.stroke,
+      OPS.closeStroke,
+      OPS.fillStroke,
+      OPS.eoFillStroke,
+      OPS.closeFillStroke,
+      OPS.closeEOFillStroke,
+    ].filter((op) => op !== undefined)
+  );
+  const FILL_ONLY = new Set([OPS.fill, OPS.eoFill].filter((op) => op !== undefined));
+
   let ctm = [1, 0, 0, 1, 0, 0];
+  let clip = null; // zone de decoupe courante, en points page
+  let fillColor = null;
+  let pending = null; // dernier trace construit, pas encore peint ni utilise en clip
   const stack = [];
+
+  const add = (box) => {
+    const visible = intersect(box, clip);
+    if (!isEmpty(visible)) items.push(visible);
+  };
 
   for (let i = 0; i < ops.fnArray.length; i += 1) {
     const fn = ops.fnArray[i];
     const args = ops.argsArray[i];
 
-    if (fn === OPS.save) stack.push(ctm);
-    else if (fn === OPS.restore) ctm = stack.pop() || ctm;
-    else if (fn === OPS.transform) ctm = multiply(args, ctm);
-    else if (
+    if (fn === OPS.save) {
+      stack.push({ ctm, clip });
+    } else if (fn === OPS.restore) {
+      const saved = stack.pop();
+      if (saved) {
+        ctm = saved.ctm;
+        clip = saved.clip;
+      }
+    } else if (fn === OPS.transform) {
+      ctm = multiply(args, ctm);
+    } else if (fn === OPS.setFillRGBColor) {
+      fillColor = args;
+    } else if (
       fn === OPS.paintImageXObject ||
       fn === OPS.paintInlineImageXObject ||
       fn === OPS.paintJpegXObject
     ) {
-      // on recadre l'image sur son encre : une page entiere livree en bitmap
-      // ne doit pas compter comme de l'encre du bord au bord
-      let box = unitBounds(ctm);
+      // on recadre l'image sur son encre : une feuille entiere livree en bitmap
+      // ne doit pas compter comme de l'encre d'un bord a l'autre
+      let box = rectBounds(ctm, { u0: 0, v0: 0, u1: 1, v1: 1 });
       const id = args[0];
       try {
         if (typeof id === "string" && page.objs.has(id)) {
-          const rect = imageInkRect(page.objs.get(id));
-          if (rect) box = subRectBounds(ctm, rect);
+          const ink = imageInkRect(page.objs.get(id));
+          if (ink && ink.blank) continue; // image entierement blanche
+          if (ink) box = rectBounds(ctm, ink);
         }
       } catch (err) {
         // image non decodee : on garde son emprise complete
       }
-      items.push({ kind: "image", ...box });
+      add({ kind: "image", ...box });
     } else if (fn === OPS.constructPath) {
       const coords = args[1];
       let minX = Infinity;
@@ -173,26 +231,25 @@ async function collectInk(page, pdfjs) {
         minY = Math.min(minY, coords[k + 1]);
         maxY = Math.max(maxY, coords[k + 1]);
       }
+      pending = null;
       if (!Number.isFinite(minX)) continue;
       const project = (x, y) => [ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5]];
-      const [x1, y1] = project(minX, minY);
-      const [x2, y2] = project(maxX, maxY);
-      items.push({
-        kind: "path",
-        left: Math.min(x1, x2),
-        bottom: Math.min(y1, y2),
-        right: Math.max(x1, x2),
-        top: Math.max(y1, y2),
-      });
+      pending = boundsOf([project(minX, minY), project(maxX, maxY)]);
+    } else if (fn === OPS.clip || fn === OPS.eoClip) {
+      // le trace ne sera pas dessine : il restreint ce qui suit
+      if (pending) clip = intersect(clip, pending);
+    } else if (PAINTS.has(fn)) {
+      if (pending && !(FILL_ONLY.has(fn) && isInvisible(fillColor))) {
+        add({ kind: "path", ...pending });
+      }
+      pending = null;
     }
   }
 
   const pageArea = viewport.width * viewport.height;
   return items.filter((b) => {
-    if (b.right <= b.left || b.top <= b.bottom) return false;
-    // Un grand TRACE qui couvre la page est un fond ou un cadre : il
-    // masquerait toute separation. Une grande IMAGE, au contraire, EST
-    // l'etiquette : certains transporteurs livrent toute la page en bitmap.
+    if (isEmpty(b)) return false;
+    // un aplat qui couvre la page est un fond : il masquerait toute separation
     if (b.kind === "path" && (b.right - b.left) * (b.top - b.bottom) > pageArea * BACKGROUND_AREA) {
       return false;
     }

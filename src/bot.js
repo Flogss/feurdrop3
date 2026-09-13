@@ -894,7 +894,7 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
   const caption =
     captionFor(rows, printedIds) +
     (onRoll
-      ? `\n📏 ${assembled.rows} rangee${assembled.rows > 1 ? "s" : ""} de rouleau` +
+      ? `\n📏 ${(assembled.lengthMm / 10).toFixed(0)} cm de rouleau · ${assembled.rows} rangee${assembled.rows > 1 ? "s" : ""}` +
         (assembled.trimmed > 0
           ? ` · ${assembled.trimmed} bloc${assembled.trimmed > 1 ? "s" : ""} d'instructions retire${assembled.trimmed > 1 ? "s" : ""}`
           : "") +
