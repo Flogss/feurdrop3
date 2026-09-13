@@ -33,48 +33,76 @@ function distanceFrom(start, point) {
 // seule source qu'on peut marquer "verifie" sans l'avoir vue de ses yeux :
 // c'est le referentiel de l'operateur, et il publie lui-meme ses heures
 // limites de depot.
+// Le reseau francilien entier est charge une fois (environ 1500 points) et
+// garde un mois : les bureaux et relais ne bougent pas d'un jour a l'autre.
+// Chercher dans un rayon autour du depart, comme avant, plafonnait a une
+// trentaine de points et donnait l'impression d'un reseau minuscule.
+async function ensureLaPosteCatalog() {
+  const { cell, fresh } = store.sweptRecently("laposte-idf", 0, 0);
+  if (fresh && store.countBySource("laposte") > 0) return 0;
+
+  let count = 0;
+  await laposte.loadIleDeFrance({
+    onBatch: (batch) => {
+      for (const point of batch) {
+        // transporteurs provisoires, deduits de la nature du site : c'est ce
+        // qui donne la taille reelle du reseau. Le calendrier du jour les
+        // remplace, site par site, pour les points proches du depart.
+        store.upsertPoint({
+          ...point,
+          carriers: laposte.carriersForKind(point.kind),
+          trust: store.TRUST.verified,
+        });
+        count += 1;
+      }
+    },
+  });
+  store.markSwept(cell, 24 * 30);
+  if (count > 0) console.log(`[plan] reseau La Poste : ${count} points en Ile-de-France`);
+  return count;
+}
+
+// Horaires et heures limites de depot des points La Poste les plus proches du
+// depart, pour la journee voulue. C'est ce qui determine ce que chacun accepte
+// ce jour-la : un site sans heure limite publiee n'est pas presente comme
+// prenant les colis.
 async function refreshLaPoste(start, day) {
-  const found = await laposte.searchPoints({ ...start, radius: SEARCH_RADIUS });
-  const hours = await laposte.fetchHours(found.map((p) => p.source_ref), day);
+  await ensureLaPosteCatalog();
 
-  const saved = [];
-  for (const point of found) {
+  const near = store.nearestBySource("laposte", start.lat, start.lng, 30);
+  const hours = await laposte.fetchHours(near.map((p) => p.source_ref), day);
+
+  let usable = 0;
+  for (const point of near) {
     const dayHours = hours.get(point.source_ref) || null;
-    const carriers = laposte.carriersFrom(dayHours);
-    // un site sans heure limite de depot publiee ce jour-la n'est pas presente
-    // comme prenant les colis
-    if (carriers.length === 0) continue;
-
-    const stored = store.upsertPoint({ ...point, carriers, trust: store.TRUST.verified });
-    store.saveHours(stored.id, day, dayHours);
-    saved.push(stored.id);
+    const carriers = laposte.carriersFrom(dayHours, point.kind);
+    store.setNetworks(point.id, carriers);
+    if (dayHours) store.saveHours(point.id, day, dayHours);
+    if (carriers.length > 0) usable += 1;
   }
-  return saved.length;
+  return usable;
 }
 
 // Points OpenStreetMap : enregistres en "a verifier", jamais mieux. Overpass
 // met des secondes a repondre et sature souvent : une zone deja ratissee dans
 // la journee n'est pas redemandee.
 async function refreshOsm(start, day) {
-  const { cell, fresh } = store.sweptRecently("osm", start.lat, start.lng);
+  const { cell, fresh } = store.sweptRecently("osm-idf", 0, 0);
   if (fresh) return 0;
   // marque tout de suite : deux calculs lances coup sur coup ne doivent pas
   // interroger Overpass deux fois
   store.markSwept(cell, 1);
 
-  try {
-    // midi : evite qu'un decalage de fuseau fasse changer de jour de la semaine
-    const found = await osm.searchPoints({ ...start, radius: 3000, day: new Date(`${day}T12:00:00`) });
-    for (const point of found) {
-      const stored = store.upsertPoint({ ...point, trust: store.TRUST.unverified });
-      if (point.hours) store.saveHours(stored.id, day, point.hours);
-    }
-    store.markSwept(cell, 24);
-    return found.length;
-  } catch (err) {
-    // on reessaiera dans une heure, pas a chaque calcul
-    throw err;
+  // midi : evite qu'un decalage de fuseau fasse changer de jour de la semaine
+  const found = await osm.searchPoints({ region: true, day: new Date(`${day}T12:00:00`) });
+  for (const point of found) {
+    const stored = store.upsertPoint({ ...point, trust: store.TRUST.unverified });
+    if (point.hours) store.saveHours(stored.id, day, point.hours);
   }
+  // la carte bouge lentement : une fois par semaine suffit
+  store.markSwept(cell, 24 * 7);
+  if (found.length > 0) console.log(`[plan] OpenStreetMap : ${found.length} points en Ile-de-France`);
+  return found.length;
 }
 
 // Boites aux lettres de rue autour du depart, avec leur heure de levee.
@@ -150,6 +178,9 @@ function candidatesFor(carrier, start, day, departAt, excluded = new Set(), incl
       // une levee ratee n'empeche pas de poster : on ne retire jamais une
       // boite aux lettres du choix
       if (point.hours && point.hours.soft) return true;
+      // ferme toute la journee : la source l'a dit explicitement (plage vide),
+      // ce n'est pas une inconnue
+      if (point.hours && point.hours.ranges && point.hours.ranges.length === 0) return false;
       const limit = deadline(point.hours, carrier);
       return limit === null || limit === undefined || limit > departAt;
     })
@@ -161,6 +192,29 @@ function candidatesFor(carrier, start, day, departAt, excluded = new Set(), incl
 }
 
 // --- Choix des arrets --------------------------------------------------------
+
+// Deux points a la meme adresse sont le meme commerce vu par deux reseaux :
+// la boutique qui fait FedEx fait souvent aussi Mondial Relay, et chaque
+// source la decrit a sa facon. Les reunir evite de s'arreter deux fois au
+// meme endroit.
+const SAME_PLACE_M = 40;
+
+function mergeSamePlace(stops) {
+  const merged = [];
+  for (const stop of stops) {
+    const twin = merged.find((m) => haversine(m.point, stop.point) < SAME_PLACE_M);
+    if (twin) {
+      twin.carriers = [...twin.carriers, ...stop.carriers];
+      twin.counts = [...twin.counts, ...stop.counts];
+      // on garde la description la plus informative : celle qui a des horaires
+      if (!twin.point.hours && stop.point.hours) twin.point = stop.point;
+      twin.alsoKnownAs = [...(twin.alsoKnownAs || []), stop.point.name];
+    } else {
+      merged.push({ ...stop });
+    }
+  }
+  return merged;
+}
 
 // Un point qui prend plusieurs de nos transporteurs vaut mieux que deux
 // points : c'est un arret en moins, donc du temps en moins.
@@ -229,6 +283,16 @@ function isSoft(stop) {
   return Boolean(stop.point.hours && stop.point.hours.soft);
 }
 
+// Heure d'ouverture d'un arret, s'il en a une : arriver avant, c'est attendre.
+function stopOpensAt(stop) {
+  const hours = stop.point.hours;
+  if (!hours || !hours.ranges || hours.soft) return null;
+  const starts = hours.ranges
+    .map((range) => toMinutes(String(range).split("-")[0]))
+    .filter((value) => value !== null);
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
 async function buildPlan({
   start,
   needs,
@@ -267,7 +331,10 @@ async function buildPlan({
         ? refreshFedex(start, day)
             .then((n) => {
               if (n === null) sources.errors.push("FedEx : cle API non configuree");
-              else sources.fedex = n;
+              else {
+                sources.fedex = n;
+                sources.fedexSandbox = fedex.isSandbox();
+              }
             })
             .catch((err) => sources.errors.push(`FedEx : ${err.message}`))
         : Promise.resolve(),
@@ -281,7 +348,7 @@ async function buildPlan({
         : Promise.resolve(),
     ]);
 
-    if (useOsm && !store.sweptRecently("osm", start.lat, start.lng).fresh) {
+    if (useOsm && !store.sweptRecently("osm-idf", 0, 0).fresh) {
       sources.pending = true;
       refreshOsm(start, day).catch((err) => console.warn("[plan] OpenStreetMap :", err.message));
     }
@@ -304,9 +371,10 @@ async function buildPlan({
       ])
     );
     const { stops, unserved } = chooseStops(wanted, pools);
-    const withDeadline = stops.map((stop) => ({
+    const withDeadline = mergeSamePlace(stops).map((stop) => ({
       ...stop,
       deadline: stopDeadline(stop),
+      opensAt: stopOpensAt(stop),
       soft: isSoft(stop),
     }));
     const matrix = estimateMatrix([start, ...withDeadline.map((s) => s.point)]);
@@ -361,6 +429,7 @@ async function buildPlan({
       meters: run.meters,
       minutes: Math.round(run.minutes),
       late: run.late,
+      waited: Math.round(run.waited || 0),
       estimated: matrix.estimated,
     },
     links: mapsLinks(start, ordered),

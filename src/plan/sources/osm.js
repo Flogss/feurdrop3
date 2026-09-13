@@ -19,6 +19,7 @@ const ENDPOINTS = [
 ];
 const TRY_MS = 9000; // par serveur
 const BUDGET_MS = 18000; // pour l'ensemble des essais
+const REGION_TRY_MS = 120000; // la requete regionale est autrement plus lourde
 
 // Marques reconnues sans ambiguite. Une marque absente de cette table n'est
 // rattachee a aucun transporteur : mieux vaut ne rien proposer que proposer un
@@ -42,24 +43,34 @@ function carriersFor(tags) {
   return [...found];
 }
 
-function buildQuery(lat, lng, radius) {
-  const around = `(around:${radius},${lat},${lng})`;
+const BRAND_FILTER = "Mondial Relay|Pickup|Chronopost|DPD|UPS|DHL|GLS";
+
+// Emprise de l'Ile-de-France. Une seule requete pour toute la region vaut
+// mieux qu'un ratissage autour de chaque depart : le resultat couvre les
+// endroits ou on n'est pas encore alle.
+const IDF_BBOX = "48.10,1.40,49.25,3.60";
+
+function buildQuery(area, timeout) {
   const filters = [
-    `nwr["brand"~"Mondial Relay|Pickup|Chronopost|DPD|UPS|DHL|GLS",i]${around};`,
-    `nwr["operator"~"Mondial Relay|Pickup|Chronopost|DPD|UPS|DHL|GLS",i]${around};`,
+    `nwr["brand"~"${BRAND_FILTER}",i]${area};`,
+    `nwr["operator"~"${BRAND_FILTER}",i]${area};`,
   ].join("");
-  return `[out:json][timeout:30];(${filters});out center tags;`;
+  return `[out:json][timeout:${timeout}];(${filters});out center tags;`;
 }
 
 // Points relais trouves autour d'un point. `day` sert a interpreter les
 // horaires OSM pour la bonne journee.
-async function searchPoints({ lat, lng, radius = 2500, day = new Date() }) {
-  const body = new URLSearchParams({ data: buildQuery(lat, lng, radius) });
+// `region: true` charge toute l'Ile-de-France ; sinon un rayon autour d'un
+// point. La requete regionale met une trentaine de secondes : elle n'a sa
+// place qu'en tache de fond.
+async function searchPoints({ lat, lng, radius = 2500, day = new Date(), region = false }) {
+  const area = region ? `(${IDF_BBOX})` : `(around:${radius},${lat},${lng})`;
+  const body = new URLSearchParams({ data: buildQuery(area, region ? 180 : 30) });
   let data = null;
   let lastError = null;
   // budget global : on ne fait pas attendre une tournee parce qu'un serveur
   // benevole sature. Au-dela, on s'en passe et on le dit.
-  const until = Date.now() + BUDGET_MS;
+  const until = Date.now() + (region ? REGION_TRY_MS * ENDPOINTS.length : BUDGET_MS);
 
   for (const endpoint of ENDPOINTS) {
     if (Date.now() >= until) break;
@@ -67,7 +78,7 @@ async function searchPoints({ lat, lng, radius = 2500, day = new Date() }) {
       data = await fetchJson(endpoint, {
         method: "POST",
         body,
-        timeout: Math.min(TRY_MS, until - Date.now()),
+        timeout: Math.min(region ? REGION_TRY_MS : TRY_MS, until - Date.now()),
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
       break;

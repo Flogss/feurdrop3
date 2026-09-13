@@ -1679,8 +1679,9 @@ function renderPlanResult(result) {
   panel.hidden = false;
 
   const km = (result.summary.meters / 1000).toFixed(1);
+  const wait = result.summary.waited > 2 ? ` (dont ${result.summary.waited} min d'attente)` : "";
   document.getElementById("plan-summary").textContent =
-    `${result.summary.stops} arrêt${result.summary.stops > 1 ? "s" : ""} · ${km} km · ~${result.summary.minutes} min`;
+    `${result.summary.stops} arrêt${result.summary.stops > 1 ? "s" : ""} · ${km} km · ~${result.summary.minutes} min${wait}`;
 
   const legs = result.stops
     .map((stop) => {
@@ -1733,6 +1734,9 @@ function renderPlanResult(result) {
   }
   if (!result.includeLockers) {
     notes.push("Les lockers sont écartés : coche la case pour les autoriser (UPS et Mondial Relay).");
+  }
+  if (result.sources.fedexSandbox) {
+    notes.push("FedEx répond depuis son bac à sable : les points sont réels mais les horaires peuvent dater. Une clé de production les fiabilisera.");
   }
   if (result.sources.pending) {
     notes.push("Recherche OpenStreetMap lancée en arrière-plan : relance le calcul dans un instant pour en tenir compte.");

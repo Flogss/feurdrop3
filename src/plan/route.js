@@ -49,6 +49,7 @@ function simulate(order, matrix, stops, departAt, serviceMinutes) {
   let meters = 0;
   let late = 0;
   let softLate = 0;
+  let waited = 0;
   const arrivals = [];
 
   for (const index of order) {
@@ -58,19 +59,26 @@ function simulate(order, matrix, stops, departAt, serviceMinutes) {
     arrivals.push(clock);
 
     const stop = stops[index];
+    // arrive avant l'ouverture : on attend devant la porte. Compter cette
+    // attente dans la duree suffit a ce que le calcul prefere passer ailleurs
+    // d'abord, sans qu'on ait a le lui dire.
+    if (stop.opensAt !== null && stop.opensAt !== undefined && clock < stop.opensAt) {
+      waited += stop.opensAt - clock;
+      clock = stop.opensAt;
+      arrivals[arrivals.length - 1] = clock;
+    }
+
     // une echeance "souple" (levee d'une boite aux lettres) se rate sans
     // gravite : on la compte a part et elle ne sert qu'a departager
     if (stop.deadline !== null && stop.deadline !== undefined && clock > stop.deadline) {
       if (stop.soft) softLate += 1;
       else late += 1;
     }
-    // on n'attend pas une ouverture : dans la journee de travail, arriver
-    // avant l'ouverture d'un point veut dire qu'on l'a mal place dans l'ordre
     clock += serviceMinutes;
     from = index + 1;
   }
 
-  return { arrivals, meters, minutes: clock - departAt, late, softLate };
+  return { arrivals, meters, minutes: clock - departAt, late, softLate, waited };
 }
 
 // Un trajet est meilleur qu'un autre s'il rate moins de fermetures ; a egalite,
@@ -79,6 +87,8 @@ function better(a, b) {
   if (!a) return true;
   if (b.late !== a.late) return b.late < a.late;
   if (b.softLate !== a.softLate) return b.softLate < a.softLate;
+  // une heure d'attente devant un rideau ferme coute plus cher qu'un detour
+  if (Math.abs(b.waited - a.waited) > 1) return b.waited < a.waited;
   return b.meters < a.meters - 1;
 }
 
@@ -101,7 +111,7 @@ const EXACT_LIMIT = 8;
 function optimize({ stops, matrix, departAt = 9 * 60, serviceMinutes = 4 }) {
   const indexes = stops.map((_, i) => i);
   if (indexes.length === 0) {
-    return { order: [], arrivals: [], meters: 0, minutes: 0, late: 0, softLate: 0 };
+    return { order: [], arrivals: [], meters: 0, minutes: 0, late: 0, softLate: 0, waited: 0 };
   }
 
   let best = null;

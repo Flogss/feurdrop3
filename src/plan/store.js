@@ -137,6 +137,32 @@ function allPoints() {
   return db.prepare("SELECT * FROM relay_points ORDER BY name").all().map(hydrate);
 }
 
+// Les n points d'une source les plus proches d'un lieu. Le calcul se fait en
+// memoire : SQLite n'a pas d'index geographique ici, mais quelques milliers de
+// distances sont instantanees.
+function nearestBySource(source, lat, lng, limit = 30) {
+  const rows = db
+    .prepare("SELECT * FROM relay_points WHERE source = ? AND lat IS NOT NULL AND trust != 'rejected'")
+    .all(source);
+
+  const toRad = (d) => (d * Math.PI) / 180;
+  const scored = rows.map((row) => {
+    const dLat = toRad(row.lat - lat);
+    const dLng = toRad(row.lng - lng) * Math.cos(toRad(lat));
+    return { row, d2: dLat * dLat + dLng * dLng };
+  });
+  scored.sort((a, b) => a.d2 - b.d2);
+  return scored.slice(0, limit).map((s) => hydrate(s.row));
+}
+
+// Remplace la liste des transporteurs d'un point. A utiliser quand la source
+// recalcule ce qu'un point accepte : un relais qui ne prend plus les colis ne
+// doit pas garder son ancienne etiquette.
+function setNetworks(pointId, carriers) {
+  db.prepare("DELETE FROM relay_networks WHERE point_id = ?").run(pointId);
+  addNetworks(pointId, carriers);
+}
+
 function countBySource(source) {
   return db.prepare("SELECT COUNT(*) AS n FROM relay_points WHERE source = ?").get(source).n;
 }
@@ -335,6 +361,8 @@ module.exports = {
   countPoints,
   countBySource,
   sourceCounts,
+  nearestBySource,
+  setNetworks,
   upsertPoint,
   addNetworks,
   setTrust,

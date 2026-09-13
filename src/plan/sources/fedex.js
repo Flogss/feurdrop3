@@ -1,4 +1,5 @@
 const { fetchJson } = require("../http");
+const { looksLikeLocker } = require("../lockers");
 
 // Points de depot FedEx, via leur API "Location Search" (developer.fedex.com).
 //
@@ -8,7 +9,13 @@ const { fetchJson } = require("../http");
 // dit -- elle ne renvoie pas une liste vide qui passerait pour "il n'y a aucun
 // point FedEx dans le coin".
 
-const HOST = process.env.FEDEX_API_HOST || "https://apis.fedex.com";
+const PROD = "https://apis.fedex.com";
+const SANDBOX = "https://apis-sandbox.fedex.com";
+// Les cles de bac a sable sont refusees en production avec un message clair :
+// on bascule alors une fois pour toutes, et on le signale dans le plan pour
+// que personne ne prenne des donnees d'essai pour des donnees reelles.
+let HOST = process.env.FEDEX_API_HOST || PROD;
+let sandbox = HOST === SANDBOX;
 const KEY = process.env.FEDEX_API_KEY || "";
 const SECRET = process.env.FEDEX_API_SECRET || "";
 
@@ -30,20 +37,32 @@ async function accessToken() {
     client_id: KEY,
     client_secret: SECRET,
   });
-  const data = await fetchJson(`${HOST}/oauth/token`, {
-    method: "POST",
-    body,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    timeout: 12000,
-  }).catch((err) => {
-    // un 401 ici n'est pas une panne : c'est la cle ou le secret qui ne vont
-    // pas. Le dire evite de chercher ailleurs.
-    throw new Error(
-      /401|403/.test(err.message)
-        ? `cle ou secret refuses par FedEx (${err.message})`
-        : err.message
-    );
-  });
+  const ask = (host) =>
+    fetchJson(`${host}/oauth/token`, {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 12000,
+    });
+
+  let data;
+  try {
+    data = await ask(HOST);
+  } catch (err) {
+    if (HOST === PROD && /403/.test(err.message)) {
+      // "Sandbox credentials not allowed in this environment"
+      HOST = SANDBOX;
+      sandbox = true;
+      console.log("[plan] FedEx : cles de bac a sable, bascule sur apis-sandbox.fedex.com");
+      data = await ask(HOST).catch((err2) => {
+        throw new Error(`cle ou secret refuses par FedEx (${err2.message})`);
+      });
+    } else if (/401|403/.test(err.message)) {
+      throw new Error(`cle ou secret refuses par FedEx (${err.message})`);
+    } else {
+      throw err;
+    }
+  }
 
   token = data.access_token;
   tokenExpiry = Date.now() + Math.max(60, (data.expires_in || 3600) - 60) * 1000;
@@ -62,6 +81,10 @@ const DAYS = {
   SATURDAY: 6,
 };
 
+// La reponse reelle ne suit pas tout a fait la specification : le jour s'y
+// appelle `dayOfWeek` (et non `dayofweek`), et `operationalHours` est un objet
+// unique, pas un tableau. On accepte les deux formes.
+
 function hhmm(value) {
   const match = /^(\d{2}):(\d{2})/.exec(String(value || ""));
   return match ? `${match[1]}:${match[2]}` : null;
@@ -71,10 +94,16 @@ function hhmm(value) {
 // dans la reponse, on ne sait pas : on ne remplit rien.
 function hoursFor(detail, day) {
   const weekday = new Date(`${day}T12:00:00`).getDay();
-  const entry = (detail.storeHours || []).find((h) => DAYS[h.dayofweek] === weekday);
+  const entry = (detail.storeHours || []).find(
+    (h) => DAYS[h.dayOfWeek || h.dayofweek] === weekday
+  );
   if (!entry) return null;
+  if (entry.operationalHoursType === "CLOSED_ALL_DAY") {
+    return { source: "fedex", ranges: [] }; // ferme ce jour-la, et on le sait
+  }
 
-  const ranges = (entry.exceptionalHours || entry.operationalHours || [])
+  const ranges = []
+    .concat(entry.exceptionalHours || entry.operationalHours || [])
     .map((r) => {
       const begins = hhmm(r.begins);
       const ends = hhmm(r.ends);
@@ -90,12 +119,16 @@ function hoursFor(detail, day) {
 async function searchPoints({ address, postalCode, city, day, limit = 10 }) {
   if (!isConfigured()) throw new Error("FedEx : cle et secret manquants (FEDEX_API_KEY/SECRET)");
 
+  // le jeton d'abord : c'est lui qui peut faire basculer HOST vers le bac a
+  // sable, et l'URL doit etre construite APRES cette bascule
+  const bearer = await accessToken();
+
   const data = await fetchJson(`${HOST}/location/v1/locations`, {
     method: "POST",
     timeout: 15000,
     headers: {
       "Content-Type": "application/json",
-      authorization: `Bearer ${await accessToken()}`,
+      authorization: `Bearer ${bearer}`,
       "x-locale": "fr_FR",
     },
     body: JSON.stringify({
@@ -128,7 +161,19 @@ async function searchPoints({ address, postalCode, city, day, limit = 10 }) {
         source: "fedex",
         source_ref: detail.locationId,
         name: detail.contactAndAddress?.contact?.companyName || `FedEx ${detail.locationId}`,
-        kind: detail.locationType || "Point FedEx",
+        kind:
+          detail.contactAndAddress?.addressAncillaryDetail?.displayName ||
+          detail.locationType ||
+          "Point FedEx",
+        // FedEx a un drapeau pour ca, mais il ne suit pas toujours le
+        // libelle ("Locker Lav Express" sort avec lockerAvailability a faux) :
+        // on retient le casier des que l'un des deux le dit
+        locker:
+          Boolean(detail.lockerAvailability) ||
+          looksLikeLocker({
+            name: detail.contactAndAddress?.contact?.companyName,
+            kind: detail.locationType,
+          }),
         address: (address2.streetLines || []).join(", "),
         postal_code: address2.postalCode,
         city: address2.city,
@@ -141,4 +186,8 @@ async function searchPoints({ address, postalCode, city, day, limit = 10 }) {
     .filter(Boolean);
 }
 
-module.exports = { searchPoints, isConfigured };
+function isSandbox() {
+  return sandbox;
+}
+
+module.exports = { searchPoints, isConfigured, isSandbox };
