@@ -881,7 +881,14 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
   progress.remove();
 
   if (!pdf) {
-    return bot.sendMessage(chatId, "Aucune etiquette lisible : rien a imprimer.").catch(() => {});
+    // dire POURQUOI : "rien a imprimer" tout seul ne laisse aucune prise
+    const causes = [...new Set(failed.map((f) => f.reason))].slice(0, 3);
+    const detail = failed.length > 0
+      ? `\n${failed.length} fichier(s) illisible(s) :\n• ${causes.join("\n• ")}`
+      : missing.length > 0
+        ? `\n${missing.length} fichier(s) introuvable(s) sur Telegram (message supprime ou trop vieux).`
+        : "";
+    return bot.sendMessage(chatId, `Aucune etiquette lisible : rien a imprimer.${detail}`).catch(() => {});
   }
 
   const name = onRoll

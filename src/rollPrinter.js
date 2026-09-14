@@ -100,13 +100,29 @@ function bestRow(labels, { allowSmall = false } = {}) {
   return best;
 }
 
+// Un bordereau photographie est aussi valable qu'un PDF : beaucoup de LIT
+// arrivent en photo Telegram. On l'emballe dans un PDF d'une page a sa taille
+// exacte, et tout le reste de la chaine -- recadrage sur l'encre, rotation,
+// mise en rangee -- s'applique sans changement.
+async function imageToPdf(bytes) {
+  const header = Buffer.from(bytes.slice(0, 4));
+  const isPng = header[0] === 0x89 && header[1] === 0x50;
+
+  const doc = await PDFDocument.create();
+  const image = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+  const page = doc.addPage([image.width, image.height]);
+  page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+  return doc.save();
+}
+
 // Prepare un bordereau : page source, zone utile, taille une fois recadree.
 async function prepareLabel(out, item) {
-  const source = await PDFDocument.load(item.bytes, { ignoreEncryption: true });
+  const bytes = item.kind === "image" ? await imageToPdf(item.bytes) : item.bytes;
+  const source = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const prepared = [];
 
   for (let i = 0; i < source.getPageCount(); i += 1) {
-    const region = await labelRegion(item.bytes, i).catch(() => null);
+    const region = await labelRegion(bytes, i).catch(() => null);
     const page = source.getPage(i);
     const media = page.getMediaBox();
     const box = region || {
