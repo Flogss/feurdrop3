@@ -6,6 +6,7 @@ const apiRouter = require("./routes/api");
 const planRouter = require("./routes/plan");
 const suiviRouter = require("./routes/suivi");
 const { startBot } = require("./bot");
+const { startSuiviBot } = require("./suivi/runner");
 const { getPrintToken } = require("./db");
 
 const app = express();
@@ -41,3 +42,4 @@ app.listen(PORT, () => {
 });
 
 startBot();
+startSuiviBot();

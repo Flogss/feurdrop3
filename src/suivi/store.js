@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
+const { suiviDbPath } = require("./paths");
 
 // Lecture de la base du bot de suivi (projet suivi-colissimo). Ce module ne
 // fait que LIRE : le bot reste seul maitre de ses donnees, et le dashboard ne
@@ -35,17 +36,9 @@ const MILESTONE_ICON = {
   unknown: "❔",
 };
 
-// Emplacements possibles de la base, du plus explicite au plus devinable.
+// Le bot ecrit ici, nous lisons ici : une seule verite, voir paths.js.
 function candidatePaths() {
-  const list = [];
-  if (process.env.SUIVI_DB_PATH) list.push(process.env.SUIVI_DB_PATH);
-  if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
-    list.push(path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, "suivi.db"));
-  }
-  // projet voisin, en developpement local
-  list.push(path.resolve(__dirname, "..", "..", "..", "suivi", "data", "suivi.db"));
-  list.push(path.resolve(__dirname, "..", "..", "data", "suivi.db"));
-  return list;
+  return [suiviDbPath()];
 }
 
 let db = null;
