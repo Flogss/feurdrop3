@@ -1910,8 +1910,8 @@ async function loadSuivi() {
   const data = await fetchJSON("/api/suivi/overview");
 
   if (!data.ready) {
-    document.getElementById("suivi-db").textContent = "base introuvable";
-    document.getElementById("suivi-jobs").innerHTML =
+    document.getElementById("suivi-total").textContent = "base introuvable";
+    document.getElementById("suivi-recheck").innerHTML =
       `<div class="empty-row">Base du bot de suivi introuvable.<br />
        Indique son chemin dans la variable <code>SUIVI_DB_PATH</code>.</div>`;
     document.getElementById("suivi-labels").innerHTML = "";
@@ -1919,63 +1919,18 @@ async function loadSuivi() {
     return;
   }
 
-  document.getElementById("suivi-db").textContent =
-    `${data.db.numbers.toLocaleString("fr-FR")} numéros · ${data.db.jobs} vérification${data.db.jobs > 1 ? "s" : ""}`;
-  document.getElementById("suivi-link-count").textContent = data.db.numbers.toLocaleString("fr-FR");
+  const total = data.totalChecked ?? data.db.numbers;
+  document.getElementById("suivi-total").textContent =
+    `${total.toLocaleString("fr-FR")} numéros vérifiés`;
+  document.getElementById("suivi-link-count").textContent = total.toLocaleString("fr-FR");
 
-  renderSuiviJobs(data.jobs);
+  renderSuiviRecheck(data.recheckable || []);
   renderSuiviSummary(data.summary);
   renderSuiviLabels(data.labels);
+  renderSuiviDonut(data.labels);
 
-  // tant qu'une verification tourne, on suit sa progression
-  const running = data.jobs.some((j) => j.running);
-  clearInterval(suiviState.timer);
-  suiviState.timer = running && currentView === "suivi" ? setInterval(refreshSuiviJobs, 3000) : null;
-}
-
-async function refreshSuiviJobs() {
-  if (currentView !== "suivi") return clearInterval(suiviState.timer);
-  try {
-    const { jobs } = await fetchJSON("/api/suivi/jobs");
-    renderSuiviJobs(jobs);
-    if (!jobs.some((j) => j.running)) clearInterval(suiviState.timer);
-  } catch (err) {
-    clearInterval(suiviState.timer);
-  }
-}
-
-const JOB_STATE = {
-  running: { label: "en cours", dot: "🔵" },
-  done: { label: "terminée", dot: "🟢" },
-  cancelled: { label: "annulée", dot: "🟠" },
-  error: { label: "erreur", dot: "🔴" },
-};
-
-function renderSuiviJobs(jobs) {
-  const box = document.getElementById("suivi-jobs");
-  if (!jobs || jobs.length === 0) {
-    box.innerHTML = `<div class="empty-row">Aucune vérification enregistrée.</div>`;
-    return;
-  }
-
-  box.innerHTML = jobs
-    .map((job) => {
-      const state = JOB_STATE[job.state] || { label: job.state, dot: "⚪" };
-      const eta = job.running && job.eta !== null ? ` · reste ~${suiviDuration(job.eta)}` : "";
-      return `<div class="suivi-job${job.running ? " suivi-job-running" : ""}">
-        <div class="suivi-job-head">
-          <span class="suivi-job-name">${state.dot} ${escapeHtml(job.file_name || "liste collée")}</span>
-          <span class="suivi-job-when">${suiviDate(job.started_at)}</span>
-        </div>
-        <div class="suivi-bar"><span style="width:${job.percent}%"></span></div>
-        <div class="suivi-job-sub">
-          ${job.checked.toLocaleString("fr-FR")} / ${job.total.toLocaleString("fr-FR")} · ${job.percent} %
-          · ${job.found.toLocaleString("fr-FR")} trouvés${job.missing ? ` · ${job.missing} introuvables` : ""}
-          · ${state.label} en ${suiviDuration(job.elapsed)}${eta}
-        </div>
-      </div>`;
-    })
-    .join("");
+  // une verification lancee ailleurs (depuis Telegram) doit aussi s'afficher
+  if ((data.running || []).length > 0) startLiveWatch();
 }
 
 function renderSuiviSummary(summary) {
@@ -2106,3 +2061,312 @@ document.getElementById("suivi-copy-numbers").addEventListener("click", (e) => {
 document.getElementById("suivi-link").addEventListener("click", () => switchView("suivi"));
 document.getElementById("suivi-back").addEventListener("click", () => switchView("dashboard"));
 document.getElementById("suivi-detail-back").addEventListener("click", () => switchView("suivi"));
+
+// --- Ecran de passage --------------------------------------------------------
+// Le compteur ne saute pas de 10 en 10 : il monte numero par numero, quitte a
+// courir derriere la realite. Un compteur qui bondit ne dit rien du rythme ;
+// un compteur qui defile, si.
+
+const live = { since: 0, timer: null, shown: 0, target: 0, raf: null, queue: [], popping: false };
+
+const MILESTONE_ICON = {
+  delivered: "✅",
+  out_for_delivery: "🚚",
+  in_transit: "📦",
+  info_received: "📥",
+  pending: "🕓",
+  final_other: "↩️",
+  expired: "⌛",
+  not_found: "❓",
+  unknown: "❔",
+};
+const MILESTONE_FR = {
+  delivered: "Livré",
+  out_for_delivery: "En cours de livraison",
+  in_transit: "En transit",
+  info_received: "Pris en charge",
+  pending: "En attente",
+  final_other: "Clôturé",
+  expired: "Expiré",
+  not_found: "Introuvable",
+  unknown: "Inconnu",
+};
+
+function startLiveWatch() {
+  document.getElementById("suivi-live").hidden = false;
+  document.getElementById("suivi-idle").hidden = true;
+  clearInterval(live.timer);
+  live.timer = setInterval(pollLive, 700);
+  pollLive();
+  tickCounter();
+}
+
+function stopLiveWatch() {
+  clearInterval(live.timer);
+  live.timer = null;
+  cancelAnimationFrame(live.raf);
+  live.raf = null;
+  document.getElementById("suivi-live").hidden = true;
+  document.getElementById("suivi-idle").hidden = false;
+}
+
+async function pollLive() {
+  let data;
+  try {
+    data = await fetchJSON(`/api/suivi/live?since=${live.since}`);
+  } catch (err) {
+    return;
+  }
+  if (!data.job) return stopLiveWatch();
+
+  const job = data.job;
+  live.target = job.checked;
+  live.since = data.seq ?? live.since;
+
+  document.getElementById("suivi-live-source").textContent = job.source;
+  document.getElementById("suivi-counter-total").textContent = `/ ${job.total.toLocaleString("fr-FR")}`;
+  document.getElementById("suivi-fill").style.width = `${job.percent.toFixed(1)}%`;
+
+  // `running` est a la racine de la reponse, pas dans `job`
+  const eta = job.eta !== null ? ` · reste ~${suiviDuration(job.eta)}` : "";
+  document.getElementById("suivi-live-sub").textContent = data.running
+    ? `${job.rate} /s · ${suiviDuration(job.elapsed)} écoulées${eta}`
+    : job.fatalError
+      ? `⚠️ ${job.fatalError}`
+      : job.cancelled
+        ? `Arrêté après ${suiviDuration(job.elapsed)}`
+        : `Terminé en ${suiviDuration(job.elapsed)}`;
+
+  renderLiveCounts(job.counts);
+  for (const find of data.finds || []) live.queue.push(find);
+  drainToasts();
+
+  if (!data.running) {
+    // on laisse l'animation finir sa course avant de rendre la main
+    setTimeout(() => {
+      stopLiveWatch();
+      loadSuivi().catch(() => {});
+    }, 2500);
+  }
+}
+
+// Monte vers la valeur reelle sans jamais sauter : au plus vite, un pas par
+// image, ce qui donne ce defilement continu meme quand l'API repond par lots.
+function tickCounter() {
+  const el = document.getElementById("suivi-counter");
+  const step = () => {
+    if (live.shown < live.target) {
+      const gap = live.target - live.shown;
+      // on rattrape un gros retard plus vite, sans jamais sauter une valeur
+      live.shown += gap > 60 ? Math.ceil(gap / 40) : 1;
+      if (live.shown > live.target) live.shown = live.target;
+      el.textContent = live.shown.toLocaleString("fr-FR");
+      el.classList.remove("bump");
+      void el.offsetWidth;
+      el.classList.add("bump");
+    }
+    live.raf = requestAnimationFrame(step);
+  };
+  cancelAnimationFrame(live.raf);
+  live.raf = requestAnimationFrame(step);
+}
+
+// Les trouvailles apparaissent une par une : en rafale elles seraient
+// illisibles, et c'est justement le defile qui rend le passage vivant.
+function drainToasts() {
+  if (live.popping || live.queue.length === 0) return;
+  live.popping = true;
+
+  const pop = () => {
+    const find = live.queue.shift();
+    if (!find) {
+      live.popping = false;
+      return;
+    }
+    // en cas d'embouteillage on accelere plutot que de prendre du retard
+    const delay = live.queue.length > 12 ? 90 : live.queue.length > 5 ? 180 : 320;
+    showToast(find);
+    setTimeout(pop, delay);
+  };
+  pop();
+}
+
+function showToast(find) {
+  const box = document.getElementById("suivi-toasts");
+  const el = document.createElement("div");
+  el.className = `suivi-toast suivi-toast-${find.found ? find.milestone : "not_found"}`;
+  el.innerHTML = `<span class="suivi-toast-icon">${MILESTONE_ICON[find.milestone] || "❔"}</span>
+    <span class="suivi-toast-main">
+      <span class="suivi-toast-num">${escapeHtml(find.number)}</span>
+      <span class="suivi-toast-cat">${escapeHtml(MILESTONE_FR[find.milestone] || find.milestone)}</span>
+    </span>`;
+  box.prepend(el);
+  while (box.children.length > 6) box.lastChild.remove();
+  setTimeout(() => el.classList.add("out"), 2600);
+  setTimeout(() => el.remove(), 3200);
+}
+
+function renderLiveCounts(counts) {
+  const box = document.getElementById("suivi-live-counts");
+  const entries = Object.entries(counts || {}).sort((a, b) => b[1] - a[1]);
+  box.innerHTML = entries
+    .map(
+      ([key, n]) =>
+        `<span class="suivi-count-chip">${MILESTONE_ICON[key] || "❔"} ${n.toLocaleString("fr-FR")}</span>`
+    )
+    .join("");
+}
+
+// --- Relance et mise en attente ---------------------------------------------
+
+function renderSuiviRecheck(categories) {
+  const box = document.getElementById("suivi-recheck");
+  const go = document.getElementById("suivi-recheck-go");
+  if (categories.length === 0) {
+    box.innerHTML = `<div class="empty-row">Rien à réinterroger : tout est livré ou clôturé.</div>`;
+    go.disabled = true;
+    return;
+  }
+  box.innerHTML = categories
+    .map(
+      (c) => `<label class="row row-pickable">
+        <div class="row-main">
+          <div class="row-title">${c.icon} ${escapeHtml(c.milestoneLabel)}</div>
+          <div class="row-sub">${c.count.toLocaleString("fr-FR")} numéro${c.count > 1 ? "s" : ""}</div>
+        </div>
+        <div class="row-actions"><input type="checkbox" data-recheck="${escapeAttr(c.milestone)}" /></div>
+      </label>`
+    )
+    .join("");
+  updateRecheckButton();
+}
+
+function selectedMilestones() {
+  return [...document.querySelectorAll("[data-recheck]:checked")].map((i) => i.dataset.recheck);
+}
+
+function updateRecheckButton() {
+  const chosen = selectedMilestones();
+  const go = document.getElementById("suivi-recheck-go");
+  go.disabled = chosen.length === 0;
+  const n = chosen
+    .map((m) => Number(document.querySelector(`[data-recheck="${m}"]`).closest(".row").querySelector(".row-sub").textContent.replace(/\D/g, "")))
+    .reduce((a, b) => a + b, 0);
+  go.textContent = chosen.length === 0 ? "Relancer la sélection" : `Relancer ${n.toLocaleString("fr-FR")} numéros`;
+}
+
+document.getElementById("suivi-recheck").addEventListener("change", updateRecheckButton);
+
+document.getElementById("suivi-recheck-go").addEventListener("click", async (e) => {
+  const milestones = selectedMilestones();
+  if (milestones.length === 0) return;
+  e.currentTarget.disabled = true;
+  try {
+    await fetchJSON("/api/suivi/recheck", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ milestones }),
+    });
+    live.since = 0;
+    live.shown = 0;
+    startLiveWatch();
+  } catch (err) {
+    alert(err.message);
+    e.currentTarget.disabled = false;
+  }
+});
+
+document.getElementById("suivi-add-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById("suivi-add-name").textContent = file.name;
+  document.getElementById("suivi-add-text").value = await file.text();
+});
+
+document.getElementById("suivi-add-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = document.getElementById("suivi-add-text").value.trim();
+  if (!text) return alert("Colle des numéros ou choisis un fichier.");
+  const name = document.getElementById("suivi-add-name").textContent || "liste collée";
+
+  try {
+    const res = await fetchJSON("/api/suivi/verifier", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, name }),
+    });
+    if (res.invalid > 0 || res.duplicates > 0) {
+      console.log(`[suivi] ${res.invalid} invalides, ${res.duplicates} doublons écartés`);
+    }
+    document.getElementById("suivi-add-text").value = "";
+    document.getElementById("suivi-add-name").textContent = "";
+    live.since = 0;
+    live.shown = 0;
+    startLiveWatch();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById("suivi-cancel").addEventListener("click", async () => {
+  await fetchJSON("/api/suivi/annuler", { method: "POST" }).catch(() => {});
+});
+
+// --- Camembert des actualisations -------------------------------------------
+
+function renderSuiviDonut(labels) {
+  const box = document.getElementById("suivi-donut");
+  const items = (labels || []).filter((l) => l.count > 0).sort((a, b) => b.count - a.count);
+  if (items.length === 0) {
+    box.innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
+    return;
+  }
+
+  const total = items.reduce((sum, it) => sum + it.count, 0);
+  const size = 220, cx = 110, cy = 110, r = 84, width = 22;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+
+  const segments = items
+    .map((it, i) => {
+      const len = (it.count / total) * circumference;
+      const gap = items.length > 1 ? 3 : 0;
+      const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
+      const seg = `<circle class="donut-seg instant" cx="${cx}" cy="${cy}" r="${r}" fill="none"
+        stroke="${color}" stroke-width="${width}"
+        stroke-dasharray="${Math.max(len - gap, 0)} ${circumference - len + gap}"
+        stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
+        <title>${escapeAttr(it.label || "")} : ${it.count}</title></circle>`;
+      offset += len;
+      return seg;
+    })
+    .join("");
+
+  const legend = items
+    .map((it, i) => {
+      const pct = Math.round((it.count / total) * 100);
+      const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
+      return `<div class="donut-legend-item">
+        <span class="donut-swatch" style="background:${color}"></span>
+        <div class="donut-legend-main">
+          <div class="donut-legend-top">
+            <span class="donut-legend-name">${it.icon} ${escapeHtml(it.label || "(sans libellé)")}</span>
+            <span class="donut-legend-value">${it.count.toLocaleString("fr-FR")}</span>
+          </div>
+          <div class="donut-legend-bar"><div class="donut-legend-bar-fill instant" style="width:${pct}%;background:${color}"></div></div>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  box.innerHTML = `<div class="donut-layout">
+      <svg viewBox="0 0 ${size} ${size}" class="donut-svg">
+        <circle class="donut-track" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke-width="${width}"/>
+        ${segments}
+        <circle class="donut-center-ring" cx="${cx}" cy="${cy}" r="${r - width / 2 - 8}" fill="none"/>
+        <text x="${cx}" y="${cy - 3}" text-anchor="middle" class="donut-total-value">${total.toLocaleString("fr-FR")}</text>
+        <text x="${cx}" y="${cy + 19}" text-anchor="middle" class="donut-total-label">colis</text>
+      </svg>
+      <div class="donut-legend">${legend}</div>
+    </div>`;
+}

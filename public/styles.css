@@ -1149,3 +1149,129 @@ main { margin-top: 16px; }
 /* le libelle EST l'information : il ne doit pas etre tronque */
 #suivi-labels .row-title { white-space: normal; line-height: 1.45; }
 #suivi-labels .row { align-items: start; }
+
+/* --- Ecran de passage ----------------------------------------------------- */
+.suivi-live { animation: fadein 0.35s ease backwards; }
+.suivi-live-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.suivi-live-source {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* le compteur : gros, tabulaire pour que les chiffres ne dansent pas */
+.suivi-counter { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 10px; }
+.suivi-counter-value {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 22px rgba(56, 247, 255, 0.35);
+  display: inline-block;
+}
+.suivi-counter-value.bump { animation: suiviBump 0.16s ease-out; }
+@keyframes suiviBump {
+  0% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-2px) scale(1.045); }
+  100% { transform: translateY(0) scale(1); }
+}
+.suivi-counter-total { font-size: 15px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.suivi-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+}
+.suivi-fill {
+  position: relative;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--cyan), var(--lime));
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+}
+/* un reflet qui balaie la barre : c'est ce qui la fait respirer */
+.suivi-fill-glow {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+  transform: translateX(-100%);
+  animation: suiviSweep 1.5s ease-in-out infinite;
+}
+@keyframes suiviSweep { to { transform: translateX(100%); } }
+
+.suivi-live-sub { font-size: 11px; color: var(--text-dim); margin-top: 8px; font-variant-numeric: tabular-nums; }
+
+/* bulles : une par colis trouve, elles s'empilent et s'effacent */
+.suivi-toasts { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; min-height: 8px; }
+.suivi-toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--panel-border);
+  border-left-width: 3px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  animation: suiviToastIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.suivi-toast.out { animation: suiviToastOut 0.5s ease forwards; }
+@keyframes suiviToastIn {
+  from { opacity: 0; transform: translateX(-14px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes suiviToastOut {
+  to { opacity: 0; transform: translateX(10px); max-height: 0; padding-top: 0; padding-bottom: 0; }
+}
+.suivi-toast-icon { font-size: 15px; flex-shrink: 0; animation: suiviPop 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes suiviPop {
+  0% { transform: scale(0.3) rotate(-18deg); }
+  60% { transform: scale(1.22) rotate(6deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.suivi-toast-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.suivi-toast-num { font-size: 12px; font-weight: 600; }
+.suivi-toast-cat { font-size: 10px; color: var(--text-dim); }
+
+/* une couleur de bord par categorie : on lit le flux sans lire les mots */
+.suivi-toast-delivered { border-left-color: var(--lime); }
+.suivi-toast-out_for_delivery { border-left-color: #ffb84d; }
+.suivi-toast-in_transit { border-left-color: var(--cyan); }
+.suivi-toast-info_received { border-left-color: #b388ff; }
+.suivi-toast-pending { border-left-color: #7a819c; }
+.suivi-toast-final_other { border-left-color: var(--magenta); }
+.suivi-toast-not_found { border-left-color: #ff6b6b; }
+
+.suivi-live-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.suivi-count-chip {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.02);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Relance et depot ------------------------------------------------------ */
+.suivi-go { width: 100%; margin-top: 10px; }
+.suivi-add { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.suivi-add textarea {
+  padding: 10px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+.suivi-add textarea:focus { outline: none; border-color: rgba(56, 247, 255, 0.45); }
+.suivi-add-row { display: flex; align-items: center; gap: 10px; }
+.suivi-file { cursor: pointer; }
+.suivi-add-name { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

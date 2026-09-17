@@ -163,6 +163,49 @@ function byLabel(label, { limit = 200, offset = 0 } = {}) {
   return { total, rows: rows.map(decorate) };
 }
 
+// Categories qu'il vaut la peine de reinterroger : un colis livre ou clos ne
+// bougera plus, le redemander gaspille le quota.
+const RECHECKABLE = ["pending", "info_received", "in_transit", "out_for_delivery"];
+
+// Combien de numeros sont reinterrogeables, par categorie.
+function recheckable() {
+  if (!isReady()) return [];
+  const marks = RECHECKABLE.map(() => "?").join(",");
+  return db
+    .prepare(
+      `${LATEST}
+       SELECT milestone, COUNT(*) AS count, MIN(rank) AS rank
+       FROM latest WHERE rn = 1 AND milestone IN (${marks})
+       GROUP BY milestone ORDER BY rank`
+    )
+    .all(...RECHECKABLE)
+    .map(decorate);
+}
+
+// Les numeros eux-memes, pour une ou plusieurs categories. Les plus anciennement
+// actualises d'abord : ce sont eux qui ont le plus de chances d'avoir bouge.
+function numbersToRecheck(milestones) {
+  if (!isReady()) return [];
+  const wanted = (milestones || []).filter((m) => RECHECKABLE.includes(m));
+  if (wanted.length === 0) return [];
+  const marks = wanted.map(() => "?").join(",");
+  return db
+    .prepare(
+      `${LATEST}
+       SELECT tracking_number FROM latest
+       WHERE rn = 1 AND milestone IN (${marks})
+       ORDER BY COALESCE(event_ts, 0) ASC`
+    )
+    .all(...wanted)
+    .map((r) => r.tracking_number);
+}
+
+// Total de numeros distincts deja verifies, toutes verifications confondues.
+function totalChecked() {
+  if (!isReady()) return 0;
+  return db.prepare("SELECT COUNT(DISTINCT tracking_number) AS n FROM job_results").get().n;
+}
+
 // Recherche d'un numero precis, avec tout son historique de verifications.
 function search(query) {
   if (!isReady()) return [];
@@ -212,4 +255,17 @@ function jobs(limit = 30) {
     });
 }
 
-module.exports = { status, labels, summary, byLabel, search, jobs, MILESTONE_FR, MILESTONE_ICON };
+module.exports = {
+  status,
+  labels,
+  summary,
+  byLabel,
+  search,
+  jobs,
+  recheckable,
+  numbersToRecheck,
+  totalChecked,
+  RECHECKABLE,
+  MILESTONE_FR,
+  MILESTONE_ICON,
+};

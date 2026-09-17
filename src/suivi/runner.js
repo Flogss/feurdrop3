@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { suiviDbPath } = require("./paths");
+const { sharedLimiter, PER_SECOND } = require("./engine");
 
 // Demarrage du bot de suivi depuis le serveur du dashboard.
 //
@@ -49,11 +50,18 @@ async function startSuiviBot() {
       allowedChats: allowed,
       okapiKey,
       dbFile,
-      maxPerSec: Number(process.env.SUIVI_MAX_PER_SEC) || 8,
+      maxPerSec: PER_SECOND,
       concurrency: Number(process.env.SUIVI_CONCURRENCY) || 5,
     });
 
-    console.log(`[suivi] ${dbFile} (${existed ? "existante" : "NOUVELLE"}) · ${allowed.length} chat(s) autorise(s)`);
+    // Le bot se fabrique son propre limiteur ; on lui substitue celui du site.
+    // Les deux tapent la meme cle Okapi, et La Poste bloque une cle qui
+    // depasse : deux limiteurs a 10/s feraient 20/s. Un seul robinet.
+    bot.limiter = await sharedLimiter();
+
+    console.log(
+      `[suivi] ${dbFile} (${existed ? "existante" : "NOUVELLE"}) · ${allowed.length} chat(s) autorise(s) · ${PER_SECOND}/s`
+    );
     // start() ne rend la main qu'a l'arret du bot : on le laisse tourner a
     // cote du serveur web plutot que de l'attendre
     bot.start().catch((err) => console.error("[suivi] arret :", err.message));

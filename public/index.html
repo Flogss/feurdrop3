@@ -254,12 +254,56 @@
         <h1>Suivi des colis</h1>
       </div>
 
-      <div class="panel" id="suivi-jobs-panel">
+      <div class="panel" id="suivi-check-panel">
         <div class="panel-head">
           <h2>Vérifications</h2>
-          <span class="chart-range" id="suivi-db">—</span>
+          <span class="chart-range" id="suivi-total">—</span>
         </div>
-        <div id="suivi-jobs" class="suivi-jobs"></div>
+
+        <!-- écran de passage : visible seulement pendant une vérification -->
+        <div class="suivi-live" id="suivi-live" hidden>
+          <div class="suivi-live-head">
+            <span class="suivi-live-source" id="suivi-live-source">—</span>
+            <button class="btn btn-ghost btn-small" id="suivi-cancel" type="button">Arrêter</button>
+          </div>
+
+          <div class="suivi-counter">
+            <span class="suivi-counter-value" id="suivi-counter">0</span>
+            <span class="suivi-counter-total" id="suivi-counter-total">/ 0</span>
+          </div>
+
+          <div class="suivi-track">
+            <div class="suivi-fill" id="suivi-fill"><span class="suivi-fill-glow"></span></div>
+          </div>
+
+          <div class="suivi-live-sub" id="suivi-live-sub">—</div>
+          <div class="suivi-toasts" id="suivi-toasts"></div>
+          <div class="suivi-live-counts" id="suivi-live-counts"></div>
+        </div>
+
+        <!-- au repos : relancer des catégories, ou déposer une nouvelle liste -->
+        <div id="suivi-idle">
+          <p class="hint">
+            Un colis livré ou clôturé ne bouge plus : seules les catégories en cours valent
+            d'être réinterrogées.
+          </p>
+          <div id="suivi-recheck" class="rows rows-dense"></div>
+          <button class="btn btn-primary suivi-go" id="suivi-recheck-go" type="button" disabled>
+            Relancer la sélection
+          </button>
+
+          <form class="suivi-add" id="suivi-add-form">
+            <textarea id="suivi-add-text" rows="3" placeholder="Colle des numéros de suivi ici…"></textarea>
+            <div class="suivi-add-row">
+              <label class="btn btn-ghost btn-small suivi-file">
+                📄 Choisir un fichier
+                <input type="file" id="suivi-add-file" accept=".txt,.csv,text/plain" hidden />
+              </label>
+              <span class="suivi-add-name" id="suivi-add-name"></span>
+            </div>
+            <button type="submit" class="btn btn-primary">Mettre en attente</button>
+          </form>
+        </div>
       </div>
 
       <div class="panel">
@@ -279,6 +323,13 @@
           Clique dessus pour voir les numéros concernés.
         </p>
         <div id="suivi-labels" class="rows rows-dense"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Répartition des actualisations</h2>
+        </div>
+        <div class="donut-wrap" id="suivi-donut"></div>
       </div>
     </section>
 
