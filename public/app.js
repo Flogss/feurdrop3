@@ -35,6 +35,8 @@ function switchView(view) {
     loadPlanNeeds().catch(() => {});
     loadPlanPoints().catch(() => {});
   }
+  // le suivi lit une base a part : on ne la sollicite qu'en arrivant dessus
+  if (view === "suivi" && currentView !== "suivi") loadSuivi().catch(() => {});
   currentView = view;
 }
 
@@ -1881,3 +1883,226 @@ document.getElementById("settings-link").addEventListener("click", () => switchV
 document.getElementById("settings-back").addEventListener("click", () => switchView("dashboard"));
 
 initPlan();
+
+// --- Suivi des colis ---------------------------------------------------------
+// Lecture des verifications faites par le bot de suivi. Rien n'est recalcule
+// ici : ce qui s'affiche est ce que le bot a releve, tel quel.
+
+const suiviState = { labels: [], label: null, rows: [], total: 0, timer: null };
+
+function suiviDate(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function suiviDuration(seconds) {
+  if (seconds === null || seconds === undefined) return "—";
+  if (seconds < 60) return `${seconds} s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
+}
+
+async function loadSuivi() {
+  const data = await fetchJSON("/api/suivi/overview");
+
+  if (!data.ready) {
+    document.getElementById("suivi-db").textContent = "base introuvable";
+    document.getElementById("suivi-jobs").innerHTML =
+      `<div class="empty-row">Base du bot de suivi introuvable.<br />
+       Indique son chemin dans la variable <code>SUIVI_DB_PATH</code>.</div>`;
+    document.getElementById("suivi-labels").innerHTML = "";
+    document.getElementById("suivi-summary").innerHTML = "";
+    return;
+  }
+
+  document.getElementById("suivi-db").textContent =
+    `${data.db.numbers.toLocaleString("fr-FR")} numéros · ${data.db.jobs} vérification${data.db.jobs > 1 ? "s" : ""}`;
+  document.getElementById("suivi-link-count").textContent = data.db.numbers.toLocaleString("fr-FR");
+
+  renderSuiviJobs(data.jobs);
+  renderSuiviSummary(data.summary);
+  renderSuiviLabels(data.labels);
+
+  // tant qu'une verification tourne, on suit sa progression
+  const running = data.jobs.some((j) => j.running);
+  clearInterval(suiviState.timer);
+  suiviState.timer = running && currentView === "suivi" ? setInterval(refreshSuiviJobs, 3000) : null;
+}
+
+async function refreshSuiviJobs() {
+  if (currentView !== "suivi") return clearInterval(suiviState.timer);
+  try {
+    const { jobs } = await fetchJSON("/api/suivi/jobs");
+    renderSuiviJobs(jobs);
+    if (!jobs.some((j) => j.running)) clearInterval(suiviState.timer);
+  } catch (err) {
+    clearInterval(suiviState.timer);
+  }
+}
+
+const JOB_STATE = {
+  running: { label: "en cours", dot: "🔵" },
+  done: { label: "terminée", dot: "🟢" },
+  cancelled: { label: "annulée", dot: "🟠" },
+  error: { label: "erreur", dot: "🔴" },
+};
+
+function renderSuiviJobs(jobs) {
+  const box = document.getElementById("suivi-jobs");
+  if (!jobs || jobs.length === 0) {
+    box.innerHTML = `<div class="empty-row">Aucune vérification enregistrée.</div>`;
+    return;
+  }
+
+  box.innerHTML = jobs
+    .map((job) => {
+      const state = JOB_STATE[job.state] || { label: job.state, dot: "⚪" };
+      const eta = job.running && job.eta !== null ? ` · reste ~${suiviDuration(job.eta)}` : "";
+      return `<div class="suivi-job${job.running ? " suivi-job-running" : ""}">
+        <div class="suivi-job-head">
+          <span class="suivi-job-name">${state.dot} ${escapeHtml(job.file_name || "liste collée")}</span>
+          <span class="suivi-job-when">${suiviDate(job.started_at)}</span>
+        </div>
+        <div class="suivi-bar"><span style="width:${job.percent}%"></span></div>
+        <div class="suivi-job-sub">
+          ${job.checked.toLocaleString("fr-FR")} / ${job.total.toLocaleString("fr-FR")} · ${job.percent} %
+          · ${job.found.toLocaleString("fr-FR")} trouvés${job.missing ? ` · ${job.missing} introuvables` : ""}
+          · ${state.label} en ${suiviDuration(job.elapsed)}${eta}
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+function renderSuiviSummary(summary) {
+  const box = document.getElementById("suivi-summary");
+  if (!summary || summary.length === 0) {
+    box.innerHTML = `<div class="empty-row">Rien à afficher.</div>`;
+    return;
+  }
+  box.innerHTML = summary
+    .map(
+      (m) => `<div class="row row-inline">
+        <div class="row-main"><div class="row-title">${m.icon} ${escapeHtml(m.milestoneLabel)}</div></div>
+        <div class="row-actions"><span class="chip chip-owed">${m.count.toLocaleString("fr-FR")}</span></div>
+      </div>`
+    )
+    .join("");
+}
+
+function renderSuiviLabels(labels) {
+  suiviState.labels = labels;
+  document.getElementById("suivi-labels-count").textContent =
+    `${labels.length} libellé${labels.length > 1 ? "s" : ""}`;
+
+  const box = document.getElementById("suivi-labels");
+  if (labels.length === 0) {
+    box.innerHTML = `<div class="empty-row">Aucune actualisation enregistrée.</div>`;
+    return;
+  }
+
+  box.innerHTML = labels
+    .map(
+      (l, i) => `<div class="row row-pick" data-suivi-label="${i}">
+        <div class="row-main">
+          <div class="row-title">${l.icon} ${escapeHtml(l.label || "(sans libellé)")}</div>
+          <div class="row-sub">dernière le ${suiviDate(l.last_event_at)}</div>
+        </div>
+        <div class="row-actions"><span class="chip chip-pending">${l.count.toLocaleString("fr-FR")}</span></div>
+      </div>`
+    )
+    .join("");
+}
+
+document.getElementById("suivi-labels").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-suivi-label]");
+  if (!row) return;
+  openSuiviLabel(suiviState.labels[Number(row.dataset.suiviLabel)]);
+});
+
+async function openSuiviLabel(label) {
+  if (!label) return;
+  suiviState.label = label;
+  suiviState.rows = [];
+  switchView("suivi-detail");
+
+  document.getElementById("suivi-detail-label").textContent = label.label || "(sans libellé)";
+  document.getElementById("suivi-rows").innerHTML = `<div class="empty-row">Chargement…</div>`;
+  await loadSuiviRows(true);
+}
+
+async function loadSuiviRows(reset = false) {
+  const offset = reset ? 0 : suiviState.rows.length;
+  const params = new URLSearchParams({ label: suiviState.label.label ?? "", limit: 200, offset });
+  const data = await fetchJSON(`/api/suivi/label?${params}`);
+
+  suiviState.rows = reset ? data.rows : [...suiviState.rows, ...data.rows];
+  suiviState.total = data.total;
+
+  document.getElementById("suivi-detail-count").textContent =
+    `${suiviState.rows.length} / ${data.total.toLocaleString("fr-FR")}`;
+  document.getElementById("suivi-more").hidden = suiviState.rows.length >= data.total;
+
+  document.getElementById("suivi-rows").innerHTML = suiviState.rows
+    .map(
+      (r, i) => `<div class="suivi-row">
+        <div class="suivi-row-main">
+          <div class="suivi-number">${escapeHtml(r.tracking_number)}</div>
+          <div class="suivi-when">${r.icon} ${suiviDate(r.last_event_at)}</div>
+        </div>
+        <button class="btn btn-ghost btn-small" data-suivi-copy="${i}">📋</button>
+      </div>`
+    )
+    .join("");
+}
+
+document.getElementById("suivi-more").addEventListener("click", () => loadSuiviRows(false));
+
+// Ce qu'on copie : le numero, la date de la derniere actualisation, et ce
+// qu'elle dit. Les trois ensemble, c'est ce qui se colle dans un message.
+function suiviLine(row) {
+  return `${row.tracking_number} — ${suiviDate(row.last_event_at)} — ${row.last_label || ""}`.trim();
+}
+
+async function copyText(text, button) {
+  const previous = button ? button.textContent : null;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    // clipboard refuse hors HTTPS : on retombe sur la vieille methode
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (button) {
+    button.textContent = "✅";
+    setTimeout(() => (button.textContent = previous), 1200);
+  }
+}
+
+document.getElementById("suivi-rows").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-suivi-copy]");
+  if (!btn) return;
+  copyText(suiviLine(suiviState.rows[Number(btn.dataset.suiviCopy)]), btn);
+});
+
+document.getElementById("suivi-copy-all").addEventListener("click", (e) => {
+  copyText(suiviState.rows.map(suiviLine).join("\n"), e.currentTarget);
+});
+
+document.getElementById("suivi-copy-numbers").addEventListener("click", (e) => {
+  copyText(suiviState.rows.map((r) => r.tracking_number).join("\n"), e.currentTarget);
+});
+
+document.getElementById("suivi-link").addEventListener("click", () => switchView("suivi"));
+document.getElementById("suivi-back").addEventListener("click", () => switchView("dashboard"));
+document.getElementById("suivi-detail-back").addEventListener("click", () => switchView("suivi"));

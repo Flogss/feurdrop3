@@ -151,6 +151,12 @@
         <div id="sender-rows" class="rows rows-dense"></div>
       </div>
 
+      <button class="settings-link suivi-link" id="suivi-link" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 7h13v10H3zM16 10h3.5l1.5 3v4h-5M6.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM17.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/></svg>
+        <span>Suivi des colis</span>
+        <span class="suivi-link-count" id="suivi-link-count"></span>
+      </button>
+
       <button class="settings-link" id="settings-link" type="button">
         <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5v.2a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H2.9a2 2 0 010-4H3a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.2a2 2 0 010 4H21a1.7 1.7 0 00-1.5 1z"/></svg>
         <span>Réglages</span>
@@ -239,6 +245,60 @@
         <p class="hint">Coche les expéditeurs inactifs à fusionner dans un groupe "Autre" pour alléger la liste. Par sécurité, un expéditeur générant plus de 25% du chiffre d'affaires total est protégé et ne peut pas être fusionné.</p>
         <div id="merge-rows" class="rows"></div>
         <button class="btn btn-ghost" id="merge-to-other-btn" disabled>Fusionner la sélection en "Autre"</button>
+      </div>
+    </section>
+
+    <section id="view-suivi" class="view">
+      <div class="view-head">
+        <button class="btn btn-ghost btn-small" id="suivi-back" type="button">← Dashboard</button>
+        <h1>Suivi des colis</h1>
+      </div>
+
+      <div class="panel" id="suivi-jobs-panel">
+        <div class="panel-head">
+          <h2>Vérifications</h2>
+          <span class="chart-range" id="suivi-db">—</span>
+        </div>
+        <div id="suivi-jobs" class="suivi-jobs"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Par catégorie</h2>
+        </div>
+        <div id="suivi-summary" class="rows rows-dense"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Dernières actualisations</h2>
+          <span class="chart-range" id="suivi-labels-count">—</span>
+        </div>
+        <p class="hint">
+          Chaque ligne est un libellé d'actualisation, de la plus récente à la plus ancienne.
+          Clique dessus pour voir les numéros concernés.
+        </p>
+        <div id="suivi-labels" class="rows rows-dense"></div>
+      </div>
+    </section>
+
+    <section id="view-suivi-detail" class="view">
+      <div class="view-head">
+        <button class="btn btn-ghost btn-small" id="suivi-detail-back" type="button">← Suivi</button>
+        <h1 id="suivi-detail-title">Détail</h1>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2 id="suivi-detail-label">—</h2>
+          <span class="chart-range" id="suivi-detail-count">—</span>
+        </div>
+        <div class="plan-actions">
+          <button class="btn btn-primary" id="suivi-copy-all" type="button">📋 Tout copier</button>
+          <button class="btn btn-ghost" id="suivi-copy-numbers" type="button">📋 Numéros seuls</button>
+        </div>
+        <div id="suivi-rows" class="suivi-rows"></div>
+        <button class="btn btn-ghost" id="suivi-more" type="button" hidden>Afficher la suite</button>
       </div>
     </section>
 

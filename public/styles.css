@@ -1077,3 +1077,75 @@ main { margin-top: 16px; }
 .plan-when input:focus { outline: none; border-color: rgba(56,247,255,0.45); }
 .plan-lockers { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--panel-border); }
 .plan-lockers em { font-style: normal; color: var(--text-dim); opacity: 0.75; }
+
+/* --- Suivi des colis ------------------------------------------------------ */
+.suivi-link { position: relative; }
+.suivi-link-count {
+  position: absolute;
+  right: 12px;
+  font-size: 10.5px;
+  color: var(--cyan);
+  opacity: 0.8;
+}
+
+.suivi-jobs { display: flex; flex-direction: column; gap: 8px; }
+.suivi-job {
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.015);
+}
+.suivi-job-running { border-color: rgba(56,247,255,0.35); background: rgba(56,247,255,0.05); }
+.suivi-job-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.suivi-job-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.suivi-job-when { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.suivi-job-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
+
+/* barre de progression : elle suit le compteur du bot, sans extrapolation */
+.suivi-bar {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.suivi-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--cyan), var(--lime));
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.suivi-job-running .suivi-bar span { animation: suiviPulse 1.8s ease-in-out infinite; }
+@keyframes suiviPulse { 50% { opacity: 0.65; } }
+
+.suivi-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.suivi-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.015);
+}
+.suivi-row-main { flex: 1; min-width: 0; }
+.suivi-number { font-size: 12.5px; font-weight: 600; letter-spacing: 0.02em; }
+.suivi-when { font-size: 10.5px; color: var(--text-dim); margin-top: 1px; }
+.suivi-row .btn { flex-shrink: 0; }
+
+#view-suivi-detail .panel-head h2 {
+  font-size: 12px;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* le libelle EST l'information : il ne doit pas etre tronque */
+#suivi-labels .row-title { white-space: normal; line-height: 1.45; }
+#suivi-labels .row { align-items: start; }
