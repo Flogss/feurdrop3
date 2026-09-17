@@ -1,7 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 const { suiviDbPath } = require("./paths");
-const { sharedLimiter, PER_SECOND } = require("./engine");
+const engine = require("./engine");
+const { sharedLimiter, PER_SECOND } = engine;
 
 // Demarrage du bot de suivi depuis le serveur du dashboard.
 //
@@ -13,6 +14,35 @@ const { sharedLimiter, PER_SECOND } = require("./engine");
 // Les deux bots Telegram n'ont pas le meme jeton et ne se genent donc pas.
 // En revanche le meme jeton ne peut pas etre interroge depuis deux machines :
 // si celui-ci tourne ici, il ne doit plus tourner sur le Mac.
+
+// Le bot ecrit ses resultats dans son store : on s'intercale pour que l'ecran
+// du site suive un .txt envoye depuis Telegram, au lieu de le laisser se
+// derouler a l'aveugle. Le proxy laisse passer tout le reste sans rien changer
+// au comportement du bot.
+function tapStore(store) {
+  return new Proxy(store, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      return (...args) => {
+        const out = value.apply(target, args);
+        try {
+          if (prop === "create") {
+            engine.adoptExternal({ id: out, total: args[0]?.total, source: args[0]?.fileName });
+          } else if (prop === "addResult") {
+            engine.noteExternalResult(args[0], args[1], args[2]);
+          } else if (prop === "finish") {
+            engine.noteExternalFinish(args[0], args[1]);
+          }
+        } catch (err) {
+          // l'affichage ne doit jamais faire tomber une verification
+          console.error("[suivi] suivi d'ecran :", err.message);
+        }
+        return out;
+      };
+    },
+  });
+}
 
 function readConfig() {
   const token = process.env.SUIVI_BOT_TOKEN || "";
@@ -59,6 +89,8 @@ async function startSuiviBot() {
     // depasse : deux limiteurs a 10/s feraient 20/s. Un seul robinet.
     bot.limiter = await sharedLimiter();
 
+    bot.store = tapStore(bot.store);
+
     console.log(
       `[suivi] ${dbFile} (${existed ? "existante" : "NOUVELLE"}) · ${allowed.length} chat(s) autorise(s) · ${PER_SECOND}/s`
     );
@@ -72,4 +104,4 @@ async function startSuiviBot() {
   }
 }
 
-module.exports = { startSuiviBot };
+module.exports = { startSuiviBot, tapStore };

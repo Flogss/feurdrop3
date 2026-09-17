@@ -1924,14 +1924,38 @@ async function loadSuivi() {
     `${total.toLocaleString("fr-FR")} numéros vérifiés`;
   document.getElementById("suivi-link-count").textContent = total.toLocaleString("fr-FR");
 
-  renderSuiviRecheck(data.recheckable || []);
   renderSuiviSummary(data.summary);
   renderSuiviLabels(data.labels);
   renderSuiviDonut(data.labels);
 
-  // une verification lancee ailleurs (depuis Telegram) doit aussi s'afficher
-  if ((data.running || []).length > 0) startLiveWatch();
+  // Une verification peut partir d'ailleurs : un .txt envoye au bot Telegram.
+  // Tant qu'on est sur cet onglet, on guette, et l'ecran s'allume tout seul.
+  watchForExternal();
 }
+
+// Veille legere : une interrogation toutes les 3 s, uniquement au repos et
+// uniquement sur cet onglet.
+function watchForExternal() {
+  clearInterval(suiviState.timer);
+  suiviState.timer = setInterval(async () => {
+    if (currentView !== "suivi") return clearInterval(suiviState.timer);
+    if (live.timer) return; // un ecran de passage tourne deja
+    try {
+      const data = await fetchJSON("/api/suivi/live");
+      if (data.running) {
+        live.since = 0;
+        live.shown = 0;
+        startLiveWatch();
+      }
+    } catch (err) {
+      /* le serveur redemarre peut-etre : on retentera */
+    }
+  }, 3000);
+}
+
+// Un colis livre ou cloture ne bougera plus : seules ces categories meritent
+// d'etre reinterrogees, et le bouton n'apparait que sur celles-la.
+const RECHECKABLE = new Set(["pending", "info_received", "in_transit", "out_for_delivery"]);
 
 function renderSuiviSummary(summary) {
   const box = document.getElementById("suivi-summary");
@@ -1940,14 +1964,44 @@ function renderSuiviSummary(summary) {
     return;
   }
   box.innerHTML = summary
-    .map(
-      (m) => `<div class="row row-inline">
+    .map((m) => {
+      const relance = RECHECKABLE.has(m.milestone)
+        ? `<button class="btn btn-ghost btn-small suivi-recheck-btn"
+             data-recheck="${escapeAttr(m.milestone)}"
+             title="Revérifier ces ${m.count} numéros">↻</button>`
+        : "";
+      return `<div class="row row-inline">
         <div class="row-main"><div class="row-title">${m.icon} ${escapeHtml(m.milestoneLabel)}</div></div>
-        <div class="row-actions"><span class="chip chip-owed">${m.count.toLocaleString("fr-FR")}</span></div>
-      </div>`
-    )
+        <div class="row-actions">
+          <span class="chip chip-owed">${m.count.toLocaleString("fr-FR")}</span>${relance}
+        </div>
+      </div>`;
+    })
     .join("");
 }
+
+document.getElementById("suivi-summary").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-recheck]");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    await fetchJSON("/api/suivi/recheck", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ milestones: [btn.dataset.recheck] }),
+    });
+    live.since = 0;
+    live.shown = 0;
+    startLiveWatch();
+    document.getElementById("suivi-check-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "↻";
+  }
+});
 
 function renderSuiviLabels(labels) {
   suiviState.labels = labels;
@@ -2219,75 +2273,41 @@ function renderLiveCounts(counts) {
 
 // --- Relance et mise en attente ---------------------------------------------
 
-function renderSuiviRecheck(categories) {
-  const box = document.getElementById("suivi-recheck");
-  const go = document.getElementById("suivi-recheck-go");
-  if (categories.length === 0) {
-    box.innerHTML = `<div class="empty-row">Rien à réinterroger : tout est livré ou clôturé.</div>`;
-    go.disabled = true;
-    return;
-  }
-  box.innerHTML = categories
-    .map(
-      (c) => `<label class="row row-pickable">
-        <div class="row-main">
-          <div class="row-title">${c.icon} ${escapeHtml(c.milestoneLabel)}</div>
-          <div class="row-sub">${c.count.toLocaleString("fr-FR")} numéro${c.count > 1 ? "s" : ""}</div>
-        </div>
-        <div class="row-actions"><input type="checkbox" data-recheck="${escapeAttr(c.milestone)}" /></div>
-      </label>`
-    )
-    .join("");
-  updateRecheckButton();
-}
-
-function selectedMilestones() {
-  return [...document.querySelectorAll("[data-recheck]:checked")].map((i) => i.dataset.recheck);
-}
-
-function updateRecheckButton() {
-  const chosen = selectedMilestones();
-  const go = document.getElementById("suivi-recheck-go");
-  go.disabled = chosen.length === 0;
-  const n = chosen
-    .map((m) => Number(document.querySelector(`[data-recheck="${m}"]`).closest(".row").querySelector(".row-sub").textContent.replace(/\D/g, "")))
-    .reduce((a, b) => a + b, 0);
-  go.textContent = chosen.length === 0 ? "Relancer la sélection" : `Relancer ${n.toLocaleString("fr-FR")} numéros`;
-}
-
-document.getElementById("suivi-recheck").addEventListener("change", updateRecheckButton);
-
-document.getElementById("suivi-recheck-go").addEventListener("click", async (e) => {
-  const milestones = selectedMilestones();
-  if (milestones.length === 0) return;
-  e.currentTarget.disabled = true;
-  try {
-    await fetchJSON("/api/suivi/recheck", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ milestones }),
-    });
-    live.since = 0;
-    live.shown = 0;
-    startLiveWatch();
-  } catch (err) {
-    alert(err.message);
-    e.currentTarget.disabled = false;
-  }
-});
-
-document.getElementById("suivi-add-file").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
+async function acceptFile(file) {
   if (!file) return;
-  document.getElementById("suivi-add-name").textContent = file.name;
-  document.getElementById("suivi-add-text").value = await file.text();
-});
+  const text = await file.text();
+  document.getElementById("suivi-add-text").value = text;
+  document.getElementById("suivi-drop-title").textContent = file.name;
+  const lignes = text.split("\n").filter((l) => l.trim()).length;
+  document.getElementById("suivi-drop-sub").textContent = `${lignes.toLocaleString("fr-FR")} ligne${lignes > 1 ? "s" : ""} lue${lignes > 1 ? "s" : ""}`;
+  document.getElementById("suivi-drop").classList.add("loaded");
+}
+
+document.getElementById("suivi-add-file").addEventListener("change", (e) => acceptFile(e.target.files[0]));
+
+// glisser-deposer : le navigateur ouvrirait le fichier si on ne l'en empechait pas
+const drop = document.getElementById("suivi-drop");
+for (const type of ["dragenter", "dragover"]) {
+  drop.addEventListener(type, (e) => {
+    e.preventDefault();
+    drop.classList.add("over");
+  });
+}
+for (const type of ["dragleave", "drop"]) {
+  drop.addEventListener(type, (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+  });
+}
+drop.addEventListener("drop", (e) => acceptFile(e.dataTransfer?.files?.[0]));
 
 document.getElementById("suivi-add-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = document.getElementById("suivi-add-text").value.trim();
   if (!text) return alert("Colle des numéros ou choisis un fichier.");
-  const name = document.getElementById("suivi-add-name").textContent || "liste collée";
+  const name = document.getElementById("suivi-drop").classList.contains("loaded")
+    ? document.getElementById("suivi-drop-title").textContent
+    : "liste collée";
 
   try {
     const res = await fetchJSON("/api/suivi/verifier", {
@@ -2299,7 +2319,7 @@ document.getElementById("suivi-add-form").addEventListener("submit", async (e) =
       console.log(`[suivi] ${res.invalid} invalides, ${res.duplicates} doublons écartés`);
     }
     document.getElementById("suivi-add-text").value = "";
-    document.getElementById("suivi-add-name").textContent = "";
+    resetDrop();
     live.since = 0;
     live.shown = 0;
     startLiveWatch();
@@ -2307,6 +2327,13 @@ document.getElementById("suivi-add-form").addEventListener("submit", async (e) =
     alert(err.message);
   }
 });
+
+function resetDrop() {
+  document.getElementById("suivi-drop-title").textContent = "Déposer un fichier .txt";
+  document.getElementById("suivi-drop-sub").textContent = "ou clique pour le choisir";
+  document.getElementById("suivi-drop").classList.remove("loaded");
+  document.getElementById("suivi-add-file").value = "";
+}
 
 document.getElementById("suivi-cancel").addEventListener("click", async () => {
   await fetchJSON("/api/suivi/annuler", { method: "POST" }).catch(() => {});

@@ -281,27 +281,20 @@
           <div class="suivi-live-counts" id="suivi-live-counts"></div>
         </div>
 
-        <!-- au repos : relancer des catégories, ou déposer une nouvelle liste -->
+        <!-- au repos : déposer une liste. La relance se fait par catégorie,
+             directement dans le panneau du dessous. -->
         <div id="suivi-idle">
-          <p class="hint">
-            Un colis livré ou clôturé ne bouge plus : seules les catégories en cours valent
-            d'être réinterrogées.
-          </p>
-          <div id="suivi-recheck" class="rows rows-dense"></div>
-          <button class="btn btn-primary suivi-go" id="suivi-recheck-go" type="button" disabled>
-            Relancer la sélection
-          </button>
-
           <form class="suivi-add" id="suivi-add-form">
-            <textarea id="suivi-add-text" rows="3" placeholder="Colle des numéros de suivi ici…"></textarea>
-            <div class="suivi-add-row">
-              <label class="btn btn-ghost btn-small suivi-file">
-                📄 Choisir un fichier
-                <input type="file" id="suivi-add-file" accept=".txt,.csv,text/plain" hidden />
-              </label>
-              <span class="suivi-add-name" id="suivi-add-name"></span>
-            </div>
-            <button type="submit" class="btn btn-primary">Mettre en attente</button>
+            <label class="suivi-drop" id="suivi-drop">
+              <input type="file" id="suivi-add-file" accept=".txt,.csv,text/plain" hidden />
+              <span class="suivi-drop-icon">📄</span>
+              <span class="suivi-drop-main">
+                <span class="suivi-drop-title" id="suivi-drop-title">Déposer un fichier .txt</span>
+                <span class="suivi-drop-sub" id="suivi-drop-sub">ou clique pour le choisir</span>
+              </span>
+            </label>
+            <textarea id="suivi-add-text" rows="3" placeholder="…ou colle des numéros de suivi ici"></textarea>
+            <button type="submit" class="btn btn-primary">Vérifier ces numéros</button>
           </form>
         </div>
       </div>

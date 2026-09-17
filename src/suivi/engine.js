@@ -128,6 +128,53 @@ async function startCheck({ numbers, source = "dashboard" }) {
   return { jobId: id, total: numbers.length };
 }
 
+// --- Verifications lancees depuis Telegram -----------------------------------
+// Le bot a son propre moteur ; on se branche sur son store (voir runner.js)
+// pour que l'ecran du site s'allume aussi quand un .txt part dans Telegram.
+// Sans ca, une verification lancee depuis le telephone se deroulait a
+// l'aveugle cote site.
+
+function adoptExternal({ id, total, source }) {
+  if (isRunning()) return; // une verification du site a la priorite d'affichage
+  current = {
+    id,
+    total: total || 0,
+    checked: 0,
+    errors: 0,
+    counts: {},
+    cancelled: false,
+    source: source || "Telegram",
+    startedAt: Date.now(),
+    done: false,
+    external: true,
+  };
+  finds = [];
+  seq = 0;
+}
+
+function noteExternalResult(jobId, number, status) {
+  if (!current || current.id !== jobId) return;
+  current.checked += 1;
+  const key = status.found ? status.milestone : "not_found";
+  current.counts[key] = (current.counts[key] ?? 0) + 1;
+  seq += 1;
+  finds.push({
+    seq,
+    number,
+    milestone: key,
+    found: Boolean(status.found),
+    label: status.lastLabel || null,
+  });
+  if (finds.length > FINDS_KEPT) finds = finds.slice(-FINDS_KEPT);
+}
+
+function noteExternalFinish(jobId, state) {
+  if (!current || current.id !== jobId) return;
+  current.state = state;
+  current.finishedAt = Date.now();
+  current.done = true;
+}
+
 function cancel() {
   if (!isRunning()) return false;
   current.cancelled = true;
@@ -169,4 +216,15 @@ function live({ since = 0 } = {}) {
   };
 }
 
-module.exports = { startCheck, cancel, live, isRunning, parse, sharedLimiter, PER_SECOND };
+module.exports = {
+  startCheck,
+  cancel,
+  live,
+  isRunning,
+  parse,
+  sharedLimiter,
+  adoptExternal,
+  noteExternalResult,
+  noteExternalFinish,
+  PER_SECOND,
+};
