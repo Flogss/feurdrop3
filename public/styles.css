@@ -1180,31 +1180,118 @@ main { margin-top: 16px; }
 }
 .suivi-counter-total { font-size: 15px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
+/* La jauge. Elle se regarde, donc elle a de quoi occuper l'oeil : des graduations
+   dans le rail, un degrade qui derive dans le remplissage, une trame qui file
+   a contresens, un reflet sous le rail, et une tete lumineuse qui pousse
+   l'avancee et porte le pourcentage. Tout est en CSS : rien ne tourne en JS
+   pendant que ca defile. */
+.suivi-gauge { position: relative; padding-bottom: 20px; }
+
 .suivi-track {
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
   position: relative;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(56, 247, 255, 0.14);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
 }
+
+/* graduations tous les 5 % : donne l'echelle et fait "instrument" */
+.suivi-ticks {
+  position: absolute;
+  inset: 0;
+  /* graduation fine tous les 5 %, plus marquee tous les 25 % */
+  background-image:
+    repeating-linear-gradient(90deg, rgba(56, 247, 255, 0.4) 0 1px, transparent 1px 25%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0 1px, transparent 1px 5%);
+}
+
 .suivi-fill {
   position: relative;
   height: 100%;
   width: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--cyan), var(--lime));
-  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  background: linear-gradient(90deg, #0891b2, var(--cyan), var(--lime), var(--cyan), #0891b2);
+  background-size: 260% 100%;
+  animation: suiviDrift 4.5s linear infinite;
+  box-shadow: 0 0 14px rgba(56, 247, 255, 0.55), 0 0 30px rgba(182, 255, 62, 0.22);
+  transition: width 0.75s cubic-bezier(0.22, 1, 0.36, 1);
   overflow: hidden;
 }
-/* un reflet qui balaie la barre : c'est ce qui la fait respirer */
+@keyframes suiviDrift { to { background-position: -260% 0; } }
+
+/* reflet qui balaie */
 .suivi-fill-glow {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
   transform: translateX(-100%);
-  animation: suiviSweep 1.5s ease-in-out infinite;
+  animation: suiviSweep 1.9s ease-in-out infinite;
 }
 @keyframes suiviSweep { to { transform: translateX(100%); } }
+
+/* trame fine qui file a contresens : l'impression de flux de donnees */
+.suivi-fill-grid {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    115deg,
+    rgba(0, 0, 0, 0.22) 0 2px,
+    transparent 2px 7px
+  );
+  animation: suiviStripes 0.8s linear infinite;
+}
+@keyframes suiviStripes { to { background-position: -7px 0; } }
+
+/* la tete : un trait blanc surexpose, avec son halo qui bat */
+.suivi-head {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 6px #fff, 0 0 16px var(--cyan), 0 0 34px rgba(56, 247, 255, 0.7);
+  transition: left 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: suiviHead 1.3s ease-in-out infinite;
+}
+@keyframes suiviHead {
+  50% { box-shadow: 0 0 9px #fff, 0 0 24px var(--cyan), 0 0 48px rgba(56, 247, 255, 0.85); }
+}
+
+/* reflet sous le rail, comme pose sur une vitre */
+.suivi-reflect {
+  height: 9px;
+  margin-top: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  opacity: 0.32;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent);
+  transform: scaleY(-1);
+}
+.suivi-reflect-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0891b2, var(--cyan), var(--lime));
+  filter: blur(1.5px);
+  transition: width 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.suivi-pct {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--cyan);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px rgba(56, 247, 255, 0.55);
+}
 
 .suivi-live-sub { font-size: 11px; color: var(--text-dim); margin-top: 8px; font-variant-numeric: tabular-nums; }
 

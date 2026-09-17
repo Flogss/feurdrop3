@@ -19,6 +19,7 @@ let store = null;
 let client = null;
 
 let current = null; // job en cours, cote runtime
+let queued = []; // verifications du site qui attendent leur tour
 let finds = []; // dernieres trouvailles, pour l'animation
 let seq = 0;
 
@@ -65,8 +66,15 @@ async function parse(text) {
 }
 
 async function startCheck({ numbers, source = "dashboard" }) {
-  if (isRunning()) throw new Error("une verification tourne deja");
   if (!Array.isArray(numbers) || numbers.length === 0) throw new Error("aucun numero a verifier");
+
+  // Une verification en cours ne fait plus echouer la suivante : elle attend
+  // son tour. Le debit est de toute facon plafonne, les lancer ensemble ne
+  // ferait rien gagner.
+  if (isRunning()) {
+    queued.push({ numbers, source });
+    return { queued: queued.length, total: numbers.length, source };
+  }
 
   const { store: st, client: cl, limiter: lim, jobs } = await resources();
   const id = jobs.newJobId();
@@ -123,9 +131,19 @@ async function startCheck({ numbers, source = "dashboard" }) {
     })
     .finally(() => {
       job.done = true;
+      startNextQueued();
     });
 
-  return { jobId: id, total: numbers.length };
+  return { jobId: id, total: numbers.length, queued: 0 };
+}
+
+function startNextQueued() {
+  const next = queued.shift();
+  if (!next) return;
+  // on laisse l'ecran afficher la fin du passage precedent avant d'enchainer
+  setTimeout(() => {
+    startCheck(next).catch((err) => console.error("[suivi] file d'attente :", err.message));
+  }, 2500);
 }
 
 // --- Verifications lancees depuis Telegram -----------------------------------
@@ -184,7 +202,7 @@ function cancel() {
 // Etat instantane, pour l'ecran de chargement. `since` permet au navigateur de
 // ne recevoir que les trouvailles qu'il n'a pas encore affichees.
 function live({ since = 0 } = {}) {
-  if (!current) return { running: false, job: null, finds: [], seq: 0 };
+  if (!current) return { running: false, job: null, finds: [], seq: 0, queued: queued.length };
 
   // runJob horodate la fin : sans ca, le chrono d'un passage termine
   // continuerait de tourner a l'ecran
@@ -196,6 +214,7 @@ function live({ since = 0 } = {}) {
   return {
     running: !current.done,
     seq,
+    queued: queued.length,
     job: {
       id: current.id,
       source: current.source,

@@ -2177,9 +2177,14 @@ async function pollLive() {
   live.target = job.checked;
   live.since = data.seq ?? live.since;
 
-  document.getElementById("suivi-live-source").textContent = job.source;
+  document.getElementById("suivi-live-source").textContent =
+    job.source + (data.queued > 0 ? ` · ${data.queued} en attente` : "");
   document.getElementById("suivi-counter-total").textContent = `/ ${job.total.toLocaleString("fr-FR")}`;
-  document.getElementById("suivi-fill").style.width = `${job.percent.toFixed(1)}%`;
+  const pct = job.percent;
+  document.getElementById("suivi-fill").style.width = `${pct.toFixed(1)}%`;
+  document.getElementById("suivi-reflect").style.width = `${pct.toFixed(1)}%`;
+  document.getElementById("suivi-head").style.left = `${pct.toFixed(1)}%`;
+  document.getElementById("suivi-pct").textContent = `${pct.toFixed(pct < 10 ? 1 : 0)} %`;
 
   // `running` est a la racine de la reponse, pas dans `job`
   const eta = job.eta !== null ? ` · reste ~${suiviDuration(job.eta)}` : "";
@@ -2192,7 +2197,12 @@ async function pollLive() {
         : `Terminé en ${suiviDuration(job.elapsed)}`;
 
   renderLiveCounts(job.counts);
-  for (const find of data.finds || []) live.queue.push(find);
+  // Les introuvables sont de loin les plus nombreux (9 sur 10 sur un gros
+  // fichier) : les afficher noierait les vraies trouvailles. Ils restent
+  // comptes dans les pastilles, mais ne defilent pas.
+  for (const find of data.finds || []) {
+    if (find.found && find.milestone !== "not_found") live.queue.push(find);
+  }
   drainToasts();
 
   if (!data.running) {
@@ -2204,20 +2214,36 @@ async function pollLive() {
   }
 }
 
-// Monte vers la valeur reelle sans jamais sauter : au plus vite, un pas par
-// image, ce qui donne ce defilement continu meme quand l'API repond par lots.
+// Le compteur monte REGULIEREMENT, pas par a-coups. L'API repond par paquets
+// toutes les 700 ms : rattraper aussi vite que possible donnait un sprint puis
+// un temps mort, soit exactement l'effet de saut qu'on veut eviter. On etale
+// donc chaque paquet sur l'intervalle qui vient, ce qui donne un defilement
+// continu et un rythme qui se lit.
+const POLL_MS = 700;
+
 function tickCounter() {
   const el = document.getElementById("suivi-counter");
-  const step = () => {
-    if (live.shown < live.target) {
-      const gap = live.target - live.shown;
-      // on rattrape un gros retard plus vite, sans jamais sauter une valeur
-      live.shown += gap > 60 ? Math.ceil(gap / 40) : 1;
-      if (live.shown > live.target) live.shown = live.target;
-      el.textContent = live.shown.toLocaleString("fr-FR");
-      el.classList.remove("bump");
-      void el.offsetWidth;
-      el.classList.add("bump");
+  let last = performance.now();
+
+  const step = (now) => {
+    const dt = now - last;
+    last = now;
+
+    const gap = live.target - live.shown;
+    if (gap > 0) {
+      // vitesse calee pour absorber le retard d'ici la prochaine reponse,
+      // avec un plancher pour que les tout petits lots avancent quand meme
+      const perMs = Math.max(gap / POLL_MS, 0.004);
+      live.progress = (live.progress || 0) + perMs * dt;
+      const pas = Math.floor(live.progress);
+      if (pas >= 1) {
+        live.progress -= pas;
+        live.shown = Math.min(live.shown + pas, live.target);
+        el.textContent = live.shown.toLocaleString("fr-FR");
+        el.classList.remove("bump");
+        void el.offsetWidth;
+        el.classList.add("bump");
+      }
     }
     live.raf = requestAnimationFrame(step);
   };
@@ -2320,6 +2346,7 @@ document.getElementById("suivi-add-form").addEventListener("submit", async (e) =
     }
     document.getElementById("suivi-add-text").value = "";
     resetDrop();
+    if (res.queued > 0) alert(`Vérification en cours : cette liste passe en file d'attente (${res.queued}).`);
     live.since = 0;
     live.shown = 0;
     startLiveWatch();

@@ -51,6 +51,7 @@ export class Bot {
     this.allowed = new Set((allowedChats ?? []).map(String).filter(Boolean));
     this.jobs = new Map(); // jobId -> job runtime
     this.activeByChat = new Map(); // chatId -> jobId
+    this.queueByChat = new Map(); // chatId -> [{ parsed, fileName }] en attente
     this.running = false;
     this.offset = undefined;
   }
@@ -145,8 +146,17 @@ export class Bot {
   /* -------------------------------------------------------------------- jobs */
 
   async startJob(chatId, parsed, fileName) {
+    // Une vérification en cours ne fait plus rejeter la suivante : on la met en
+    // file. Envoyer trois fichiers d'affilée doit marcher sans avoir à
+    // surveiller la fin du précédent.
     if (this.activeByChat.has(chatId)) {
-      await this.api.sendMessage(chatId, '⏳ Une vérification est déjà en cours. Attends la fin ou annule-la.');
+      const file = this.queueByChat.get(chatId) ?? [];
+      file.push({ parsed, fileName });
+      this.queueByChat.set(chatId, file);
+      await this.api.sendMessage(
+        chatId,
+        `⏳ Vérification en cours : « ${fileName} » passe en file d'attente (${file.length}${file.length > 1 ? 'e' : 'er'} de la file, ${parsed.valid.length} numéros).`,
+      );
       return;
     }
     if (parsed.valid.length > MAX_NUMBERS) {
@@ -210,7 +220,20 @@ export class Bot {
       .finally(() => {
         this.activeByChat.delete(chatId);
         this.refresh(job, { force: true });
+        this.startNextQueued(chatId);
       });
+  }
+
+  /** Enchaîne la vérification suivante de la file, s'il y en a une. */
+  startNextQueued(chatId) {
+    const file = this.queueByChat.get(chatId);
+    if (!file || file.length === 0) return;
+    const next = file.shift();
+    if (file.length === 0) this.queueByChat.delete(chatId);
+    // détaché : on est dans le finally du job précédent
+    this.startJob(chatId, next.parsed, next.fileName).catch((e) =>
+      console.error('[suivi] file d\'attente :', e.message),
+    );
   }
 
   /* ------------------------------------------------------------------- rendu */
