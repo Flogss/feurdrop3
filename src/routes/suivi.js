@@ -39,4 +39,20 @@ router.get("/search", (req, res) => {
   res.json({ rows: store.search(req.query.q) });
 });
 
+// L'adresse IP que le monde exterieur voit quand ce serveur appelle une API.
+// Rien a voir avec l'adresse interne de la machine : un conteneur heberge sort
+// derriere une passerelle, et c'est CETTE adresse-la que La Poste compare a sa
+// liste d'IP autorisees.
+router.get("/ip-sortie", async (req, res) => {
+  try {
+    const answer = await fetch("https://api.ipify.org?format=json", {
+      signal: AbortSignal.timeout(8000),
+    });
+    const { ip } = await answer.json();
+    res.json({ ip, note: "adresse a autoriser dans la console La Poste" });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 module.exports = router;
