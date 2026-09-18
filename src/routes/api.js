@@ -476,6 +476,19 @@ router.delete("/senders/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Etat des outils dont depend la qualite d'impression. Sert a repondre a la
+// seule question qui compte quand les etiquettes reviennent mal recadrees :
+// est-ce que le serveur sait rendre une page, ou travaille-t-il a l'aveugle ?
+router.get("/diagnostic", (req, res) => {
+  const { isAvailable } = require("../rasterInk");
+  res.json({
+    recadrageSurRendu: isAvailable(),
+    note: isAvailable()
+      ? "les etiquettes sont recadrees sur ce qui s'imprime vraiment"
+      : "pdftoppm absent : recadrage a l'aveugle sur le contenu du PDF",
+  });
+});
+
 router.get("/config", (req, res) => {
   res.json({ defaultPrice: DEFAULT_PRICE, defaultLitPrice: DEFAULT_LIT_PRICE });
 });
