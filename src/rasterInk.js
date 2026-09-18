@@ -15,8 +15,17 @@ const { spawn, spawnSync } = require("child_process");
 // 100 ppp : assez fin pour un trait de 0,25 mm, assez grossier pour rester
 // rapide. Mesure : environ 250 ms par etiquette, rendu compris.
 const DPI = 100;
-const WHITE = 245; // au-dessus, c'est du papier
+// Seuil d'encre. Les etiquettes scannees portent des salissures tres pales --
+// bords de vitre, ombres, poussieres -- qui ne sont pas du papier blanc sans
+// etre du contenu. A 225, un gris franc compte encore, un voile non.
+const WHITE = 225;
 const STEP = 2; // un pixel sur deux suffit a trouver les bords
+
+// Une ligne ou une colonne ne compte que si elle porte assez d'encre. Une
+// salissure laisse un ou deux pixels sur sa ligne ; une ligne de texte ou un
+// code-barres en laisse des dizaines. Sans ce filtre, un point perdu dans un
+// coin etirait le cadrage jusqu'a lui.
+const MIN_PIXELS = 3;
 const TIMEOUT_MS = 20000;
 
 let available = null;
@@ -86,6 +95,47 @@ function parsePgm(buffer) {
   return { width, height, data: buffer.subarray(pos, pos + width * height) };
 }
 
+
+// Ecart tolere a l'interieur d'un meme bloc : un bordereau separe ses pavés de
+// quelques millimetres, pas de dix centimetres.
+const GAP_TOL_MM = 25;
+
+// Etendue du contenu sur un axe. On regroupe les lignes encrees en blocs, et
+// on ne garde que ceux qui pesent vraiment : une feuille porte souvent un
+// trait de coupe isole a l'autre bout, dense mais sans rapport avec
+// l'etiquette. Prendre du premier au dernier pixel sombre revenait a garder
+// tout ce qui les separe.
+function etendue(profil, seuil) {
+  const tol = Math.round((GAP_TOL_MM / 25.4) * DPI);
+  const blocs = [];
+  let debut = -1;
+  let vide = 0;
+
+  for (let i = 0; i < profil.length; i += 1) {
+    if (profil[i] >= seuil) {
+      if (debut < 0) debut = i;
+      vide = 0;
+    } else if (debut >= 0) {
+      vide += 1;
+      if (vide > tol) {
+        blocs.push({ debut, fin: i - vide });
+        debut = -1;
+      }
+    }
+  }
+  if (debut >= 0) blocs.push({ debut, fin: profil.length - 1 });
+  if (blocs.length === 0) return [-1, -1];
+
+  for (const bloc of blocs) {
+    bloc.masse = 0;
+    for (let i = bloc.debut; i <= bloc.fin; i += 1) bloc.masse += profil[i];
+  }
+  const plusLourd = Math.max(...blocs.map((b) => b.masse));
+  // un bloc qui ne pese pas 15 % du principal est un accessoire, pas du contenu
+  const gardes = blocs.filter((b) => b.masse >= plusLourd * 0.15);
+  return [Math.min(...gardes.map((b) => b.debut)), Math.max(...gardes.map((b) => b.fin))];
+}
+
 // Rectangle encre, en points PDF, origine en bas a gauche. Renvoie null si on
 // ne sait pas mesurer : l'appelant garde alors son analyse du contenu.
 async function rasterInkBox(bytes, pageIndex, { rotation = 0 } = {}) {
@@ -102,22 +152,35 @@ async function rasterInkBox(bytes, pageIndex, { rotation = 0 } = {}) {
   if (!image || image.data.length < image.width * image.height) return null;
 
   const { width, height, data } = image;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
+
+  // On compte l'encre par ligne et par colonne plutot que de retenir le
+  // premier pixel sombre venu : c'est ce qui distingue une salissure d'un
+  // contenu.
+  const parLigne = new Int32Array(height);
+  const parColonne = new Int32Array(width);
 
   for (let y = 0; y < height; y += STEP) {
     const row = y * width;
     for (let x = 0; x < width; x += STEP) {
       if (data[row + x] > WHITE) continue;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+      parLigne[y] += 1;
+      parColonne[x] += 1;
     }
   }
-  if (maxX < 0) return null; // page blanche : rien a en tirer
+
+  // Le seuil se regle sur la page elle-meme : une ligne de bordereau porte des
+  // dizaines de pixels d'encre, un cheveu qui traverse la feuille en laisse un
+  // ou deux. Un seuil fixe ne separait pas les deux ; 2 % de la ligne la plus
+  // chargee, si.
+  const seuilDe = (profil) => {
+    let max = 0;
+    for (const n of profil) if (n > max) max = n;
+    return Math.max(MIN_PIXELS, Math.round(max * 0.02));
+  };
+
+  const [minY, maxY] = etendue(parLigne, seuilDe(parLigne));
+  const [minX, maxX] = etendue(parColonne, seuilDe(parColonne));
+  if (maxX < 0 || maxY < 0) return null; // page blanche : rien a en tirer
 
   const toPt = 72 / DPI;
   const pageHeight = height * toPt;
