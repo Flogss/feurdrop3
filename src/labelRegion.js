@@ -85,11 +85,16 @@ const SCAN_STEP = 2; // un pixel sur deux suffit pour trouver les bords
 // comme en PDF). Renvoie null si l'image est illisible (on gardera alors son
 // emprise complete) et { blank: true } si elle est entierement blanche.
 function imageInkRect(image) {
-  const { width, height, kind, data } = image;
+  const { width, height, data } = image;
   if (!data || !width || !height) return null;
-  // 2 = RGB, 3 = RGBA ; les autres formats sont rares, on ne prend pas de risque
-  const channels = kind === 2 ? 3 : kind === 3 ? 4 : 0;
-  if (!channels || data.length < width * height * channels) return null;
+
+  // On deduit le nombre d'octets par pixel de la taille reelle du tampon
+  // plutot que de se fier au champ `kind` : pdfjs livre aussi du gris sur un
+  // octet, et une image qu'on renonce a lire finit par imposer son emprise
+  // entiere -- c'est-a-dire, pour une feuille livree en un seul bitmap,
+  // aucun recadrage du tout.
+  const channels = Math.floor(data.length / (width * height));
+  if (![1, 3, 4].includes(channels)) return null;
 
   let minX = width;
   let minY = height;
@@ -101,7 +106,9 @@ function imageInkRect(image) {
     for (let x = 0; x < width; x += SCAN_STEP) {
       const i = row + x * channels;
       if (channels === 4 && data[i + 3] < ALPHA) continue;
-      if (data[i] > WHITE && data[i + 1] > WHITE && data[i + 2] > WHITE) continue;
+      if (channels === 1) {
+        if (data[i] > WHITE) continue;
+      } else if (data[i] > WHITE && data[i + 1] > WHITE && data[i + 2] > WHITE) continue;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
@@ -176,6 +183,10 @@ async function collectInk(page, pdfjs) {
   let ctm = [1, 0, 0, 1, 0, 0];
   let clip = null; // zone de decoupe courante, en points page
   let fillColor = null;
+  // opacites de l'etat graphique : un trace a CA = 0 est parfaitement
+  // invisible, et pourtant certaines etiquettes en sont pleines
+  let fillAlpha = 1;
+  let strokeAlpha = 1;
   let pending = null; // dernier trace construit, pas encore peint ni utilise en clip
   const stack = [];
 
@@ -189,15 +200,42 @@ async function collectInk(page, pdfjs) {
     const args = ops.argsArray[i];
 
     if (fn === OPS.save) {
-      stack.push({ ctm, clip });
-    } else if (fn === OPS.restore) {
+      stack.push({ ctm, clip, fillAlpha, strokeAlpha });
+    } else if (fn === OPS.paintFormXObjectBegin) {
+      // Un form XObject a sa propre matrice ET son propre cadre : tout ce qu'il
+      // dessine en dehors de ce cadre est rogne a l'affichage. Les ignorer
+      // faisait compter comme encre des traces parfaitement invisibles -- et
+      // suffisait a garder une demi-page blanche dans le recadrage.
+      stack.push({ ctm, clip, fillAlpha, strokeAlpha });
+      const [matrix, bbox] = args;
+      if (Array.isArray(matrix) && matrix.length === 6) ctm = multiply(matrix, ctm);
+      if (Array.isArray(bbox) && bbox.length === 4) {
+        const [x0, y0, x1, y1] = bbox;
+        clip = intersect(
+          clip,
+          boundsOf(
+            [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => [
+              ctm[0] * x + ctm[2] * y + ctm[4],
+              ctm[1] * x + ctm[3] * y + ctm[5],
+            ])
+          )
+        );
+      }
+    } else if (fn === OPS.paintFormXObjectEnd || fn === OPS.restore) {
       const saved = stack.pop();
       if (saved) {
         ctm = saved.ctm;
         clip = saved.clip;
+        fillAlpha = saved.fillAlpha;
+        strokeAlpha = saved.strokeAlpha;
       }
     } else if (fn === OPS.transform) {
       ctm = multiply(args, ctm);
+    } else if (fn === OPS.setGState) {
+      for (const [key, value] of args[0] || []) {
+        if (key === "ca" && typeof value === "number") fillAlpha = value;
+        if (key === "CA" && typeof value === "number") strokeAlpha = value;
+      }
     } else if (fn === OPS.setFillRGBColor) {
       fillColor = args;
     } else if (
@@ -208,17 +246,23 @@ async function collectInk(page, pdfjs) {
       // on recadre l'image sur son encre : une feuille entiere livree en bitmap
       // ne doit pas compter comme de l'encre d'un bord a l'autre
       let box = rectBounds(ctm, { u0: 0, v0: 0, u1: 1, v1: 1 });
+      let measured = false;
       const id = args[0];
       try {
         if (typeof id === "string" && page.objs.has(id)) {
           const ink = imageInkRect(page.objs.get(id));
           if (ink && ink.blank) continue; // image entierement blanche
-          if (ink) box = rectBounds(ctm, ink);
+          if (ink) {
+            box = rectBounds(ctm, ink);
+            measured = true;
+          }
         }
       } catch (err) {
-        // image non decodee : on garde son emprise complete
+        // image non decodee : on garde son emprise, mais sans certitude
       }
-      add({ kind: "image", ...box });
+      // `measured: false` = on n'a pas pu regarder ses pixels. Son emprise
+      // reste connue, mais elle ne servira qu'a defaut d'autre encre.
+      add({ kind: "image", measured, ...box });
     } else if (fn === OPS.constructPath) {
       const coords = args[1];
       let minX = Infinity;
@@ -239,9 +283,10 @@ async function collectInk(page, pdfjs) {
       // le trace ne sera pas dessine : il restreint ce qui suit
       if (pending) clip = intersect(clip, pending);
     } else if (PAINTS.has(fn)) {
-      if (pending && !(FILL_ONLY.has(fn) && isInvisible(fillColor))) {
-        add({ kind: "path", ...pending });
-      }
+      const remplit = FILL_ONLY.has(fn);
+      const opacite = remplit ? fillAlpha : Math.max(fillAlpha, strokeAlpha);
+      const visible = opacite > 0.02 && !(remplit && isInvisible(fillColor));
+      if (pending && visible) add({ kind: "path", ...pending });
       pending = null;
     }
   }
@@ -255,6 +300,26 @@ async function collectInk(page, pdfjs) {
     }
     return true;
   });
+}
+
+
+// Marge de rattachement : un libelle colle a un cadre est a quelques
+// millimetres de lui, jamais a dix centimetres.
+const TEXT_REACH = 12 * MM;
+
+function keepTextNearInk(items) {
+  const structure = items.filter((b) => b.kind !== "text");
+  if (structure.length === 0) return items;
+
+  const zone = union(structure);
+  const proche = (b) =>
+    b.left < zone.right + TEXT_REACH &&
+    b.right > zone.left - TEXT_REACH &&
+    b.bottom < zone.top + TEXT_REACH &&
+    b.top > zone.bottom - TEXT_REACH;
+
+  const gardes = items.filter((b) => b.kind !== "text" || proche(b));
+  return gardes.length > 0 ? gardes : items;
 }
 
 function union(items) {
@@ -328,6 +393,29 @@ async function labelRegion(bytes, pageIndex = 0) {
         items = kept;
         trimmed = true;
       }
+    }
+
+    // Le texte est rapporte par pdfjs pour la page entiere, sans tenir compte
+    // des cadres qui le rognent : une etiquette repliee dans un form XObject
+    // laisse traîner du texte dans la moitie blanche de la feuille. Or ce
+    // texte-la ne s'imprime pas.
+    //
+    // On garde donc le texte qui TOUCHE la structure dessinee -- cadres,
+    // codes-barres, images -- et on ecarte celui qui flotte seul dans le vide.
+    // Un bordereau sans aucun trace (rare) garde tout son texte.
+    items = keepTextNearInk(items);
+
+    // Une image qu'on n'a pas su mesurer couvre souvent toute la feuille : la
+    // laisser decider du cadrage revient a ne rien recadrer. Des qu'il existe
+    // de l'encre mesuree, c'est elle qui fait foi.
+    const mesures = items.filter((b) => b.kind !== "image" || b.measured);
+    if (mesures.length > 0 && mesures.length < items.length) {
+      const total = union(items);
+      const sur = union(mesures);
+      const aire = (b) => (b.right - b.left) * (b.top - b.bottom);
+      // on ne retient l'encre mesuree que si elle fait vraiment gagner de la
+      // place : sinon autant garder la vue large, moins risquee
+      if (aire(sur) < aire(total) * 0.8) items = mesures;
     }
 
     const ink = union(items);

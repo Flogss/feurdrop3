@@ -165,6 +165,17 @@ function placeOn(page, label, form, scale, left, bottom) {
   });
 }
 
+// Trait de coupe horizontal, entre deux bordereaux empiles.
+function drawCutLineH(page, y, left, right) {
+  page.drawLine({
+    start: { x: left, y },
+    end: { x: right, y },
+    thickness: 0.5,
+    color: rgb(0.6, 0.6, 0.6),
+    dashArray: [3, 3],
+  });
+}
+
 // Trait de coupe discret entre deux bordereaux.
 function drawCutLine(page, x, top, bottom) {
   page.drawLine({
@@ -176,76 +187,57 @@ function drawCutLine(page, x, top, bottom) {
   });
 }
 
-// Longueur de rouleau consommee par une rangee, marges comprises.
-function rowCost(fit) {
-  return fit.height + MARGIN * 2;
+// --- Mise en colonnes ---------------------------------------------------------
+//
+// Les rangees gaspillaient : une rangee fait la hauteur de son plus grand
+// bordereau, donc un petit bordereau a cote d'un grand laissait un trou sous
+// lui. On empile desormais VERTICALEMENT dans deux colonnes, et le rouleau ne
+// mesure plus que la plus haute des deux.
+//
+// La decoupe reste simple : un trait vertical sur toute la longueur pour
+// separer les colonnes, puis un trait horizontal entre deux bordereaux d'une
+// meme colonne.
+
+const COLUMNS = 2;
+const COLUMN_WIDTH = (USABLE_WIDTH - GAP) / COLUMNS;
+// au-dela, la feuille devient ingerable a manipuler ; on repart sur une page
+const MAX_PAGE = 1200 * MM;
+
+// Place un bordereau dans une colonne : orientation qui remplit le mieux la
+// largeur disponible sans jamais agrandir.
+function fitColumn(label, width) {
+  const options = orientations(label).map((form) => {
+    const scale = Math.min(1, width / form.outW);
+    return { form, scale, w: form.outW * scale, h: form.outH * scale };
+  });
+  const lisibles = options.filter((o) => o.scale >= MIN_SCALE);
+  const retenues = lisibles.length > 0 ? lisibles : options;
+  // a lisibilite egale, l'orientation la plus courte sur le rouleau
+  return retenues.reduce((a, b) => (b.h < a.h - 0.5 ? b : a));
 }
 
-// Rabotage : on reprend deux rangees, on remelange leurs bordereaux de toutes
-// les facons possibles et on garde la meilleure. C'est ce qui rattrape les
-// mauvais choix de la fusion gloutonne, qui apparie d'abord ce qui fait gagner
-// le plus tout de suite et laisse parfois un bordereau seul alors qu'il tenait
-// a cote d'un autre.
-function refineRows(rows) {
-  for (let guard = 0; guard < 200; guard += 1) {
-    let best = null;
-    for (let i = 0; i < rows.length && !best; i += 1) {
-      for (let j = i + 1; j < rows.length && !best; j += 1) {
-        const pool = [...rows[i].labels, ...rows[j].labels];
-        if (pool.length > MAX_PER_ROW * 2) continue;
-        const current = rowCost(rows[i].fit) + rowCost(rows[j].fit);
+// Repartit les bordereaux entre les colonnes. On place le plus grand d'abord
+// dans la colonne la moins chargee : c'est la regle qui equilibre le mieux
+// deux piles, et ici equilibrer, c'est raccourcir le rouleau.
+function packColumns(labels) {
+  const pleine = [];
+  const colonnables = [];
 
-        for (let mask = 1; mask < 1 << pool.length; mask += 1) {
-          const left = pool.filter((_, k) => (mask >> k) & 1);
-          const right = pool.filter((_, k) => !((mask >> k) & 1));
-          if (left.length > MAX_PER_ROW || right.length > MAX_PER_ROW) continue;
-
-          const fitLeft = bestRow(left);
-          if (!fitLeft) continue;
-          const fitRight = right.length ? bestRow(right) : null;
-          if (right.length && !fitRight) continue;
-
-          const total = rowCost(fitLeft) + (fitRight ? rowCost(fitRight) : 0);
-          if (total < current - 1 && (!best || total < best.total)) {
-            best = { i, j, total, rows: [{ labels: left, fit: fitLeft }].concat(fitRight ? [{ labels: right, fit: fitRight }] : []) };
-          }
-        }
-      }
-    }
-    if (!best) return rows;
-    rows.splice(best.j, 1);
-    rows.splice(best.i, 1, ...best.rows);
-  }
-  return rows;
-}
-
-// Regroupe les bordereaux en rangees. On part d'un bordereau par rangee, puis
-// on fusionne a chaque tour les deux rangees qui font gagner le plus de
-// papier, jusqu'a ce qu'aucune fusion ne fasse gagner quoi que ce soit.
-function buildRows(labels) {
-  const rows = labels.map((label) => ({
-    labels: [label],
-    fit: bestRow([label]) || bestRow([label], { allowSmall: true }),
-  }));
-
-  for (;;) {
-    let merge = null;
-    for (let i = 0; i < rows.length; i += 1) {
-      for (let j = i + 1; j < rows.length; j += 1) {
-        if (rows[i].labels.length + rows[j].labels.length > MAX_PER_ROW) continue;
-        const merged = bestRow([...rows[i].labels, ...rows[j].labels]);
-        if (!merged) continue;
-        // une rangee en moins, c'est aussi deux marges en moins
-        const gain = rows[i].fit.height + rows[j].fit.height + MARGIN * 2 - merged.height;
-        if (gain > 1 && (!merge || gain > merge.gain)) merge = { i, j, merged, gain };
-      }
-    }
-    if (!merge) break;
-    rows[merge.i] = { labels: [...rows[merge.i].labels, ...rows[merge.j].labels], fit: merge.merged };
-    rows.splice(merge.j, 1);
+  for (const label of labels) {
+    const demi = fitColumn(label, COLUMN_WIDTH);
+    // trop large meme reduit : il prendra toute la laize, seul
+    if (demi.scale < MIN_SCALE) pleine.push({ label, ...fitColumn(label, USABLE_WIDTH) });
+    else colonnables.push({ label, ...demi });
   }
 
-  return refineRows(rows);
+  const colonnes = Array.from({ length: COLUMNS }, () => ({ items: [], height: 0 }));
+  for (const item of colonnables.sort((a, b) => b.h - a.h)) {
+    const cible = colonnes.reduce((a, b) => (b.height < a.height ? b : a));
+    cible.items.push(item);
+    cible.height += item.h + (cible.items.length > 1 ? GAP : 0);
+  }
+
+  return { colonnes, pleine };
 }
 
 // Assemble les bordereaux sur le rouleau. `labels` : [{ bytes, label }].
@@ -264,41 +256,75 @@ async function buildRoll(labels) {
 
   if (prepared.length === 0) return { pdf: null, pages: 0, rows: 0, trimmed: 0, failed };
 
-  const rows = buildRows(prepared);
+  const { colonnes, pleine } = packColumns(prepared);
   let length = 0;
+  let rangees = 0;
 
-  for (const row of rows) {
-    const { labels: items, fit } = row;
-    const page = out.addPage([ROLL_WIDTH, fit.height + MARGIN * 2]);
-    length += fit.height + MARGIN * 2;
+  // --- les deux colonnes, sur une meme bande de rouleau ---------------------
+  const hauteur = Math.max(...colonnes.map((c) => c.height), 0);
+  if (hauteur > 0) {
+    // au-dela d'une certaine longueur la feuille devient ingerable : on coupe
+    const bandes = Math.max(1, Math.ceil(hauteur / MAX_PAGE));
+    const parBande = hauteur / bandes;
 
-    // la place en trop est repartie a parts egales entre les bords et les
-    // intervalles : les bordereaux restent centres et le trait de coupe tombe
-    // bien au milieu
-    const drawn = items.map((label, i) => fit.forms[i].outW * fit.scales[i]);
-    const spare = USABLE_WIDTH - drawn.reduce((a, b) => a + b, 0) - GAP * (items.length - 1);
-    const extra = Math.max(0, spare) / (items.length + 1);
+    for (let b = 0; b < bandes; b += 1) {
+      const debut = b * parBande;
+      const fin = debut + parBande;
+      const dansBande = colonnes.map((c) => {
+        let y = 0;
+        return c.items.filter((item) => {
+          const haut = y + item.h;
+          const dedans = y >= debut - 0.5 && haut <= fin + 0.5;
+          y = haut + GAP;
+          return dedans;
+        });
+      });
 
-    let x = MARGIN + extra;
-    items.forEach((label, i) => {
-      const form = fit.forms[i];
-      const scale = fit.scales[i];
-      // centre verticalement : plus lisible quand les bordereaux d'une rangee
-      // n'ont pas la meme hauteur
-      const bottom = MARGIN + (fit.height - form.outH * scale) / 2;
-      placeOn(page, label, form, scale, x, bottom);
-      x += drawn[i];
-      if (i < items.length - 1) {
-        drawCutLine(page, x + (GAP + extra) / 2, fit.height + MARGIN, MARGIN);
-        x += GAP + extra;
+      const hauteurBande = Math.max(
+        ...dansBande.map((items) => items.reduce((sum, it) => sum + it.h, 0) + GAP * Math.max(0, items.length - 1)),
+        0
+      );
+      if (hauteurBande <= 0) continue;
+
+      const page = out.addPage([ROLL_WIDTH, hauteurBande + MARGIN * 2]);
+      length += hauteurBande + MARGIN * 2;
+      rangees += 1;
+
+      dansBande.forEach((items, col) => {
+        const x = MARGIN + col * (COLUMN_WIDTH + GAP);
+        // empile du haut vers le bas : l'ordre de lecture d'une pile
+        let y = MARGIN + hauteurBande;
+        items.forEach((item, i) => {
+          y -= item.h;
+          // centre dans la largeur de colonne : un bordereau etroit ne colle
+          // pas au trait de coupe
+          placeOn(page, item.label, item.form, item.scale, x + (COLUMN_WIDTH - item.w) / 2, y);
+          if (i < items.length - 1) {
+            drawCutLineH(page, y - GAP / 2, x, x + COLUMN_WIDTH);
+          }
+          y -= GAP;
+        });
+      });
+
+      // un seul trait vertical, sur toute la bande : une coupe et deux piles
+      if (dansBande.every((items) => items.length > 0)) {
+        drawCutLine(page, MARGIN + COLUMN_WIDTH + GAP / 2, hauteurBande + MARGIN, MARGIN);
       }
-    });
+    }
+  }
+
+  // --- les bordereaux trop larges pour une colonne, chacun sur sa bande -----
+  for (const item of pleine) {
+    const page = out.addPage([ROLL_WIDTH, item.h + MARGIN * 2]);
+    length += item.h + MARGIN * 2;
+    rangees += 1;
+    placeOn(page, item.label, item.form, item.scale, (ROLL_WIDTH - item.w) / 2, MARGIN);
   }
 
   return {
     pdf: Buffer.from(await out.save()),
     pages: out.getPageCount(),
-    rows: rows.length,
+    rows: rangees,
     lengthMm: Math.round(length / MM),
     trimmed: prepared.filter((l) => l.trimmed).length,
     labels: prepared.length,

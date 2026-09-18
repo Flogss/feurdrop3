@@ -1188,7 +1188,7 @@ async function playStatsReveal() {
 }
 
 document.addEventListener("click", async (e) => {
-  const target = e.target.closest("[data-drop-sender], [data-drop-carrier], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn");
+  const target = e.target.closest("[data-drop-sender], [data-drop-carrier], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn, .drop-except-lit-btn");
   if (!target) return;
 
   const dropSender = target.dataset.dropSender;
@@ -1220,6 +1220,13 @@ document.addEventListener("click", async (e) => {
       await fetchJSON(`/api/colis/quick-remove/${encodeURIComponent(quickRemove)}`, { method: "POST" });
     } catch (err) { /* nothing pending to remove */ }
     refreshAll();
+  } else if (target.classList.contains("drop-except-lit-btn")) {
+    // les LIT partent sur une autre imprimante, souvent un autre jour
+    if (confirm("Marquer comme dropés tous les colis en attente SAUF les LIT ?")) {
+      const r = await fetchJSON("/api/colis/drop-all-except-lit", { method: "POST" });
+      if (r.count === 0) alert("Aucun colis à dropper en dehors des LIT.");
+      refreshAll();
+    }
   } else if (target.classList.contains("drop-all-btn")) {
     if (confirm("Marquer TOUS les colis en attente comme dropés ?")) {
       await fetchJSON("/api/colis/drop-all", { method: "POST" });

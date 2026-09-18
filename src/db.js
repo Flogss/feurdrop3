@@ -542,6 +542,12 @@ function dropAll() {
   return dropWhere("");
 }
 
+// Les LIT partent sur une autre imprimante et souvent un autre jour : pouvoir
+// solder le reste sans les emporter evite de les marquer dropes avant l'heure.
+function dropAllExceptLit() {
+  return dropWhere(" AND type != 'lit'");
+}
+
 function dropBySender(name) {
   return dropWhere(" AND sender_name = ?", [name]);
 }
@@ -973,6 +979,7 @@ module.exports = {
   getCarrierSummary,
   dropByCarrier,
   dropAll,
+  dropAllExceptLit,
   dropBySender,
   dropColis,
   getTourStart,

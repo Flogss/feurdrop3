@@ -1401,3 +1401,5 @@ main { margin-top: 16px; }
   white-space: nowrap;
 }
 .suivi-drop-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+/* les deux boutons de drop groupe : "sauf LIT" d'abord, le plus large ensuite */
+.drop-all-group { display: flex; gap: 6px; flex-shrink: 0; }

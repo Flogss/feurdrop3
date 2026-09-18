@@ -23,6 +23,7 @@ const {
   getCarrierSummary,
   dropByCarrier,
   dropAll,
+  dropAllExceptLit,
   dropBySender,
   dropColis,
   getTourStart,
@@ -296,6 +297,11 @@ router.post("/colis/:id/type", (req, res) => {
 
 router.post("/colis/drop-all", (req, res) => {
   const dropped = dropAll();
+  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
+});
+
+router.post("/colis/drop-all-except-lit", (req, res) => {
+  const dropped = dropAllExceptLit();
   res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
 });
 
