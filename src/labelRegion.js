@@ -380,6 +380,11 @@ function widestGap(items, axis) {
 
 // Coupe la page en deux le long de la gouttiere et ne garde que le morceau qui
 // porte un code-barres. Renvoie null si la coupe n'est pas evidente.
+// Ce qu'on jette doit etre un vrai bloc. Cette coupe existe pour retirer un
+// pave "INSTRUCTIONS D'EMBALLAGE" colle a cote du bordereau ; elle n'a jamais
+// eu pour but de raboter un logo de quelques millimetres au bord.
+const MIN_DROPPED = 35 * MM;
+
 function splitOnce(items, axis) {
   const gap = widestGap(items, axis);
   if (!gap) return null;
@@ -388,11 +393,16 @@ function splitOnce(items, axis) {
   const after = items.filter((b) => (axis === "x" ? b.left : b.bottom) >= gap[1] - 0.5);
   if (before.length === 0 || after.length === 0) return null;
 
+  const taille = (liste) => {
+    const b = union(liste);
+    return axis === "x" ? b.right - b.left : b.top - b.bottom;
+  };
+
   const barsBefore = before.filter(isBarcodeBar).length;
   const barsAfter = after.filter(isBarcodeBar).length;
-  if (barsBefore > 0 && barsAfter === 0) return before;
-  if (barsAfter > 0 && barsBefore === 0) return after;
-  return null; // code-barres des deux cotes (ou d'aucun) : on ne coupe pas
+  if (barsBefore > 0 && barsAfter === 0 && taille(after) >= MIN_DROPPED) return before;
+  if (barsAfter > 0 && barsBefore === 0 && taille(before) >= MIN_DROPPED) return after;
+  return null; // code-barres des deux cotes, d'aucun, ou morceau trop petit
 }
 
 // Zone a imprimer pour une page donnee, en points PDF.
@@ -458,14 +468,19 @@ async function labelRegion(bytes, pageIndex = 0) {
 
     let ink = union(items);
 
-    // Arbitre : ce que la page donne REELLEMENT a l'impression. L'analyse du
-    // contenu sait ecarter un bloc d'instructions (elle seule voit les
-    // code-barres), le rendu sait ce qui s'imprime vraiment. On garde
-    // l'intersection : chacun ne peut que resserrer le cadrage de l'autre.
+    // Le rendu fait foi. L'analyse du contenu enchaine les suppositions -- ce
+    // trace est-il peint, rogne, transparent, decoratif ? -- et chacune peut
+    // se tromper en moins : c'est ainsi qu'un logo Mondial Relay s'est
+    // retrouve coupe de six millimetres.
+    //
+    // On ne lui garde donc qu'un seul pouvoir, celui que le rendu n'a pas :
+    // reconnaitre un bloc d'instructions a l'absence de code-barres. Quand
+    // cette coupe s'est declenchee, on croise les deux ; sinon le rendu
+    // decide seul.
     const rendu = await rasterInkBox(bytes, pageIndex, { rotation: page.rotate || 0 });
     if (rendu) {
-      const serre = intersect(ink, rendu);
-      if (!isEmpty(serre)) ink = serre;
+      const retenu = trimmed ? intersect(ink, rendu) : rendu;
+      if (!isEmpty(retenu)) ink = retenu;
     }
 
     return {
