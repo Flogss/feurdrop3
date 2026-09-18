@@ -19,6 +19,8 @@
 // d'instructions, jamais. Dans le doute on garde tout : perdre du papier est
 // sans consequence, couper un code-barres fait perdre le colis.
 
+const { rasterInkBox } = require("./rasterInk");
+
 const MM = 72 / 25.4;
 const MIN_GUTTER = 6 * MM; // en-deca, c'est une simple marge entre deux blocs
 const BACKGROUND_AREA = 0.5; // un aplat couvrant plus de la moitie de la page est un fond
@@ -307,6 +309,32 @@ async function collectInk(page, pdfjs) {
 // millimetres de lui, jamais a dix centimetres.
 const TEXT_REACH = 12 * MM;
 
+
+// Un trait de guide : un cheveu qui traverse la feuille. Les bordereaux en
+// portent souvent -- reperes de pliage, bords de planche, amorces de decoupe --
+// et ils s'impriment bel et bien, mais ils ne font pas partie de l'etiquette.
+// Les compter comme encre revenait a garder la feuille entiere.
+//
+// La longueur les distingue d'une barre de code-barres : une barre depasse
+// rarement 50 mm, un trait de guide court sur toute la page.
+const HAIRLINE_THIN = 1.2 * MM;
+const HAIRLINE_LONG = 100 * MM;
+
+function isGuideLine(box) {
+  if (box.kind === "text") return false;
+  const w = box.right - box.left;
+  const h = box.top - box.bottom;
+  return (w < HAIRLINE_THIN && h > HAIRLINE_LONG) || (h < HAIRLINE_THIN && w > HAIRLINE_LONG);
+}
+
+function dropGuideLines(items) {
+  const sans = items.filter((b) => !isGuideLine(b));
+  if (sans.length === 0) return items;
+  const aire = (b) => (b.right - b.left) * (b.top - b.bottom);
+  // on ne les ecarte que si ca resserre vraiment le cadrage
+  return aire(union(sans)) < aire(union(items)) * 0.8 ? sans : items;
+}
+
 function keepTextNearInk(items) {
   const structure = items.filter((b) => b.kind !== "text");
   if (structure.length === 0) return items;
@@ -381,7 +409,16 @@ async function labelRegion(bytes, pageIndex = 0) {
     const viewport = page.getViewport({ scale: 1 });
     let items = await collectInk(page, pdfjs);
     if (items.length === 0) {
-      return { left: 0, bottom: 0, right: viewport.width, top: viewport.height, trimmed: false };
+      // rien de lisible dans le contenu : le rendu reste une chance de cadrer
+      const rendu = await rasterInkBox(bytes, pageIndex, { rotation: page.rotate || 0 });
+      const box = rendu || { left: 0, bottom: 0, right: viewport.width, top: viewport.height };
+      return {
+        left: Math.max(0, box.left - MARGIN),
+        bottom: Math.max(0, box.bottom - MARGIN),
+        right: Math.min(viewport.width, box.right + MARGIN),
+        top: Math.min(viewport.height, box.top + MARGIN),
+        trimmed: false,
+      };
     }
 
     // au plus une coupe par axe : bordereau + instructions a cote, ou
@@ -403,6 +440,7 @@ async function labelRegion(bytes, pageIndex = 0) {
     // On garde donc le texte qui TOUCHE la structure dessinee -- cadres,
     // codes-barres, images -- et on ecarte celui qui flotte seul dans le vide.
     // Un bordereau sans aucun trace (rare) garde tout son texte.
+    items = dropGuideLines(items);
     items = keepTextNearInk(items);
 
     // Une image qu'on n'a pas su mesurer couvre souvent toute la feuille : la
@@ -418,7 +456,18 @@ async function labelRegion(bytes, pageIndex = 0) {
       if (aire(sur) < aire(total) * 0.8) items = mesures;
     }
 
-    const ink = union(items);
+    let ink = union(items);
+
+    // Arbitre : ce que la page donne REELLEMENT a l'impression. L'analyse du
+    // contenu sait ecarter un bloc d'instructions (elle seule voit les
+    // code-barres), le rendu sait ce qui s'imprime vraiment. On garde
+    // l'intersection : chacun ne peut que resserrer le cadrage de l'autre.
+    const rendu = await rasterInkBox(bytes, pageIndex, { rotation: page.rotate || 0 });
+    if (rendu) {
+      const serre = intersect(ink, rendu);
+      if (!isEmpty(serre)) ink = serre;
+    }
+
     return {
       left: Math.max(0, ink.left - MARGIN),
       bottom: Math.max(0, ink.bottom - MARGIN),

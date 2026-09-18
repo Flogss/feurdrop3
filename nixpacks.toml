@@ -1,0 +1,6 @@
+# pdftoppm (poppler-utils) sert a recadrer les etiquettes sur ce qui s'imprime
+# vraiment, et non sur ce que le flux de contenu pretend contenir. Sans lui le
+# site fonctionne, mais le recadrage retombe sur l'analyse du contenu -- moins
+# fiable sur les feuilles a cadres, masques et calques invisibles.
+[phases.setup]
+aptPkgs = ["poppler-utils"]
