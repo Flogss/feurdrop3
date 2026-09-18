@@ -12,7 +12,9 @@ const { spawn, spawnSync } = require("child_process");
 // un en-tete de trois lignes puis un octet par pixel. Aucune dependance npm,
 // aucun decodeur d'image a ecrire.
 
-const DPI = 100; // assez fin pour un trait de 0,25 mm, assez grossier pour etre rapide
+// 100 ppp : assez fin pour un trait de 0,25 mm, assez grossier pour rester
+// rapide. Mesure : environ 250 ms par etiquette, rendu compris.
+const DPI = 100;
 const WHITE = 245; // au-dessus, c'est du papier
 const STEP = 2; // un pixel sur deux suffit a trouver les bords
 const TIMEOUT_MS = 20000;
