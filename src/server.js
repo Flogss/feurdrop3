@@ -3,7 +3,7 @@ const os = require("os");
 const path = require("path");
 const express = require("express");
 const apiRouter = require("./routes/api");
-const planRouter = require("./routes/plan");
+const printRouter = require("./routes/print");
 const suiviRouter = require("./routes/suivi");
 const { startBot } = require("./bot");
 const { startSuiviBot } = require("./suivi/runner");
@@ -12,7 +12,7 @@ const { getPrintToken } = require("./db");
 const app = express();
 app.use(express.json());
 app.use("/api", apiRouter);
-app.use("/api/plan", planRouter);
+app.use("/api/print", printRouter);
 app.use("/api/suivi", suiviRouter);
 app.use(express.static(path.join(__dirname, "..", "public")));
 

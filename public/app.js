@@ -31,10 +31,7 @@ function switchView(view) {
   }
   // l'onglet Plan interroge des services exterieurs : on ne charge qu'en y
   // arrivant, jamais dans le rafraichissement de fond
-  if (view === "plan" && currentView !== "plan") {
-    loadPlanNeeds().catch(() => {});
-    loadPlanPoints().catch(() => {});
-  }
+  if (view === "imprime" && currentView !== "imprime") loadImprime();
   // le suivi lit une base a part : on ne la sollicite qu'en arrivant dessus
   if (view === "suivi" && currentView !== "suivi") loadSuivi().catch(() => {});
   currentView = view;
@@ -1478,419 +1475,6 @@ initPush();
 refreshAll();
 setInterval(refreshAll, 5000);
 
-// --- Plan : tournee de depot -------------------------------------------------
-// Regle qui gouverne tout cet ecran : ne jamais afficher une certitude qu'on
-// n'a pas. Un point sans horaires connus s'affiche en blanc "horaires
-// inconnus", jamais en vert.
-
-const TRUST_DOT = { verified: "🟢", unverified: "🟠", rejected: "🔴" };
-const STATE_DOT = { open: "🟢", closed: "🔴", late: "🟠", unknown: "⚪" };
-
-const planState = {
-  start: null,
-  needs: [],
-  selected: new Set(),
-  result: null,
-  busy: false,
-};
-
-function loadStoredStart() {
-  try {
-    const raw = localStorage.getItem("plan.start");
-    if (raw) planState.start = JSON.parse(raw);
-  } catch (err) {
-    planState.start = null;
-  }
-  renderStart();
-}
-
-function setStart(place) {
-  planState.start = place;
-  localStorage.setItem("plan.start", JSON.stringify(place));
-  document.getElementById("plan-start-results").innerHTML = "";
-  document.getElementById("plan-start-input").value = "";
-  renderStart();
-}
-
-function renderStart() {
-  const box = document.getElementById("plan-start-current");
-  const label = document.getElementById("plan-start-label");
-  if (!planState.start) {
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
-  label.textContent = planState.start.label;
-}
-
-document.getElementById("plan-start-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const query = document.getElementById("plan-start-input").value.trim();
-  const box = document.getElementById("plan-start-results");
-  if (query.length < 3) return;
-
-  box.innerHTML = `<div class="row row-inline"><div class="row-main"><div class="row-title">Recherche…</div></div></div>`;
-  try {
-    const { results } = await fetchJSON(`/api/plan/geocode?q=${encodeURIComponent(query)}`);
-    if (results.length === 0) {
-      box.innerHTML = `<div class="row row-inline"><div class="row-main"><div class="row-title">Aucune adresse trouvée en Île-de-France.</div></div></div>`;
-      return;
-    }
-    box.innerHTML = results
-      .map(
-        (r, i) =>
-          `<div class="row row-inline row-pick" data-start-index="${i}">
-             <div class="row-main"><div class="row-title">${escapeHtml(r.label)}</div></div>
-           </div>`
-      )
-      .join("");
-    box.dataset.results = JSON.stringify(results);
-  } catch (err) {
-    box.innerHTML = `<div class="row row-inline"><div class="row-main"><div class="row-title">Recherche impossible : ${escapeHtml(err.message)}</div></div></div>`;
-  }
-});
-
-document.getElementById("plan-start-results").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-start-index]");
-  if (!btn) return;
-  const results = JSON.parse(e.currentTarget.dataset.results || "[]");
-  const place = results[Number(btn.dataset.startIndex)];
-  if (place) setStart(place);
-});
-
-document.getElementById("plan-locate").addEventListener("click", () => {
-  if (!navigator.geolocation) return alert("Ce navigateur ne donne pas la position.");
-  const btn = document.getElementById("plan-locate");
-  btn.disabled = true;
-  btn.textContent = "📍 …";
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      try {
-        const { latitude, longitude } = pos.coords;
-        const { place } = await fetchJSON(`/api/plan/reverse?lat=${latitude}&lng=${longitude}`);
-        setStart(place || { label: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`, lat: latitude, lng: longitude });
-      } catch (err) {
-        alert(`Position trouvée mais adresse introuvable : ${err.message}`);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "📍 Me localiser";
-      }
-    },
-    (err) => {
-      btn.disabled = false;
-      btn.textContent = "📍 Me localiser";
-      alert(`Localisation refusée ou indisponible (${err.message}).`);
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-});
-
-async function loadPlanNeeds() {
-  const { needs } = await fetchJSON("/api/plan/needs");
-  planState.needs = needs;
-  // au premier chargement, tout ce qui est routable est coche
-  if (planState.selected.size === 0) {
-    needs.filter((n) => n.routable).forEach((n) => planState.selected.add(n.carrier));
-  }
-  renderNeeds();
-}
-
-function renderNeeds() {
-  const box = document.getElementById("plan-needs");
-  if (planState.needs.length === 0) {
-    box.innerHTML = `<div class="empty-row">Aucun colis en attente.</div>`;
-    return;
-  }
-
-  box.innerHTML = planState.needs
-    .map((need) => {
-      const label = escapeHtml(CARRIER_LABELS[need.carrier] || need.carrier);
-      if (!need.routable) {
-        return `<div class="row row-off">
-          <div class="row-main">
-            <div class="row-title">${label}</div>
-            <div class="row-sub">×${need.count} · pas de réseau de dépôt</div>
-          </div>
-        </div>`;
-      }
-      const checked = planState.selected.has(need.carrier) ? "checked" : "";
-      const known =
-        need.known > 0
-          ? `${need.known} point${need.known > 1 ? "s" : ""} connu${need.known > 1 ? "s" : ""}`
-          : "aucun point connu";
-      return `<label class="row row-pickable">
-        <div class="row-main">
-          <div class="row-title">${label}</div>
-          <div class="row-sub">×${need.count} · ${known}</div>
-        </div>
-        <div class="row-actions">
-          <input type="checkbox" data-need="${escapeAttr(need.carrier)}" ${checked} />
-        </div>
-      </label>`;
-    })
-    .join("");
-}
-
-document.getElementById("plan-needs").addEventListener("change", (e) => {
-  const input = e.target.closest("[data-need]");
-  if (!input) return;
-  if (input.checked) planState.selected.add(input.dataset.need);
-  else planState.selected.delete(input.dataset.need);
-});
-
-function departMinutes() {
-  const value = document.getElementById("plan-depart").value;
-  if (!value) return null;
-  const [h, m] = value.split(":").map(Number);
-  return h * 60 + m;
-}
-
-document.getElementById("plan-compute").addEventListener("click", async () => {
-  if (planState.busy) return;
-  if (!planState.start) return alert("Indique d'abord ta position de départ.");
-
-  const needs = planState.needs
-    .filter((n) => n.routable && planState.selected.has(n.carrier))
-    .map((n) => ({ carrier: n.carrier, count: n.count }));
-  if (needs.length === 0) return alert("Coche au moins un transporteur à déposer.");
-
-  const btn = document.getElementById("plan-compute");
-  planState.busy = true;
-  btn.disabled = true;
-  btn.textContent = "Recherche des points et calcul…";
-
-  try {
-    const result = await fetchJSON("/api/plan/compute", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        start: planState.start,
-        needs,
-        day: document.getElementById("plan-day").value || undefined,
-        departAt: departMinutes(),
-        lockers: document.getElementById("plan-lockers").checked,
-      }),
-    });
-    planState.result = result;
-    renderPlanResult(result);
-    loadPlanPoints();
-  } catch (err) {
-    alert(`Calcul impossible : ${err.message}`);
-  } finally {
-    planState.busy = false;
-    btn.disabled = false;
-    btn.textContent = "Calculer la tournée";
-  }
-});
-
-function renderPlanResult(result) {
-  const panel = document.getElementById("plan-result");
-  panel.hidden = false;
-
-  const km = (result.summary.meters / 1000).toFixed(1);
-  const wait = result.summary.waited > 2 ? ` (dont ${result.summary.waited} min d'attente)` : "";
-  document.getElementById("plan-summary").textContent =
-    `${result.summary.stops} arrêt${result.summary.stops > 1 ? "s" : ""} · ${km} km · ~${result.summary.minutes} min${wait}`;
-
-  const legs = result.stops
-    .map((stop) => {
-      const counts = stop.counts
-        .map((c) => `${CARRIER_LABELS[c.carrier] || c.carrier} ×${c.count}`)
-        .join(" + ");
-      const dot = STATE_DOT[stop.status.state] || "⚪";
-      const cutoff = stop.status.cutoff ? ` · dépôt jusqu'à ${escapeHtml(stop.status.cutoff)}` : "";
-      const address = [stop.point.address, stop.point.postal_code, stop.point.city]
-        .filter(Boolean)
-        .join(", ");
-      return `<div class="plan-leg">${(stop.legMeters / 1000).toFixed(1)} km</div>
-        <div class="plan-stop${stop.late ? " plan-stop-late" : ""}">
-          <div class="plan-stop-head">
-            <span class="plan-rank">${stop.rank}</span>
-            <span class="plan-carrier">📦 ${escapeHtml(counts)}</span>
-            <span class="plan-trust">${TRUST_DOT[stop.point.trust] || ""}</span>
-          </div>
-          <div class="plan-stop-name">${stop.point.locker ? "🔒 " : ""}${escapeHtml(stop.point.name)}</div>
-          <div class="plan-stop-address">${escapeHtml(address)}</div>
-          <div class="plan-stop-status">${dot} ${escapeHtml(stop.status.label)}${cutoff} · arrivée ${escapeHtml(stop.arrival)}</div>
-          ${stop.late ? `<div class="plan-stop-warn">Trop tard pour ce point : passe-le en premier, ou garde ces colis pour demain.</div>` : ""}
-          <div class="plan-stop-actions">
-            <button class="btn btn-ghost btn-small" data-visit="ok" data-point="${stop.point.id}" data-carrier="${escapeAttr(stop.carriers[0])}">✅ Déposé</button>
-            <button class="btn btn-ghost btn-small" data-visit="refuse" data-point="${stop.point.id}" data-carrier="${escapeAttr(stop.carriers[0])}">🔴 Refuse mes colis</button>
-          </div>
-        </div>`;
-    })
-    .join("");
-
-  document.getElementById("plan-stops").innerHTML =
-    `<div class="plan-stop plan-stop-start">
-       <div class="plan-stop-head"><span class="plan-rank">📍</span><span class="plan-carrier">Départ ${escapeHtml(result.departAt)}</span></div>
-       <div class="plan-stop-address">${escapeHtml(result.start.label || "position actuelle")}</div>
-     </div>` + legs;
-
-  document.getElementById("plan-google").href = result.links.google || "#";
-  document.getElementById("plan-apple").href = result.links.apple || "#";
-
-  const notes = [];
-  if (result.summary.estimated) {
-    notes.push("Distance et durée sont estimées à vol d'oiseau corrigé : Google Maps donnera le temps réel.");
-  }
-  if (result.unserved.length > 0) {
-    notes.push(
-      `Aucun point de dépôt connu pour : ${result.unserved
-        .map((c) => CARRIER_LABELS[c] || c)
-        .join(", ")}. Ajoute-les plus bas ou importe ta liste.`
-    );
-  }
-  if (!result.includeLockers) {
-    notes.push("Les lockers sont écartés : coche la case pour les autoriser (UPS et Mondial Relay).");
-  }
-  if (result.sources.fedexSandbox) {
-    notes.push("FedEx répond depuis son bac à sable : les points sont réels mais les horaires peuvent dater. Une clé de production les fiabilisera.");
-  }
-  if (result.sources.pending) {
-    notes.push("Recherche OpenStreetMap lancée en arrière-plan : relance le calcul dans un instant pour en tenir compte.");
-  }
-  if (result.sources.errors.length > 0) notes.push(`Sources indisponibles — ${result.sources.errors.join(" ; ")}`);
-  document.getElementById("plan-notes").textContent = notes.join(" ");
-}
-
-document.getElementById("plan-stops").addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-visit]");
-  if (!btn) return;
-  btn.disabled = true;
-  try {
-    await fetchJSON("/api/plan/visit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        pointId: Number(btn.dataset.point),
-        carrier: btn.dataset.carrier,
-        result: btn.dataset.visit,
-      }),
-    });
-    btn.textContent = btn.dataset.visit === "ok" ? "✅ Vérifié" : "🔴 Écarté";
-    loadPlanPoints();
-  } catch (err) {
-    btn.disabled = false;
-    alert(err.message);
-  }
-});
-
-// Nom lisible de chaque source de points.
-const SOURCE_LABELS = {
-  "mr-idf": "Mondial Relay — ta liste",
-  laposte: "Bureaux et relais La Poste — officiel",
-  boitejaune: "Boîtes aux lettres — officiel",
-  fedex: "Points FedEx",
-  osm: "OpenStreetMap — à vérifier",
-};
-
-async function loadPlanPoints() {
-  const { points, counts, bySource } = await fetchJSON("/api/plan/points");
-  document.getElementById("plan-points-count").textContent =
-    `${counts.verified} 🟢 · ${counts.unverified} 🟠${counts.rejected ? ` · ${counts.rejected} 🔴` : ""}`;
-
-  const box = document.getElementById("plan-points");
-  if (counts.total === 0) {
-    box.innerHTML = `<div class="empty-row">Aucun point enregistré. Lance un calcul : les bureaux de poste et les boîtes aux lettres du secteur se chargent tout seuls.</div>`;
-    return;
-  }
-
-  // Les points a soi d'abord : ce sont les seuls qu'on ait interet a relire ou
-  // a corriger. Les bureaux de poste charges tout seuls se comptent, ils ne se
-  // listent pas -- il y en a des dizaines, et ils reviendraient au prochain
-  // calcul meme si on les supprimait.
-  const mine = points;
-
-  const rows = mine
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(
-      (p) => `<div class="row">
-        <div class="row-main">
-          <div class="row-title">${TRUST_DOT[p.trust] || ""} ${escapeHtml(p.name)}</div>
-          <div class="row-sub">${escapeHtml(p.carriers.map((c) => CARRIER_LABELS[c] || c).join(", ") || "—")} · ${escapeHtml(p.city || "")}</div>
-        </div>
-        <div class="row-actions">
-          <button class="btn btn-ghost btn-small" data-point-delete="${p.id}">✕</button>
-        </div>
-      </div>`
-    )
-    .join("");
-
-  // les autres points ne se listent pas -- il y en a plus d'un millier -- mais
-  // on dit toujours d'ou ils viennent
-  const sources = (bySource || [])
-    .filter((s) => s.source !== "manuel" && s.source !== "import")
-    .map(
-      (s) => `<div class="row row-off">
-         <div class="row-main">
-           <div class="row-title">${s.count} point${s.count > 1 ? "s" : ""}</div>
-           <div class="row-sub">${escapeHtml(SOURCE_LABELS[s.source] || s.source)}</div>
-         </div>
-       </div>`
-    )
-    .join("");
-
-  box.innerHTML = rows + sources || `<div class="empty-row">Aucun point pour l'instant.</div>`;
-}
-
-document.getElementById("plan-points").addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-point-delete]");
-  if (!btn) return;
-  if (!confirm("Supprimer ce point de dépôt ?")) return;
-  await fetchJSON(`/api/plan/points/${btn.dataset.pointDelete}`, { method: "DELETE" });
-  loadPlanPoints();
-});
-
-document.getElementById("plan-point-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const body = {
-    name: document.getElementById("plan-point-name").value.trim(),
-    address: document.getElementById("plan-point-address").value.trim(),
-    postal_code: document.getElementById("plan-point-postal").value.trim(),
-    city: document.getElementById("plan-point-city").value.trim(),
-    carriers: [document.getElementById("plan-point-carrier").value],
-    trust: document.getElementById("plan-point-verified").checked ? "verified" : "unverified",
-  };
-  try {
-    await fetchJSON("/api/plan/points", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    e.target.reset();
-    document.getElementById("plan-point-verified").checked = true;
-    loadPlanPoints();
-    loadPlanNeeds();
-  } catch (err) {
-    alert(`Ajout impossible : ${err.message}`);
-  }
-});
-
-function initPlan() {
-  const select = document.getElementById("plan-point-carrier");
-  select.innerHTML = Object.entries(CARRIER_LABELS)
-    .filter(([code]) => code !== "BJ" && code !== "Inconnu")
-    .map(([code, label]) => `<option value="${code}">${label}</option>`)
-    .join("");
-
-  const now = new Date();
-  document.getElementById("plan-depart").value =
-    `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  // le jour compte autant que l'heure : les horaires de depot ne sont pas les
-  // memes le dimanche
-  document.getElementById("plan-day").value = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 10);
-
-  loadStoredStart();
-}
-
-document.getElementById("settings-link").addEventListener("click", () => switchView("colis"));
-document.getElementById("settings-back").addEventListener("click", () => switchView("dashboard"));
-
-initPlan();
-
 // --- Suivi des colis ---------------------------------------------------------
 // Lecture des verifications faites par le bot de suivi. Rien n'est recalcule
 // ici : ce qui s'affiche est ce que le bot a releve, tel quel.
@@ -2431,3 +2015,201 @@ function renderSuiviDonut(labels) {
       <div class="donut-legend">${legend}</div>
     </div>`;
 }
+
+// --- Onglet Imprimé ----------------------------------------------------------
+// Même chaîne que /imprime sur Telegram : mêmes étiquettes, même mise en page,
+// même marquage. Seule la sortie change — le PDF s'ouvre dans un onglet, et
+// c'est le navigateur qui imprime.
+
+const CARRIER_ICONS = {
+  MR: "🩷", LP: "🟡", CHRONO: "🟢", UPS: "🟤", DPD: "🔴",
+  GLS: "🔵", DHL: "🟠", FEDEX: "🟣", BJ: "🟨", LIT: "🧻", Inconnu: "⚠️",
+};
+
+async function loadImprime() {
+  let aFaire;
+  let deja;
+  try {
+    [aFaire, deja] = await Promise.all([
+      fetchJSON("/api/print/resume?scope=new"),
+      fetchJSON("/api/print/resume?scope=printed"),
+    ]);
+  } catch (err) {
+    // un onglet muet ne dit pas s'il est vide ou casse : on le dit
+    document.getElementById("imp-total").textContent = "erreur";
+    document.getElementById(
+      "imp-categories"
+    ).innerHTML = `<div class="empty-row">Liste indisponible : ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  document.getElementById("imp-total").textContent =
+    aFaire.total > 0 ? `${aFaire.total} étiquette${aFaire.total > 1 ? "s" : ""}` : "rien en attente";
+
+  // "Tout" ne couvre que le thermique 4x6 : les LIT sortent sur le rouleau
+  // 210 mm, dans un PDF qui ne se mélange pas au reste.
+  const thermiques = aFaire.categories
+    .filter((c) => !c.roll)
+    .reduce((sum, c) => sum + c.count, 0);
+  const tout = document.getElementById("imp-all");
+  tout.disabled = thermiques === 0;
+  tout.textContent = thermiques > 0 ? `🖨 Tout imprimer · ${thermiques}` : "🖨 Tout imprimer";
+
+  renderCategories("imp-categories", aFaire.categories, "new");
+  document.getElementById("imp-printed-count").textContent =
+    deja.total > 0 ? `${deja.total}` : "aucune";
+  renderCategories("imp-printed", deja.categories, "printed");
+}
+
+function renderCategories(cible, categories, scope) {
+  const box = document.getElementById(cible);
+  // une catégorie dépliée le reste apres un rafraichissement : sinon la liste
+  // se referme sous le doigt a chaque impression
+  const ouvertes = [...box.querySelectorAll(".imp-cat.open")].map((el) => el.dataset.cat);
+
+  if (!categories || categories.length === 0) {
+    box.innerHTML = `<div class="empty-row">Rien ici.</div>`;
+    return;
+  }
+  box.innerHTML = categories
+    .map(
+      (c) => `<div class="imp-cat" data-cat="${escapeAttr(c.code)}" data-scope="${scope}">
+        <div class="imp-cat-head">
+          <span class="imp-chevron">▶</span>
+          <span class="imp-cat-name">${CARRIER_ICONS[c.code] || "📦"} ${escapeHtml(c.label)}</span>
+          <span class="imp-cat-count">${c.count}</span>
+          <button class="btn btn-ghost btn-small" data-print-cat="${escapeAttr(c.code)}" data-scope="${scope}">🖨</button>
+        </div>
+        <div class="imp-list"></div>
+      </div>`
+    )
+    .join("");
+
+  for (const code of ouvertes) {
+    const cat = box.querySelector(`.imp-cat[data-cat="${CSS.escape(code)}"]`);
+    if (!cat) continue;
+    cat.classList.add("open");
+    fillCategory(cat);
+  }
+}
+
+// Déplier une catégorie charge sa liste : inutile de tout descendre d'avance.
+document.addEventListener("click", async (e) => {
+  const head = e.target.closest(".imp-cat-head");
+  if (head && !e.target.closest("[data-print-cat]")) {
+    const cat = head.parentElement;
+    cat.classList.toggle("open");
+    if (cat.classList.contains("open")) await fillCategory(cat);
+    return;
+  }
+
+  const printCat = e.target.closest("[data-print-cat]");
+  if (printCat) {
+    return lancerImpression(printCat, {
+      categorie: printCat.dataset.printCat,
+      scope: printCat.dataset.scope,
+    });
+  }
+
+  const printOne = e.target.closest("[data-print-one]");
+  if (printOne) {
+    return lancerImpression(printOne, {
+      ids: [Number(printOne.dataset.printOne)],
+      scope: printOne.dataset.scope,
+    });
+  }
+
+  const supprime = e.target.closest("[data-del-colis]");
+  if (supprime) {
+    if (!confirm("Retirer ce colis et effacer son fichier sur Telegram ?")) return;
+    supprime.disabled = true;
+    try {
+      await fetchJSON(`/api/print/colis/${supprime.dataset.delColis}`, { method: "DELETE" });
+      await loadImprime();
+    } catch (err) {
+      supprime.disabled = false;
+      alert(err.message);
+    }
+  }
+});
+
+async function fillCategory(cat) {
+  const liste = cat.querySelector(".imp-list");
+  const { cat: code, scope } = cat.dataset;
+  liste.innerHTML = `<div class="empty-row">Chargement…</div>`;
+
+  let colis;
+  try {
+    ({ colis } = await fetchJSON(
+      `/api/print/colis?categorie=${encodeURIComponent(code)}&scope=${scope}`
+    ));
+  } catch (err) {
+    liste.innerHTML = `<div class="empty-row">${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  if (colis.length === 0) {
+    liste.innerHTML = `<div class="empty-row">Vide.</div>`;
+    return;
+  }
+
+  liste.innerHTML = colis
+    .map(
+      (c) => `<div class="imp-row">
+        <div class="imp-row-main">
+          <div class="imp-row-name">${escapeHtml(c.fileName || `colis #${c.id}`)}</div>
+          <div class="imp-row-sub">${escapeHtml(c.sender)}${c.kind === "image" ? " · photo" : ""}</div>
+        </div>
+        <button class="btn btn-ghost btn-small" data-print-one="${c.id}" data-scope="${scope}">🖨</button>
+        <button class="btn btn-ghost btn-small" data-del-colis="${c.id}">✕</button>
+      </div>`
+    )
+    .join("");
+}
+
+// L'onglet s'ouvre AVANT la construction du PDF : un navigateur ne laisse
+// ouvrir une fenêtre que pendant le clic, pas après un aller-retour réseau.
+async function lancerImpression(bouton, corps) {
+  const onglet = window.open("", "_blank");
+  const texte = bouton.textContent;
+  bouton.disabled = true;
+  bouton.textContent = "…";
+
+  let res = null;
+  try {
+    res = await fetchJSON("/api/print/build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corps),
+    });
+  } catch (err) {
+    if (onglet) onglet.close();
+    alert(`Impression impossible : ${err.message}`);
+  }
+
+  // rendre son libelle au bouton AVANT le rafraichissement : dans l'autre
+  // ordre, "Tout imprimer · 3" revient alors qu'il ne reste plus rien
+  bouton.disabled = false;
+  bouton.textContent = texte;
+  if (!res) return;
+
+  if (onglet) onglet.location = res.url;
+  else window.location = res.url; // fenêtre bloquée : on y va quand même
+
+  // Un bloqueur de fenetres avale parfois l'onglet sans rien dire. Le lien
+  // reste affiche : il y a toujours quelque chose a toucher pour ouvrir le
+  // PDF, et il sert aussi a le rouvrir sans le reconstruire.
+  const detail = res.roll
+    ? `${res.count} étiquette${res.count > 1 ? "s" : ""} · ${res.lengthMm} mm de rouleau`
+    : `${res.count} étiquette${res.count > 1 ? "s" : ""} · ${res.pages} page${res.pages > 1 ? "s" : ""}`;
+  const lien = document.getElementById("imp-last");
+  lien.href = res.url;
+  lien.textContent = `📄 Ouvrir le PDF — ${detail}`;
+  lien.hidden = false;
+
+  await loadImprime();
+}
+
+document.getElementById("imp-all").addEventListener("click", (e) =>
+  lancerImpression(e.currentTarget, { categorie: "*", scope: "new" })
+);

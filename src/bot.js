@@ -50,13 +50,15 @@ const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
 // topics sont comptes automatiquement, sans avoir besoin de forward au bot.
 const AUTO_GROUP_CHAT_ID = -1004388459228; // derive de l'id de canal 4388459228 (t.me/c/4388459228/...)
 const AUTO_LIT_TOPIC_IDS = [4];
-const AUTO_NORMAL_TOPIC_IDS = [2, 5];
+const AUTO_NORMAL_TOPIC_IDS = [2];
 // Les colis BJ sont factures comme des colis normaux, ils sont juste
 // comptabilises a part pour le suivi.
 const AUTO_BJ_TOPIC_IDS = [6];
 // Topic "special" : photos de contexte, captures, colis pris en photo. A
 // renseigner dans SPECIAL_TOPIC_ID (le nombre a la fin du lien t.me/c/.../N).
-const AUTO_SPECIAL_TOPIC_IDS = (process.env.SPECIAL_TOPIC_ID || "")
+// t.me/c/4388459228/5 . On y envoie aussi des PDF : dans "special" un PDF
+// reste un colis ordinaire, seules les images y valent 0 EUR.
+const AUTO_SPECIAL_TOPIC_IDS = (process.env.SPECIAL_TOPIC_ID || "5")
   .split(",")
   .map((n) => Number(n.trim()))
   .filter(Number.isFinite);
@@ -1260,16 +1262,18 @@ async function downloadLabels(bot, rows, onStep) {
   return { labels, missing };
 }
 
-// Utilise par le dashboard (impression automatique) : meme chaine que
-// /imprime, sans Telegram autour.
-async function buildLabelsPdf(rows) {
+// Utilise par le dashboard (impression automatique et onglet Imprime) : meme
+// chaine que /imprime, sans Telegram autour. `roll` sort la mise en page du
+// rouleau 210 mm des LIT au lieu du format thermique 4x6.
+async function buildLabelsPdf(rows, { roll = false, onStep } = {}) {
   if (!botInstance) throw new Error("bot non demarre");
-  const { labels, missing } = await downloadLabels(botInstance, rows);
-  const { pdf, pages, failed } = await mergeLabels(labels);
+  const { labels, missing } = await downloadLabels(botInstance, rows, onStep);
+  const assembled = roll ? await buildRoll(labels) : await mergeLabels(labels);
+  const { pdf, failed } = assembled;
   const printedIds = labels
     .filter((l) => !failed.some((f) => f.label === l.label))
     .map((l) => l.colisId);
-  return { pdf, pages, printedIds, missing, failed };
+  return { ...assembled, pdf, printedIds, missing, failed };
 }
 
 // Barre de progression : un seul message, edite au fil des telechargements.
@@ -1557,4 +1561,4 @@ function refreshGroupStats() {
   }, 800);
 }
 
-module.exports = { startBot, refreshGroupStats, buildLabelsPdf };
+module.exports = { startBot, refreshGroupStats, buildLabelsPdf, markButtonsPrinted, getBot: () => botInstance };
