@@ -1703,6 +1703,9 @@ document.getElementById("suivi-copy-numbers").addEventListener("click", (e) => {
   copyText(suiviState.rows.map((r) => r.tracking_number).join("\n"), e.currentTarget);
 });
 
+document.getElementById("settings-link").addEventListener("click", () => switchView("colis"));
+document.getElementById("settings-back").addEventListener("click", () => switchView("dashboard"));
+
 document.getElementById("suivi-link").addEventListener("click", () => switchView("suivi"));
 document.getElementById("suivi-back").addEventListener("click", () => switchView("dashboard"));
 document.getElementById("suivi-detail-back").addEventListener("click", () => switchView("suivi"));
@@ -2043,8 +2046,9 @@ async function loadImprime() {
     return;
   }
 
+  const annotes = aFaire.noted > 0 ? ` · ${aFaire.noted} 📝` : "";
   document.getElementById("imp-total").textContent =
-    aFaire.total > 0 ? `${aFaire.total} étiquette${aFaire.total > 1 ? "s" : ""}` : "rien en attente";
+    aFaire.total > 0 ? `${aFaire.total} étiquette${aFaire.total > 1 ? "s" : ""}${annotes}` : "rien en attente";
 
   // "Tout" ne couvre que le thermique 4x6 : les LIT sortent sur le rouleau
   // 210 mm, dans un PDF qui ne se mélange pas au reste.
@@ -2073,10 +2077,11 @@ function renderCategories(cible, categories, scope) {
   }
   box.innerHTML = categories
     .map(
-      (c) => `<div class="imp-cat" data-cat="${escapeAttr(c.code)}" data-scope="${scope}">
+      (c) => `<div class="imp-cat${c.noted ? " noted" : ""}" data-cat="${escapeAttr(c.code)}" data-scope="${scope}">
         <div class="imp-cat-head">
           <span class="imp-chevron">▶</span>
           <span class="imp-cat-name">${CARRIER_ICONS[c.code] || "📦"} ${escapeHtml(c.label)}</span>
+          ${c.noted ? `<span class="imp-cat-noted">📝 ${c.noted}</span>` : ""}
           <span class="imp-cat-count">${c.count}</span>
           <button class="btn btn-ghost btn-small" data-print-cat="${escapeAttr(c.code)}" data-scope="${scope}">🖨</button>
         </div>
@@ -2155,10 +2160,11 @@ async function fillCategory(cat) {
 
   liste.innerHTML = colis
     .map(
-      (c) => `<div class="imp-row">
+      (c) => `<div class="imp-row${c.note ? " noted" : ""}">
         <div class="imp-row-main">
           <div class="imp-row-name">${escapeHtml(c.fileName || `colis #${c.id}`)}</div>
           <div class="imp-row-sub">${escapeHtml(c.sender)}${c.kind === "image" ? " · photo" : ""}</div>
+          ${c.note ? `<div class="imp-row-note">📝 ${escapeHtml(c.note)}</div>` : ""}
         </div>
         <button class="btn btn-ghost btn-small" data-print-one="${c.id}" data-scope="${scope}">🖨</button>
         <button class="btn btn-ghost btn-small" data-del-colis="${c.id}">✕</button>

@@ -123,6 +123,10 @@ if (!colisColumns.includes("printed_at")) db.exec("ALTER TABLE colis ADD COLUMN 
 // dans une meme fournee.
 if (!colisColumns.includes("printed_by")) db.exec("ALTER TABLE colis ADD COLUMN printed_by TEXT");
 if (!colisColumns.includes("print_job")) db.exec("ALTER TABLE colis ADD COLUMN print_job TEXT");
+// note libre posee avec /note : "fragile", "a deposer avant 14h", "client
+// rappelle". Un colis annote passe en tete de la file d'impression et sort en
+// rouge sur le site -- c'est tout l'interet d'en poser une.
+if (!colisColumns.includes("note")) db.exec("ALTER TABLE colis ADD COLUMN note TEXT");
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -364,14 +368,18 @@ function printableScope(scope) {
   return `${PRINTABLE_SQL} AND printed_at IS NULL`;
 }
 
+// Un colis annote sort le premier : la note dit qu'il y a quelque chose a
+// faire avec celui-la, autant l'avoir en haut de la pile.
+const PRINT_ORDER_SQL = "ORDER BY note IS NULL, id";
+
 function getPrintableColis(carrier, { scope = "new" } = {}) {
-  const base = `SELECT id, sender_name, file_id, file_kind, file_name, ${CARRIER_GROUP_SQL} AS carrier_group
+  const base = `SELECT id, sender_name, file_id, file_kind, file_name, note, ${CARRIER_GROUP_SQL} AS carrier_group
                 FROM colis WHERE ${printableScope(scope)}`;
-  if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ORDER BY id`).all();
+  if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ${PRINT_ORDER_SQL}`).all();
   if (carrier === "Inconnu") {
-    return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ORDER BY id`).all();
+    return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ${PRINT_ORDER_SQL}`).all();
   }
-  return db.prepare(`${base} AND type != 'bj' AND carrier = ? ORDER BY id`).all(carrier);
+  return db.prepare(`${base} AND type != 'bj' AND carrier = ? ${PRINT_ORDER_SQL}`).all(carrier);
 }
 
 // File d'impression des LIT, meme logique de scope que la file thermique.
@@ -384,14 +392,21 @@ function litScope(scope) {
 function getLitPrintable({ scope = "new" } = {}) {
   return db
     .prepare(
-      `SELECT id, sender_name, file_id, file_kind, file_name, 'LIT' AS carrier_group
-       FROM colis WHERE ${litScope(scope)} ORDER BY id`
+      `SELECT id, sender_name, file_id, file_kind, file_name, note, 'LIT' AS carrier_group
+       FROM colis WHERE ${litScope(scope)} ${PRINT_ORDER_SQL}`
     )
     .all();
 }
 
 function countLitPrintable({ scope = "new" } = {}) {
   return db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${litScope(scope)}`).get().c;
+}
+
+// Combien de colis annotes par LIT : le site signale la categorie en rouge
+// sans avoir a la deplier.
+function countLitNoted({ scope = "new" } = {}) {
+  return db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${litScope(scope)} AND note IS NOT NULL`)
+    .get().c;
 }
 
 // Combien d'etiquettes en attente ont deja ete imprimees une fois : sert a
@@ -406,9 +421,10 @@ function countAlreadyPrinted() {
 function getPrintableSummary({ scope = "new" } = {}) {
   return db
     .prepare(
-      `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count
+      `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count,
+              SUM(note IS NOT NULL) AS noted
        FROM colis WHERE ${printableScope(scope)}
-       GROUP BY ${CARRIER_GROUP_SQL} ORDER BY count DESC`
+       GROUP BY ${CARRIER_GROUP_SQL} ORDER BY noted DESC, count DESC`
     )
     .all();
 }
@@ -584,6 +600,11 @@ function findColisByMessage(chatId, messageId) {
     .get(chatId, messageId);
 }
 
+// Sans filtre de statut : /note doit marcher meme sur un colis deja drope.
+function findAnyColisByMessage(chatId, messageId) {
+  return db.prepare("SELECT * FROM colis WHERE chat_id = ? AND message_id = ?").get(chatId, messageId);
+}
+
 function getLatestBatchId(chatId) {
   const row = db
     .prepare("SELECT id FROM batches WHERE chat_id = ? ORDER BY id DESC LIMIT 1")
@@ -757,6 +778,22 @@ function setBatchPrice(batchId, price) {
     .prepare("UPDATE colis SET price = ?, price_locked = 1 WHERE batch_id = ? AND status = 'pending'")
     .run(price, batchId);
   return info.changes;
+}
+
+// --- Notes -------------------------------------------------------------------
+// /note pose un mot sur un colis. Contrairement au prix, une note s'applique
+// aussi a un colis deja drope ou deja imprime : "le client rappelle" reste
+// vrai apres coup. Une note vide efface la note.
+function setColisNote(id, note) {
+  const propre = (note || "").trim() || null;
+  const info = db.prepare("UPDATE colis SET note = ? WHERE id = ?").run(propre, id);
+  if (info.changes === 0) return null;
+  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+}
+
+function setBatchNote(batchId, note) {
+  const propre = (note || "").trim() || null;
+  return db.prepare("UPDATE colis SET note = ? WHERE batch_id = ?").run(propre, batchId).changes;
 }
 
 function quickAddColis(senderName) {
@@ -1028,6 +1065,7 @@ module.exports = {
   getArrivedDuringTour,
   createBatch,
   findColisByMessage,
+  findAnyColisByMessage,
   getLatestBatchId,
   setColisType,
   setBatchType,
@@ -1044,6 +1082,7 @@ module.exports = {
   countAlreadyPrinted,
   getLitPrintable,
   countLitPrintable,
+  countLitNoted,
   isAutoPrintEnabled,
   setAutoPrintEnabled,
   getUnprintedLabels,
@@ -1057,6 +1096,8 @@ module.exports = {
   getBatchColis,
   deleteColis,
   setBatchPrice,
+  setColisNote,
+  setBatchNote,
   quickAddColis,
   quickRemoveColis,
   getDailySeries,

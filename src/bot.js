@@ -6,6 +6,7 @@ const {
   addColis,
   createBatch,
   findColisByMessage,
+  findAnyColisByMessage,
   getLatestBatchId,
   setColisType,
   setBatchType,
@@ -30,6 +31,8 @@ const {
   getBatchColis,
   deleteColis,
   setBatchPrice,
+  setColisNote,
+  setBatchNote,
   getPendingSummary,
   getStatsMessageId,
   setStatsMessageId,
@@ -364,7 +367,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune, special), sans toucher au fichier ni a sa legende.\n\nSous chaque etiquette republiee, trois boutons : Imprime, Clean, Del.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune, special), sans toucher au fichier ni a sa legende.\n\nSous chaque etiquette republiee, trois boutons : Imprime, Clean, Del.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -380,6 +383,13 @@ function startBot() {
   bot.onText(
     /^\/prix(@\w+)?\s+(-?[\d]+(?:[.,][\d]+)?)/,
     command((msg, match) => handlePrice(bot, msg, Number(String(match[2]).replace(",", "."))))
+  );
+
+  // /note fragile  (en reponse a un colis, sinon applique au dernier lot)
+  // /note          efface la note
+  bot.onText(
+    /^\/note(@\w+)?(?:\s+([\s\S]+))?$/i,
+    command((msg, match) => handleNote(bot, msg, match[2]))
   );
 
   // /transporteur MR  (en reponse a un colis, sinon applique au dernier lot)
@@ -445,6 +455,7 @@ async function registerCommands(bot) {
     { command: "litall", description: "Passer tout le dernier lot en LIT" },
     { command: "unlitall", description: "Repasser tout le dernier lot en normal" },
     { command: "prix", description: "Forcer le montant, ex: /prix 7.5" },
+    { command: "note", description: "Annoter le colis : il sort en premier (en reponse)" },
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
@@ -684,19 +695,41 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
 // Boutons sous un PDF republie. Ils font exactement ce que font les commandes
 // /clear et /del, plus un "Imprime" qui sort l'etiquette de la file de
 // /imprime sans rien effacer.
-function fileButtons(colisId, { printed = false } = {}) {
-  if (printed) {
-    return { inline_keyboard: [[{ text: "✅ Deja imprime", callback_data: `c:n:${colisId}` }]] };
+function fileButtons(colisId, { printed = false, note = null } = {}) {
+  const lignes = [];
+  // La note se lit sous le fichier sans y toucher : la legende reste celle de
+  // l'expediteur. Le texte entier s'affiche en tapant dessus.
+  if (note) {
+    lignes.push([{ text: `📝 ${tronque(note, 40)}`, callback_data: `c:m:${colisId}` }]);
   }
-  return {
-    inline_keyboard: [
-      [
-        { text: "🖨 Imprime", callback_data: `c:p:${colisId}` },
-        { text: "🧹 Clean", callback_data: `c:c:${colisId}` },
-        { text: "🗑 Del", callback_data: `c:d:${colisId}` },
-      ],
-    ],
-  };
+  lignes.push(
+    printed
+      ? [{ text: "✅ Deja imprime", callback_data: `c:n:${colisId}` }]
+      : [
+          { text: "🖨 Imprime", callback_data: `c:p:${colisId}` },
+          { text: "🧹 Clean", callback_data: `c:c:${colisId}` },
+          { text: "🗑 Del", callback_data: `c:d:${colisId}` },
+        ]
+  );
+  return { inline_keyboard: lignes };
+}
+
+function tronque(texte, max) {
+  const propre = String(texte).replace(/\s+/g, " ").trim();
+  return propre.length > max ? `${propre.slice(0, max - 1)}…` : propre;
+}
+
+// Repose les boutons d'un colis en relisant son etat : appele apres /note,
+// pour que la note apparaisse sous le fichier sans toucher a la legende.
+function refreshFileButtons(bot, colis) {
+  if (!colis || !colis.chat_id || !colis.message_id) return;
+  bot
+    .editMessageReplyMarkup(fileButtons(colis.id, { printed: Boolean(colis.printed_at), note: colis.note }), {
+      chat_id: colis.chat_id,
+      message_id: colis.message_id,
+    })
+    // le message n'a pas forcement de boutons (colis d'avant cette version)
+    .catch(() => {});
 }
 
 async function routeToTopic(bot, msg, attachment, batches) {
@@ -824,10 +857,17 @@ async function handleFileButton(bot, query) {
   const chatId = query.message.chat.id;
   const messageId = query.message.message_id;
 
+  // le bouton de la note n'agit pas : il affiche le texte en entier, que le
+  // bouton tronque a 40 caracteres
+  if (action === "m") return repondre(colis.note || "Plus de note sur ce colis.", true);
+
   if (action === "p") {
     markPrinted([id], query.from?.username ? `@${query.from.username}` : query.from?.first_name);
     await bot
-      .editMessageReplyMarkup(fileButtons(id, { printed: true }), { chat_id: chatId, message_id: messageId })
+      .editMessageReplyMarkup(fileButtons(id, { printed: true, note: colis.note }), {
+        chat_id: chatId,
+        message_id: messageId,
+      })
       .catch(() => {});
     return repondre("Marquee imprimee : elle ne ressortira plus dans /imprime.");
   }
@@ -856,7 +896,7 @@ function markButtonsPrinted(bot, ids) {
     if (!colis || !colis.chat_id || !colis.message_id) continue;
     if (colis.file_kind !== "pdf") continue;
     bot
-      .editMessageReplyMarkup(fileButtons(id, { printed: true }), {
+      .editMessageReplyMarkup(fileButtons(id, { printed: true, note: colis.note }), {
         chat_id: colis.chat_id,
         message_id: colis.message_id,
       })
@@ -1399,6 +1439,53 @@ async function handleBatchType(bot, msg, type) {
     msg,
     `${colis.length} colis passes en ${TYPE_LABELS[type]}` +
       (deplaces > 0 ? `, ${deplaces} fichier(s) deplaces dans le bon topic.` : ".")
+  );
+}
+
+// /note fragile  (en reponse a un colis, sinon applique au dernier lot)
+// /note          efface la note
+//
+// Un colis annote sort en premier a l'impression et s'affiche en rouge sur le
+// site : la note n'est pas un pense-bete mort, elle change l'ordre du travail.
+// Contrairement a /prix, elle s'applique aussi a un colis deja drope ou deja
+// imprime -- "le client rappelle" reste vrai apres coup.
+function handleNote(bot, msg, texte) {
+  const note = (texte || "").trim();
+
+  const reply = msg.reply_to_message;
+  if (reply) {
+    const colis = findAnyColisByMessage(msg.chat.id, reply.message_id);
+    if (!colis) {
+      replyEphemeral(bot, msg, "Colis introuvable : reponds au message du fichier.");
+      return;
+    }
+    const updated = setColisNote(colis.id, note);
+    refreshFileButtons(bot, updated);
+    replyEphemeral(
+      bot,
+      msg,
+      note
+        ? `Note posee sur le colis #${updated.id} (${updated.sender_name}) : ${note}\nIl passera en premier a l'impression.`
+        : `Note effacee sur le colis #${updated.id}.`
+    );
+    return;
+  }
+
+  const batchId = getLatestBatchId(msg.chat.id);
+  if (!batchId) {
+    replyEphemeral(bot, msg, "Aucun colis recent trouve.");
+    return;
+  }
+  const count = setBatchNote(batchId, note);
+  if (count === 0) {
+    replyEphemeral(bot, msg, "Aucun colis dans le dernier groupe.");
+    return;
+  }
+  for (const colis of getBatchColis(batchId)) refreshFileButtons(bot, colis);
+  replyEphemeral(
+    bot,
+    msg,
+    note ? `${count} colis annotes : ${note}` : `Note effacee sur ${count} colis.`
   );
 }
 

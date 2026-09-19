@@ -4,6 +4,7 @@ const {
   getPrintableColis,
   getLitPrintable,
   countLitPrintable,
+  countLitNoted,
   getColisById,
   deleteColis,
   markPrinted,
@@ -42,19 +43,22 @@ router.get("/resume", (req, res) => {
     code: row.carrier,
     label: carrierLabel(row.carrier),
     count: row.count,
+    // combien d'annotes : le site marque la categorie sans avoir a la deplier
+    noted: row.noted || 0,
     roll: false,
   }));
 
   const lit = countLitPrintable({ scope });
   if (lit > 0) {
     // les LIT sortent sur le rouleau 210 mm, pas sur la thermique 4x6
-    categories.push({ code: "LIT", label: "LIT", count: lit, roll: true });
+    categories.push({ code: "LIT", label: "LIT", count: lit, noted: countLitNoted({ scope }), roll: true });
   }
 
   res.json({
     scope,
     categories,
     total: categories.reduce((sum, c) => sum + c.count, 0),
+    noted: categories.reduce((sum, c) => sum + c.noted, 0),
   });
 });
 
@@ -70,6 +74,7 @@ router.get("/colis", (req, res) => {
       sender: row.sender_name,
       fileName: row.file_name,
       kind: row.file_kind,
+      note: row.note || null,
       carrier: row.carrier_group || row.carrier,
     })),
   });
@@ -83,7 +88,10 @@ function rowsFor({ categorie, ids, scope }) {
   }
   if (categorie === "LIT") return getLitPrintable({ scope });
   if (categorie === "*") {
-    return getPrintableSummary({ scope }).flatMap((row) => getPrintableColis(row.carrier, { scope }));
+    const rows = getPrintableSummary({ scope }).flatMap((row) => getPrintableColis(row.carrier, { scope }));
+    // les annotes remontent en tete de la liasse entiere, pas seulement en
+    // tete de leur transporteur : ce sont eux qu'on veut sur le dessus
+    return [...rows.filter((r) => r.note), ...rows.filter((r) => !r.note)];
   }
   return getPrintableColis(categorie, { scope });
 }

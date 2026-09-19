@@ -7,6 +7,9 @@
   --cyan: #38f7ff;
   --magenta: #ff3ecb;
   --lime: #b6ff3e;
+  /* rouge des colis annotes : il doit accrocher l'oeil sans se confondre avec
+     le magenta de l'interface */
+  --rouge: #ff4d5e;
   --radius: 14px;
 }
 
@@ -1023,6 +1026,37 @@ main { margin-top: 16px; }
 }
 .imp-row-sub { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 .imp-row .btn { flex-shrink: 0; padding: 3px 8px; font-size: 12px; }
+
+/* --- Colis annotes (/note) ------------------------------------------------ */
+/* Ils sortent en premier a l'impression : ils doivent se voir en premier ici
+   aussi, categorie comprise pour ne pas avoir a tout deplier. */
+.imp-cat.noted {
+  border-color: rgba(255,77,94,0.45);
+  background: rgba(255,77,94,0.05);
+}
+.imp-cat.noted .imp-cat-name { color: var(--rouge); }
+.imp-cat-noted {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--rouge);
+  border: 1px solid rgba(255,77,94,0.4);
+  background: rgba(255,77,94,0.1);
+}
+
+.imp-row.noted {
+  border-color: rgba(255,77,94,0.5);
+  background: rgba(255,77,94,0.07);
+}
+.imp-row.noted .imp-row-name { color: var(--rouge); }
+.imp-row-note {
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--rouge);
+  overflow-wrap: anywhere;
+}
 
 /* --- Suivi des colis ------------------------------------------------------ */
 .suivi-link { position: relative; }
