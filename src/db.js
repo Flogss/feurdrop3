@@ -171,8 +171,19 @@ function setSetting(key, value) {
 function priceForType(sender, type) {
   if (type === "lit") return sender.lit_price;
   if (type === "bj") return sender.bj_price;
-  return sender.price;
+  return sender.price; // "special" suit le tarif normal : seules ses images sont gratuites
 }
+
+// Une image postee dans "special" n'est pas une etiquette : c'est une photo de
+// contexte. Elle ne vaut rien, ne se drope pas et ne s'imprime pas. Un PDF
+// dans "special" reste un colis ordinaire.
+function isFreeSpecial(type, fileKind) {
+  return type === "special" && fileKind === "image";
+}
+
+// Les colis "offerts" sortent de tous les comptes : le statut suffit, puisque
+// tout ce qui compte filtre deja sur status = 'pending'.
+const FREE_STATUS = "free";
 
 // Jour comptable : rien ne se poste le dimanche, donc l'argent fait ce jour-la
 // est compte sur le lundi qui suit. La courbe quotidienne n'a d'ailleurs pas de
@@ -277,17 +288,19 @@ function addColis(
   { chatId, messageId, batchId, type = "normal", carrier = null, fileName, caption, fileId, fileKind } = {}
 ) {
   const sender = getOrCreateSender(senderName);
-  const price = priceForType(sender, type);
+  const gratuit = isFreeSpecial(type, fileKind);
+  const price = gratuit ? 0 : priceForType(sender, type);
   const info = db
     .prepare(
       `INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier,
                           file_name, caption, file_id, file_kind)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       sender.name,
       type,
       price,
+      gratuit ? FREE_STATUS : "pending",
       chatId || null,
       messageId || null,
       batchId || null,
@@ -561,9 +574,13 @@ function dropColis(id) {
   return { count: 1, bj: colis.type === "bj" ? 1 : 0 };
 }
 
+// Les images de "special" ont le statut "free" : elles ne comptent nulle part,
+// mais on doit pouvoir les retirer comme les autres.
+const VIVANT_SQL = `status IN ('pending', '${FREE_STATUS}')`;
+
 function findColisByMessage(chatId, messageId) {
   return db
-    .prepare("SELECT * FROM colis WHERE chat_id = ? AND message_id = ? AND status = 'pending'")
+    .prepare(`SELECT * FROM colis WHERE chat_id = ? AND message_id = ? AND ${VIVANT_SQL}`)
     .get(chatId, messageId);
 }
 
@@ -575,13 +592,28 @@ function getLatestBatchId(chatId) {
 }
 
 function setColisType(id, type) {
-  const colis = db.prepare("SELECT * FROM colis WHERE id = ? AND status = 'pending'").get(id);
+  const colis = db.prepare(`SELECT * FROM colis WHERE id = ? AND ${VIVANT_SQL}`).get(id);
   if (!colis) return null;
-  const price = priceForType(getOrCreateSender(colis.sender_name), type);
+
+  // Une image qui entre dans "special" devient gratuite et sort des comptes ;
+  // la meme image qui en ressort redevient un colis ordinaire.
+  const gratuit = isFreeSpecial(type, colis.file_kind);
+  const price = gratuit ? 0 : priceForType(getOrCreateSender(colis.sender_name), type);
+  const status = gratuit ? FREE_STATUS : "pending";
+
   // changer de type reapplique le tarif de l'expediteur, meme si un prix avait
   // ete fixe manuellement
-  db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?").run(type, price, id);
-  return { ...colis, type, price };
+  db.prepare(
+    "UPDATE colis SET type = ?, price = ?, status = ?, price_locked = 0 WHERE id = ?"
+  ).run(type, price, status, id);
+  return { ...colis, type, price, status };
+}
+
+// Un colis deplace change de message : /del et les boutons doivent agir sur le
+// nouveau, pas sur celui qui vient d'etre efface.
+function setColisMessage(id, chatId, messageId) {
+  db.prepare("UPDATE colis SET chat_id = ?, message_id = ? WHERE id = ?").run(chatId, messageId, id);
+  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
 }
 
 function setColisCarrier(id, carrier) {
@@ -980,6 +1012,7 @@ module.exports = {
   dropByCarrier,
   dropAll,
   dropAllExceptLit,
+  isFreeSpecial,
   dropBySender,
   dropColis,
   getTourStart,
@@ -1000,6 +1033,7 @@ module.exports = {
   setBatchType,
   setColisPrice,
   setColisCarrier,
+  setColisMessage,
   saveCarrierRule,
   getCarrierRules,
   listCarrierRules,

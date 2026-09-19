@@ -11,6 +11,7 @@ const {
   setBatchType,
   setColisPrice,
   setColisCarrier,
+  setColisMessage,
   setBatchCarrier,
   saveCarrierRule,
   getCarrierRules,
@@ -40,6 +41,7 @@ const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = req
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
 const { notifyNewColis } = require("./push");
+const { classifyFile } = require("./classify");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
@@ -52,6 +54,28 @@ const AUTO_NORMAL_TOPIC_IDS = [2, 5];
 // Les colis BJ sont factures comme des colis normaux, ils sont juste
 // comptabilises a part pour le suivi.
 const AUTO_BJ_TOPIC_IDS = [6];
+// Topic "special" : photos de contexte, captures, colis pris en photo. A
+// renseigner dans SPECIAL_TOPIC_ID (le nombre a la fin du lien t.me/c/.../N).
+const AUTO_SPECIAL_TOPIC_IDS = (process.env.SPECIAL_TOPIC_ID || "")
+  .split(",")
+  .map((n) => Number(n.trim()))
+  .filter(Number.isFinite);
+
+// Ou reposter un fichier selon son type. Le topic 1 d'un forum est le General
+// et n'a pas de message_thread_id cote Bot API : d'ou le filtre.
+const TOPIC_BY_TYPE = {
+  normal: AUTO_NORMAL_TOPIC_IDS[0],
+  lit: AUTO_LIT_TOPIC_IDS[0],
+  bj: AUTO_BJ_TOPIC_IDS[0],
+  special: AUTO_SPECIAL_TOPIC_IDS[0],
+};
+
+const TYPE_LABELS = {
+  normal: "Normaux",
+  lit: "LIT",
+  bj: "Boite jaune",
+  special: "Special",
+};
 // Le topic "1" (t.me/c/.../1) correspond au topic General par defaut d'un
 // forum Telegram, qui n'a pas de vrai message_thread_id cote Bot API : il ne
 // faut pas en passer un pour y poster.
@@ -137,6 +161,7 @@ function resolveForcedType(msg) {
     if (AUTO_LIT_TOPIC_IDS.includes(threadId)) return "lit";
     if (AUTO_NORMAL_TOPIC_IDS.includes(threadId)) return "normal";
     if (AUTO_BJ_TOPIC_IDS.includes(threadId)) return "bj";
+    if (AUTO_SPECIAL_TOPIC_IDS.includes(threadId)) return "special";
     return null; // bon groupe, mais topic non suivi
   }
 
@@ -234,6 +259,16 @@ function startBot() {
     const forcedType = resolveForcedType(msg);
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
+    // Envoye en tete-a-tete : le bot classe le fichier et le republie lui-meme
+    // dans le bon topic, a l'identique. C'est ce qui evite d'avoir a trier
+    // entre normaux, special, LIT et boite jaune avant d'envoyer.
+    if (msg.chat.type === "private") {
+      routeToTopic(bot, msg, attachment, batches).catch((err) =>
+        console.error("[bot] aiguillage :", err.message)
+      );
+      return;
+    }
+
     const senderName = extractSenderName(msg);
     const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
     const threadId = msg.message_thread_id;
@@ -327,7 +362,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi des PDF (transferes ou non), je compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune, special), sans toucher au fichier ni a sa legende.\n\nSous chaque etiquette republiee, trois boutons : Imprime, Clean, Del.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -362,6 +397,7 @@ function startBot() {
     /^\/imprime(@\w+)?(?:\s+(.+))?$/i,
     command((msg, match) => handlePrintCommand(bot, msg, match[2]))
   );
+  bot.onText(/^\/special(@\w+)?$/i, command((msg) => handleMoveType(bot, msg, "special")));
   bot.onText(/^\/del(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, true)));
   bot.onText(/^\/clear(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, false)));
 
@@ -375,6 +411,7 @@ function startBot() {
   );
 
   bot.on("callback_query", (query) => {
+    if (/^c:/.test(query.data || "")) return handleFileButton(bot, query);
     if (/^pra?:|^prmenu:|^prjob:/.test(query.data || "")) return handlePrintCallback(bot, query);
     return handleCarrierCallback(bot, query);
   });
@@ -409,6 +446,7 @@ async function registerCommands(bot) {
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
+    { command: "special", description: "Deplacer le colis dans Special (en reponse)" },
     { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
     { command: "regles", description: "Voir ce que le bot a appris" },
     ...CARRIERS.map((carrier) => ({
@@ -629,6 +667,275 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
     msg,
     `Colis #${removed.id} (${removed.sender_name}, ${removed.price.toFixed(2)} EUR) retire du suivi` +
       `${alsoDeleteFile ? " et efface du fil." : ". Le fichier reste dans la conversation."}`
+  );
+}
+
+
+// --- Aiguillage des fichiers envoyes en prive --------------------------------
+//
+// Le fichier est republie tel quel dans le topic qui lui revient : copyMessage
+// conserve le document et sa legende a l'octet pres, contrairement a un renvoi
+// qui ajouterait un en-tete "transfere de". Le colis est ensuite rattache au
+// message REPUBLIE, pour que /del et les boutons agissent la ou le fichier se
+// trouve vraiment.
+
+// Telecharge le fichier : le classement en LIT repose sur le format de la
+// page, donc il faut l'avoir sous la main. Inutile pour une image.
+async function fetchBytes(bot, fileId) {
+  try {
+    const link = await bot.getFileLink(fileId);
+    const res = await fetch(link);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    console.error("[bot] telechargement :", err.message);
+    return null;
+  }
+}
+
+// Boutons sous un PDF republie. Ils font exactement ce que font les commandes
+// /clear et /del, plus un "Imprime" qui sort l'etiquette de la file de
+// /imprime sans rien effacer.
+function fileButtons(colisId, { printed = false } = {}) {
+  if (printed) {
+    return { inline_keyboard: [[{ text: "✅ Deja imprime", callback_data: `c:n:${colisId}` }]] };
+  }
+  return {
+    inline_keyboard: [
+      [
+        { text: "🖨 Imprime", callback_data: `c:p:${colisId}` },
+        { text: "🧹 Clean", callback_data: `c:c:${colisId}` },
+        { text: "🗑 Del", callback_data: `c:d:${colisId}` },
+      ],
+    ],
+  };
+}
+
+async function routeToTopic(bot, msg, attachment, batches) {
+  const bytes = attachment.kind === "pdf" ? await fetchBytes(bot, attachment.fileId) : null;
+  const type = await classifyFile({
+    fileName: attachment.fileName,
+    caption: msg.caption,
+    kind: attachment.kind,
+    bytes,
+  });
+
+  const topic = TOPIC_BY_TYPE[type];
+  const senderName = extractSenderName(msg);
+  const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
+
+  // Topic inconnu (le "special" n'est pas encore configure) : on ne perd rien,
+  // le colis est compte la ou il est et on le dit.
+  if (!topic) {
+    const colis = registerRouted(msg, attachment, { senderName, carrier, type, batches,
+      chatId: msg.chat.id, messageId: msg.message_id });
+    await bot.sendMessage(
+      msg.chat.id,
+      `Classe en ${TYPE_LABELS[type] || type}, mais aucun topic "${TYPE_LABELS[type] || type}" n'est configure : ` +
+        `le fichier reste ici. Renseigne SPECIAL_TOPIC_ID pour qu'il parte au bon endroit.`,
+      { reply_to_message_id: msg.message_id }
+    ).catch(() => {});
+    return colis;
+  }
+
+  let copie;
+  try {
+    copie = await bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
+      message_thread_id: topic,
+    });
+  } catch (err) {
+    console.error("[bot] republication impossible :", err.message);
+    await bot.sendMessage(msg.chat.id, `Republication impossible : ${err.message}`).catch(() => {});
+    return null;
+  }
+
+  const colis = registerRouted(msg, attachment, {
+    senderName,
+    carrier,
+    type,
+    batches,
+    chatId: AUTO_GROUP_CHAT_ID,
+    messageId: copie.message_id,
+  });
+
+  // Les boutons ne servent que pour une etiquette : une photo de "special" ne
+  // s'imprime pas et ne se drope pas.
+  if (attachment.kind === "pdf") {
+    await bot
+      .editMessageReplyMarkup(fileButtons(colis.id), {
+        chat_id: AUTO_GROUP_CHAT_ID,
+        message_id: copie.message_id,
+      })
+      .catch((err) => console.error("[bot] boutons :", err.message));
+  }
+
+  queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
+  return colis;
+}
+
+// Enregistre le colis et l'ajoute au lot en cours, comme le fait la reception
+// directe dans un topic.
+function registerRouted(msg, attachment, { senderName, carrier, type, batches, chatId, messageId }) {
+  const key = batchKey(chatId, TOPIC_BY_TYPE[type]);
+  let batch = batches.get(key);
+  if (!batch) {
+    batch = {
+      chatId,
+      threadId: TOPIC_BY_TYPE[type],
+      batchId: createBatch(chatId),
+      count: 0,
+      total: 0,
+      bySender: new Map(),
+      groupCaptions: new Map(),
+      groupFirstMessage: new Map(),
+      unresolved: [],
+      timer: null,
+    };
+    batches.set(key, batch);
+  }
+
+  const colis = addColis(senderName, {
+    chatId,
+    messageId,
+    batchId: batch.batchId,
+    type,
+    carrier,
+    fileName: attachment.fileName,
+    caption: msg.caption || null,
+    fileId: attachment.fileId,
+    fileKind: attachment.kind,
+  });
+
+  // une image de "special" ne vaut rien : elle ne gonfle pas le total du lot
+  if (colis.price > 0) {
+    batch.count += 1;
+    batch.total += colis.price;
+    batch.bySender.set(senderName, (batch.bySender.get(senderName) || 0) + 1);
+  }
+
+  if (batch.timer) clearTimeout(batch.timer);
+  batch.timer = setTimeout(() => flushBatch(botInstance, key, batches), DEBOUNCE_MS);
+  return colis;
+}
+
+
+// --- Boutons sous les etiquettes ---------------------------------------------
+// Trois gestes, les memes que les commandes, mais a portee de pouce :
+//   Imprime : sort l'etiquette de la file de /imprime, sans rien effacer
+//   Clean   : retire le colis du suivi, garde le fichier    (= /clear)
+//   Del     : retire le colis ET efface le message          (= /del)
+async function handleFileButton(bot, query) {
+  const [, action, rawId] = (query.data || "").split(":");
+  const id = Number(rawId);
+  const repondre = (texte, alerte = false) =>
+    bot.answerCallbackQuery(query.id, { text: texte, show_alert: alerte }).catch(() => {});
+
+  if (action === "n") return repondre("Cette etiquette est deja sortie de l'imprimante.");
+
+  const colis = getColisById(id);
+  if (!colis) return repondre("Ce colis n'est plus suivi.", true);
+
+  const chatId = query.message.chat.id;
+  const messageId = query.message.message_id;
+
+  if (action === "p") {
+    markPrinted([id], query.from?.username ? `@${query.from.username}` : query.from?.first_name);
+    await bot
+      .editMessageReplyMarkup(fileButtons(id, { printed: true }), { chat_id: chatId, message_id: messageId })
+      .catch(() => {});
+    return repondre("Marquee imprimee : elle ne ressortira plus dans /imprime.");
+  }
+
+  if (action === "c" || action === "d") {
+    deleteColis(id);
+    refreshGroupStats();
+    if (action === "d") {
+      await bot.deleteMessage(chatId, messageId).catch((err) =>
+        console.error("[bot] suppression du fichier impossible :", err.message)
+      );
+      return repondre("Colis retire et fichier efface.");
+    }
+    await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+    return repondre("Colis retire du suivi. Le fichier reste ici.");
+  }
+
+  return repondre("Action inconnue.");
+}
+
+// Une etiquette sortie par /imprime ne doit plus proposer le bouton : on
+// remplace les boutons par la mention "deja imprime" sous le fichier concerne.
+function markButtonsPrinted(bot, ids) {
+  for (const id of ids) {
+    const colis = getColisById(id);
+    if (!colis || !colis.chat_id || !colis.message_id) continue;
+    if (colis.file_kind !== "pdf") continue;
+    bot
+      .editMessageReplyMarkup(fileButtons(id, { printed: true }), {
+        chat_id: colis.chat_id,
+        message_id: colis.message_id,
+      })
+      // le message n'a pas forcement de boutons (colis poste avant cette
+      // version, ou deja marque) : ce n'est pas une erreur
+      .catch(() => {});
+  }
+}
+
+// --- Deplacer un colis d'un topic a un autre ---------------------------------
+// /special (et demain /lit ou /bj sur le meme modele) : le message part du
+// topic ou il est, revient dans le bon, et le colis suit.
+async function handleMoveType(bot, msg, type) {
+  const reply = msg.reply_to_message;
+  if (!reply) {
+    return replyEphemeral(bot, msg, `Reponds au fichier a deplacer avec /${type}.`, {}, 8000);
+  }
+
+  const colis = findColisByMessage(msg.chat.id, reply.message_id);
+  if (!colis) return replyEphemeral(bot, msg, "Ce message n'est pas un colis suivi.", {}, 8000);
+
+  const topic = TOPIC_BY_TYPE[type];
+  if (!topic) {
+    return replyEphemeral(
+      bot,
+      msg,
+      `Aucun topic "${TYPE_LABELS[type] || type}" configure : renseigne SPECIAL_TOPIC_ID.`,
+      {},
+      12000
+    );
+  }
+
+  let copie;
+  try {
+    copie = await bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, reply.message_id, {
+      message_thread_id: topic,
+    });
+  } catch (err) {
+    return replyEphemeral(bot, msg, `Deplacement impossible : ${err.message}`, {}, 12000);
+  }
+
+  // le colis suit son message : nouveau type, nouvel emplacement
+  const maj = setColisType(colis.id, type);
+  setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+
+  if (colis.file_kind === "pdf") {
+    await bot
+      .editMessageReplyMarkup(fileButtons(colis.id, { printed: Boolean(colis.printed_at) }), {
+        chat_id: AUTO_GROUP_CHAT_ID,
+        message_id: copie.message_id,
+      })
+      .catch(() => {});
+  }
+
+  await bot
+    .deleteMessage(msg.chat.id, reply.message_id)
+    .catch((err) => console.error("[bot] ancien message non efface :", err.message));
+
+  refreshGroupStats();
+  const prix = maj ? maj.price : colis.price;
+  replyEphemeral(
+    bot,
+    msg,
+    `Colis #${colis.id} deplace en ${TYPE_LABELS[type]}` +
+      (prix === 0 ? " — image, 0 EUR, hors suivi." : ` — ${prix.toFixed(2)} EUR.`)
   );
 }
 
@@ -921,6 +1228,9 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
     // le PDF est parti : ces etiquettes ne reviendront plus dans le menu, ni
     // dans la file de l'impression automatique
     markPrinted(printedIds, printerName(msg));
+    // sous chaque fichier concerne, le bouton "Imprime" laisse la place a la
+    // mention "deja imprime"
+    markButtonsPrinted(bot, printedIds);
   } catch (err) {
     bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {});
   }
