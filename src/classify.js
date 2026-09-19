@@ -8,49 +8,36 @@
 //   - une boite jaune s'annonce par son nom de fichier : les bordereaux
 //     recus s'appellent BOITEJAUNE6N00028490616.pdf. Leur format est celui
 //     d'une etiquette ordinaire, 102 x 152 mm, donc seul le nom les trahit ;
-//   - un LIT est un gros colis, et son bordereau arrive sur une feuille A4
-//     entiere la ou une etiquette ordinaire fait 102 x 152 mm. Le format de
-//     page est ici un signal franc, mesurable, et non une supposition ;
+//   - un LIT se reconnait au mot "scotch" dans le nom du fichier. Le format de
+//     page avait ete essaye -- A4 contre 102 x 152 -- mais il change d'un
+//     expediteur a l'autre : un critere qui bouge tout seul ne vaut rien ici.
+//     Pour tout le reste, c'est /lit ou /litall qui tranche, a la main ;
 //   - le reste part en normaux.
 //
 // Le classement n'a pas besoin d'etre parfait : /special, /lit et /bj le
 // corrigent en un geste, et la correction deplace le message.
 
-const MM = 72 / 25.4;
-// A4 fait 210 x 297 ; une etiquette thermique 102 x 152. Le seuil est large
-// pour laisser passer les formats voisins (Letter, A4 legerement rogne).
-const GRANDE_PAGE_MM = 180;
-
 const BJ_PATTERN = /bo[iî]te?[\s_-]*jaune|^bj[\s_-]/i;
+const LIT_PATTERN = /scotch/i;
 
 function nomDitBoiteJaune(fileName, caption) {
   const texte = `${fileName || ""} ${caption || ""}`;
   return BJ_PATTERN.test(texte);
 }
 
-// Plus grande dimension de la premiere page, en millimetres. Renvoie 0 si on
-// ne sait pas lire le PDF : dans le doute on ne classe pas en LIT.
-async function plusGrandCote(bytes) {
-  try {
-    const { PDFDocument } = require("pdf-lib");
-    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    if (doc.getPageCount() === 0) return 0;
-    const { width, height } = doc.getPage(0).getSize();
-    return Math.max(width, height) / MM;
-  } catch (err) {
-    return 0;
-  }
+function nomDitLit(fileName, caption) {
+  return LIT_PATTERN.test(`${fileName || ""} ${caption || ""}`);
 }
 
 /**
- * @param {object} fichier { fileName, caption, kind: "pdf"|"image", bytes }
+ * @param {object} fichier { fileName, caption, kind: "pdf"|"image" }
  * @returns {"special"|"bj"|"lit"|"normal"}
  */
-async function classifyFile({ fileName, caption, kind, bytes }) {
+function classifyFile({ fileName, caption, kind }) {
   if (kind === "image") return "special";
   if (nomDitBoiteJaune(fileName, caption)) return "bj";
-  if (bytes && (await plusGrandCote(bytes)) >= GRANDE_PAGE_MM) return "lit";
+  if (nomDitLit(fileName, caption)) return "lit";
   return "normal";
 }
 
-module.exports = { classifyFile, nomDitBoiteJaune, plusGrandCote, GRANDE_PAGE_MM };
+module.exports = { classifyFile, nomDitBoiteJaune, nomDitLit };

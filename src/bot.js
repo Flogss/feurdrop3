@@ -362,7 +362,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune, special), sans toucher au fichier ni a sa legende.\n\nSous chaque etiquette republiee, trois boutons : Imprime, Clean, Del.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis pour changer son type\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune, special), sans toucher au fichier ni a sa legende.\n\nSous chaque etiquette republiee, trois boutons : Imprime, Clean, Del.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -679,20 +679,6 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
 // message REPUBLIE, pour que /del et les boutons agissent la ou le fichier se
 // trouve vraiment.
 
-// Telecharge le fichier : le classement en LIT repose sur le format de la
-// page, donc il faut l'avoir sous la main. Inutile pour une image.
-async function fetchBytes(bot, fileId) {
-  try {
-    const link = await bot.getFileLink(fileId);
-    const res = await fetch(link);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    console.error("[bot] telechargement :", err.message);
-    return null;
-  }
-}
-
 // Boutons sous un PDF republie. Ils font exactement ce que font les commandes
 // /clear et /del, plus un "Imprime" qui sort l'etiquette de la file de
 // /imprime sans rien effacer.
@@ -712,12 +698,10 @@ function fileButtons(colisId, { printed = false } = {}) {
 }
 
 async function routeToTopic(bot, msg, attachment, batches) {
-  const bytes = attachment.kind === "pdf" ? await fetchBytes(bot, attachment.fileId) : null;
-  const type = await classifyFile({
+  const type = classifyFile({
     fileName: attachment.fileName,
     caption: msg.caption,
     kind: attachment.kind,
-    bytes,
   });
 
   const topic = TOPIC_BY_TYPE[type];
@@ -881,39 +865,29 @@ function markButtonsPrinted(bot, ids) {
 }
 
 // --- Deplacer un colis d'un topic a un autre ---------------------------------
-// /special (et demain /lit ou /bj sur le meme modele) : le message part du
-// topic ou il est, revient dans le bon, et le colis suit.
-async function handleMoveType(bot, msg, type) {
-  const reply = msg.reply_to_message;
-  if (!reply) {
-    return replyEphemeral(bot, msg, `Reponds au fichier a deplacer avec /${type}.`, {}, 8000);
-  }
+// /lit, /unlit, /special : changer le type ne suffit pas, le fichier doit
+// suivre. Sinon il reste la ou il etait et il faut encore trier a la main --
+// exactement ce qu'on cherche a eviter.
 
-  const colis = findColisByMessage(msg.chat.id, reply.message_id);
-  if (!colis) return replyEphemeral(bot, msg, "Ce message n'est pas un colis suivi.", {}, 8000);
-
+// Deplace un seul colis. Renvoie vrai si le FICHIER a bouge ; le type, lui,
+// est toujours applique, meme quand le deplacement echoue.
+async function moveColis(bot, colis, type) {
+  const maj = setColisType(colis.id, type);
   const topic = TOPIC_BY_TYPE[type];
-  if (!topic) {
-    return replyEphemeral(
-      bot,
-      msg,
-      `Aucun topic "${TYPE_LABELS[type] || type}" configure : renseigne SPECIAL_TOPIC_ID.`,
-      {},
-      12000
-    );
-  }
+  if (!topic || !colis.chat_id || !colis.message_id) return false;
+  // deja au bon endroit : rien a faire
+  if (colis.chat_id === AUTO_GROUP_CHAT_ID && colis.type === type) return false;
 
   let copie;
   try {
-    copie = await bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, reply.message_id, {
+    copie = await bot.copyMessage(AUTO_GROUP_CHAT_ID, colis.chat_id, colis.message_id, {
       message_thread_id: topic,
     });
   } catch (err) {
-    return replyEphemeral(bot, msg, `Deplacement impossible : ${err.message}`, {}, 12000);
+    console.error("[bot] deplacement impossible :", err.message);
+    return false;
   }
 
-  // le colis suit son message : nouveau type, nouvel emplacement
-  const maj = setColisType(colis.id, type);
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
 
   if (colis.file_kind === "pdf") {
@@ -926,16 +900,41 @@ async function handleMoveType(bot, msg, type) {
   }
 
   await bot
-    .deleteMessage(msg.chat.id, reply.message_id)
+    .deleteMessage(colis.chat_id, colis.message_id)
     .catch((err) => console.error("[bot] ancien message non efface :", err.message));
 
+  return Boolean(maj);
+}
+
+async function handleMoveType(bot, msg, type) {
+  const reply = msg.reply_to_message;
+  if (!reply) {
+    return replyEphemeral(bot, msg, `Reponds au fichier a deplacer avec /${type}.`, {}, 8000);
+  }
+
+  const colis = findColisByMessage(msg.chat.id, reply.message_id);
+  if (!colis) return replyEphemeral(bot, msg, "Ce message n'est pas un colis suivi.", {}, 8000);
+
+  if (!TOPIC_BY_TYPE[type]) {
+    return replyEphemeral(
+      bot,
+      msg,
+      `Aucun topic "${TYPE_LABELS[type] || type}" configure${type === "special" ? " : renseigne SPECIAL_TOPIC_ID." : "."}`,
+      {},
+      12000
+    );
+  }
+
+  const deplace = await moveColis(bot, colis, type);
   refreshGroupStats();
-  const prix = maj ? maj.price : colis.price;
+
+  const apres = getColisById(colis.id) || colis;
   replyEphemeral(
     bot,
     msg,
-    `Colis #${colis.id} deplace en ${TYPE_LABELS[type]}` +
-      (prix === 0 ? " — image, 0 EUR, hors suivi." : ` — ${prix.toFixed(2)} EUR.`)
+    `Colis #${colis.id} passe en ${TYPE_LABELS[type]}` +
+      (apres.price === 0 ? " — image, 0 EUR, hors suivi" : ` — ${apres.price.toFixed(2)} EUR`) +
+      (deplace ? ", fichier deplace." : ".")
   );
 }
 
@@ -1362,35 +1361,41 @@ function handleRulesCommand(bot, msg) {
   );
 }
 
+// Changer le type ne suffit plus : le fichier doit suivre, sinon il reste dans
+// le topic ou il etait et il faut encore trier a la main.
 function handleSingleType(bot, msg, type) {
-  const reply = msg.reply_to_message;
-  if (!reply) {
-    replyEphemeral(bot, msg, "Reponds a un message contenant un colis avec /lit ou /unlit.");
-    return;
-  }
-  const colis = findColisByMessage(msg.chat.id, reply.message_id);
-  if (!colis) {
-    replyEphemeral(bot, msg, "Colis introuvable (deja drope ou pas un colis).");
-    return;
-  }
-  const updated = setColisType(colis.id, type);
-  const label = type === "lit" ? "LIT" : "normal";
-  replyEphemeral(bot, msg, `Colis #${updated.id} (${updated.sender_name}) passe en ${label} (${updated.price.toFixed(2)} EUR).`);
+  return handleMoveType(bot, msg, type);
 }
 
-function handleBatchType(bot, msg, type) {
+async function handleBatchType(bot, msg, type) {
   const batchId = getLatestBatchId(msg.chat.id);
   if (!batchId) {
     replyEphemeral(bot, msg, "Aucun groupe de colis recent trouve.");
     return;
   }
-  const count = setBatchType(batchId, type);
-  const label = type === "lit" ? "LIT" : "normal";
-  if (count === 0) {
+
+  const colis = getBatchColis(batchId);
+  if (colis.length === 0) {
     replyEphemeral(bot, msg, "Aucun colis en attente dans le dernier groupe.");
     return;
   }
-  replyEphemeral(bot, msg, `${count} colis passes en ${label}.`);
+
+  let deplaces = 0;
+  for (const item of colis) {
+    // un fichier a la fois : Telegram limite les envois en rafale
+    // eslint-disable-next-line no-await-in-loop
+    if (await moveColis(bot, item, type)) deplaces += 1;
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(120);
+  }
+
+  refreshGroupStats();
+  replyEphemeral(
+    bot,
+    msg,
+    `${colis.length} colis passes en ${TYPE_LABELS[type]}` +
+      (deplaces > 0 ? `, ${deplaces} fichier(s) deplaces dans le bon topic.` : ".")
+  );
 }
 
 function handlePrice(bot, msg, price) {
