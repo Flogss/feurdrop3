@@ -43,6 +43,7 @@ const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
+const { createWriteQueue } = require("./throttle");
 const { notifyNewColis } = require("./push");
 const { classifyFile } = require("./classify");
 
@@ -192,6 +193,13 @@ const REACTION_UNKNOWN_FALLBACK = "🤔";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Toutes les ecritures vers le groupe passent par une file cadencee : voir
+// throttle.js pour le pourquoi.
+const ecritureGroupe = createWriteQueue({
+  intervalMs: Number(process.env.GROUP_WRITE_INTERVAL_MS || 700),
+  onWait: (secondes) => console.warn(`[bot] 429 : pause de ${secondes}s avant de reessayer`),
+});
+
 // Les reactions partent une par une : un lot de 20 fichiers ferait sinon
 // autant d'appels simultanes et Telegram limiterait.
 let reactionQueue = Promise.resolve();
@@ -268,9 +276,7 @@ function startBot() {
     // dans le bon topic, a l'identique. C'est ce qui evite d'avoir a trier
     // entre normaux, special, LIT et boite jaune avant d'envoyer.
     if (msg.chat.type === "private") {
-      routeToTopic(bot, msg, attachment, batches).catch((err) =>
-        console.error("[bot] aiguillage :", err.message)
-      );
+      enfileFichier(bot, msg, attachment, batches);
       return;
     }
 
@@ -732,6 +738,96 @@ function refreshFileButtons(bot, colis) {
     .catch(() => {});
 }
 
+// --- File des envois en tete-a-tete ------------------------------------------
+// Dix PDF laches d'un coup arrivaient en dix aiguillages simultanes : Telegram
+// en refusait une partie (429) et ces fichiers-la etaient perdus. Ils passent
+// maintenant un par un, dans l'ordre d'arrivee, avec une barre qui dit ou on en
+// est -- le total monte au fur et a mesure que les fichiers continuent d'entrer.
+const filesPrivees = new Map(); // chatId -> { attente, total, faits, echecs, ... }
+
+function enfileFichier(bot, msg, attachment, batches) {
+  const chatId = msg.chat.id;
+  let file = filesPrivees.get(chatId);
+  if (!file) {
+    file = { attente: [], total: 0, faits: 0, echecs: 0, message: null, derniereEdition: 0 };
+    filesPrivees.set(chatId, file);
+  }
+
+  file.attente.push({ msg, attachment });
+  file.total += 1;
+
+  if (!file.actif) {
+    file.actif = true;
+    videFilePrivee(bot, chatId, file, batches).catch((err) =>
+      console.error("[bot] file d'envoi :", err.message)
+    );
+  }
+}
+
+async function videFilePrivee(bot, chatId, file, batches) {
+  while (file.attente.length > 0) {
+    const { msg, attachment } = file.attente.shift();
+    try {
+      const colis = await routeToTopic(bot, msg, attachment, batches);
+      if (colis) file.faits += 1;
+      else file.echecs += 1;
+    } catch (err) {
+      file.echecs += 1;
+      console.error("[bot] aiguillage :", err.message);
+    }
+    await majProgression(bot, chatId, file);
+  }
+
+  file.actif = false;
+  filesPrivees.delete(chatId);
+  await termineProgression(bot, chatId, file);
+}
+
+// Un fichier seul n'a pas besoin d'une barre : elle n'apparait qu'a partir du
+// deuxieme, quand l'attente devient reelle.
+async function majProgression(bot, chatId, file) {
+  const restants = file.attente.length;
+  const total = file.faits + file.echecs + restants;
+  if (total < 2) return;
+
+  const texte =
+    `📤 Classement des fichiers\n${progressBar(file.faits + file.echecs, total)}\n` +
+    `${file.faits + file.echecs}/${total} republies${restants > 0 ? ` · ${restants} en attente` : ""}`;
+
+  if (!file.message) {
+    file.message = await bot.sendMessage(chatId, texte).catch(() => null);
+    file.derniereEdition = Date.now();
+    return;
+  }
+
+  // Telegram limite aussi les editions : on n'en fait pas plus d'une par
+  // seconde, la derniere etape etant de toute facon affichee a la fin.
+  if (Date.now() - file.derniereEdition < PROGRESS_MIN_INTERVAL_MS) return;
+  file.derniereEdition = Date.now();
+  await bot
+    .editMessageText(texte, { chat_id: chatId, message_id: file.message.message_id })
+    .catch(() => {});
+}
+
+async function termineProgression(bot, chatId, file) {
+  if (!file.message) return;
+  const total = file.faits + file.echecs;
+  const resume =
+    file.echecs > 0
+      ? `✅ ${file.faits}/${total} classes · ${file.echecs} en echec`
+      : `✅ ${total} fichier${total > 1 ? "s" : ""} classe${total > 1 ? "s" : ""}`;
+
+  await bot
+    .editMessageText(`${resume}\n${progressBar(total, total)}`, {
+      chat_id: chatId,
+      message_id: file.message.message_id,
+    })
+    .catch(() => {});
+  // le recapitulatif du lot arrive juste apres : la barre n'a plus de raison
+  // de rester dans le fil
+  setTimeout(() => bot.deleteMessage(chatId, file.message.message_id).catch(() => {}), 6000);
+}
+
 async function routeToTopic(bot, msg, attachment, batches) {
   const type = classifyFile({
     fileName: attachment.fileName,
@@ -757,36 +853,46 @@ async function routeToTopic(bot, msg, attachment, batches) {
     return colis;
   }
 
+  // Le colis est cree AVANT la republication pour que ses boutons partent avec
+  // le fichier : une seule ecriture au lieu de deux, soit deux fois moins de
+  // travail dans la file, ce qui compte quand dix PDF arrivent ensemble. Son
+  // numero de message n'est connu qu'une fois la copie faite.
+  const { batch, key } = lotCourant(batches, AUTO_GROUP_CHAT_ID, type);
+  const colis = addColis(senderName, {
+    chatId: AUTO_GROUP_CHAT_ID,
+    messageId: null,
+    batchId: batch.batchId,
+    type,
+    carrier,
+    fileName: attachment.fileName,
+    caption: msg.caption || null,
+    fileId: attachment.fileId,
+    fileKind: attachment.kind,
+  });
+
   let copie;
   try {
-    copie = await bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
-      message_thread_id: topic,
-    });
+    copie = await ecritureGroupe(() =>
+      bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
+        message_thread_id: topic,
+        // Les boutons ne servent que pour une etiquette : une photo de
+        // "special" ne s'imprime pas et ne se drope pas.
+        ...(attachment.kind === "pdf" ? { reply_markup: fileButtons(colis.id) } : {}),
+      })
+    );
   } catch (err) {
+    // le fichier n'est jamais arrive : le colis ne doit pas rester dans les
+    // comptes, sinon le recapitulatif annonce des colis qu'on n'a pas
+    deleteColis(colis.id);
     console.error("[bot] republication impossible :", err.message);
-    await bot.sendMessage(msg.chat.id, `Republication impossible : ${err.message}`).catch(() => {});
+    await bot
+      .sendMessage(msg.chat.id, `Republication impossible (${attachment.fileName || "fichier"}) : ${err.message}`)
+      .catch(() => {});
     return null;
   }
 
-  const colis = registerRouted(msg, attachment, {
-    senderName,
-    carrier,
-    type,
-    batches,
-    chatId: AUTO_GROUP_CHAT_ID,
-    messageId: copie.message_id,
-  });
-
-  // Les boutons ne servent que pour une etiquette : une photo de "special" ne
-  // s'imprime pas et ne se drope pas.
-  if (attachment.kind === "pdf") {
-    await bot
-      .editMessageReplyMarkup(fileButtons(colis.id), {
-        chat_id: AUTO_GROUP_CHAT_ID,
-        message_id: copie.message_id,
-      })
-      .catch((err) => console.error("[bot] boutons :", err.message));
-  }
+  setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+  ajouteAuLot(batches, key, batch, colis, senderName);
 
   queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
   return colis;
@@ -795,6 +901,25 @@ async function routeToTopic(bot, msg, attachment, batches) {
 // Enregistre le colis et l'ajoute au lot en cours, comme le fait la reception
 // directe dans un topic.
 function registerRouted(msg, attachment, { senderName, carrier, type, batches, chatId, messageId }) {
+  const { batch, key } = lotCourant(batches, chatId, type);
+
+  const colis = addColis(senderName, {
+    chatId,
+    messageId,
+    batchId: batch.batchId,
+    type,
+    carrier,
+    fileName: attachment.fileName,
+    caption: msg.caption || null,
+    fileId: attachment.fileId,
+    fileKind: attachment.kind,
+  });
+
+  ajouteAuLot(batches, key, batch, colis, senderName);
+  return colis;
+}
+
+function lotCourant(batches, chatId, type) {
   const key = batchKey(chatId, TOPIC_BY_TYPE[type]);
   let batch = batches.get(key);
   if (!batch) {
@@ -812,19 +937,13 @@ function registerRouted(msg, attachment, { senderName, carrier, type, batches, c
     };
     batches.set(key, batch);
   }
+  return { batch, key };
+}
 
-  const colis = addColis(senderName, {
-    chatId,
-    messageId,
-    batchId: batch.batchId,
-    type,
-    carrier,
-    fileName: attachment.fileName,
-    caption: msg.caption || null,
-    fileId: attachment.fileId,
-    fileKind: attachment.kind,
-  });
-
+// Compte le colis dans le lot et relance le compte a rebours du recapitulatif.
+// Appele seulement une fois le fichier reellement republie : un fichier refuse
+// par Telegram ne doit pas apparaitre dans le total annonce.
+function ajouteAuLot(batches, key, batch, colis, senderName) {
   // une image de "special" ne vaut rien : elle ne gonfle pas le total du lot
   if (colis.price > 0) {
     batch.count += 1;
@@ -834,7 +953,6 @@ function registerRouted(msg, attachment, { senderName, carrier, type, batches, c
 
   if (batch.timer) clearTimeout(batch.timer);
   batch.timer = setTimeout(() => flushBatch(botInstance, key, batches), DEBOUNCE_MS);
-  return colis;
 }
 
 

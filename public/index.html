@@ -177,7 +177,7 @@
           <h2>Notifications</h2>
           <span class="push-state" id="push-state">—</span>
         </div>
-        <p class="hint" id="push-hint">Reçois une alerte dès qu'un lot de colis arrive, même app fermée.</p>
+        <p class="hint" id="push-hint" hidden></p>
         <div class="push-actions">
           <button class="btn btn-primary" id="push-enable">Activer les notifications</button>
           <button class="btn btn-ghost" id="push-test" hidden>Tester</button>
@@ -190,10 +190,7 @@
           <h2>Impression auto</h2>
           <span class="push-state" id="autoprint-state">—</span>
         </div>
-        <p class="hint" id="autoprint-hint">
-          L'agent installé sur le Mac imprime les étiquettes dès qu'elles arrivent. Les LIT ne sont
-          jamais imprimés automatiquement.
-        </p>
+        <p class="hint" id="autoprint-hint" hidden></p>
         <div class="push-actions">
           <button class="btn btn-primary" id="autoprint-toggle">Activer</button>
         </div>
@@ -219,14 +216,12 @@
           <input type="number" id="new-sender-bj-price" placeholder="BJ €" step="0.5" min="0" required />
           <button type="submit" class="btn btn-primary">Ajouter</button>
         </form>
-        <p class="hint">Chaque expéditeur a trois tarifs : normal, LIT et BJ. Le nom doit correspondre exactement à celui affiché par Telegram (ex: @pseudo ou prénom). Un nouvel expéditeur reçoit les tarifs par défaut à son premier colis.</p>
       </div>
 
       <div class="panel">
         <div class="panel-head">
           <h2>Fusionner deux expéditeurs</h2>
         </div>
-        <p class="hint">Si la même personne a recréé un compte, choisis l'ancien nom et le nom à conserver : tous les colis, gains, dettes et statistiques sont transférés, puis l'ancien expéditeur est supprimé.</p>
         <form id="merge-pair-form" class="merge-pair-form">
           <label class="merge-pair-field">
             <span class="price-tag">Ancien (supprimé)</span>
@@ -245,7 +240,6 @@
         <div class="panel-head">
           <h2>Regrouper en "Autre"</h2>
         </div>
-        <p class="hint">Coche les expéditeurs inactifs à fusionner dans un groupe "Autre" pour alléger la liste. Par sécurité, un expéditeur générant plus de 25% du chiffre d'affaires total est protégé et ne peut pas être fusionné.</p>
         <div id="merge-rows" class="rows"></div>
         <button class="btn btn-ghost" id="merge-to-other-btn" disabled>Fusionner la sélection en "Autre"</button>
       </div>
@@ -323,10 +317,6 @@
           <h2>Dernières actualisations</h2>
           <span class="chart-range" id="suivi-labels-count">—</span>
         </div>
-        <p class="hint">
-          Chaque ligne est un libellé d'actualisation, de la plus récente à la plus ancienne.
-          Clique dessus pour voir les numéros concernés.
-        </p>
         <div id="suivi-labels" class="rows rows-dense"></div>
       </div>
 
@@ -364,10 +354,6 @@
           <h2>À imprimer</h2>
           <span class="chart-range" id="imp-total">—</span>
         </div>
-        <p class="hint">
-          Le PDF s'ouvre dans un onglet : le navigateur l'imprime. Une étiquette sortie ne
-          ressort plus, ici comme sur Telegram.
-        </p>
         <button class="btn btn-primary imp-go" id="imp-all" type="button">🖨 Tout imprimer</button>
         <a class="imp-last" id="imp-last" href="#" target="_blank" rel="noopener" hidden></a>
         <div id="imp-categories" class="imp-categories"></div>
@@ -378,7 +364,6 @@
           <h2>Déjà imprimées</h2>
           <span class="chart-range" id="imp-printed-count">—</span>
         </div>
-        <p class="hint">Pour ressortir une étiquette déjà passée par l'imprimante.</p>
         <div id="imp-printed" class="imp-categories"></div>
       </div>
     </section>

@@ -215,9 +215,13 @@ function renderAutoPrint(state) {
   badge.className = `push-state ${autoPrintEnabled ? "push-on" : "push-off"}`;
   btn.textContent = autoPrintEnabled ? "Désactiver" : "Activer";
   btn.className = autoPrintEnabled ? "btn btn-ghost" : "btn btn-primary";
+  // la ligne ne sert que quand elle dit quelque chose qu'on ne voit pas
+  // ailleurs : le nombre en attente. Eteinte, elle disparait.
+  const enAttente = state.pending || 0;
+  hint.hidden = !autoPrintEnabled;
   hint.textContent = autoPrintEnabled
-    ? `${state.pending || 0} étiquette${(state.pending || 0) > 1 ? "s" : ""} en attente d'impression. Les LIT restent à faire à la main.`
-    : "L'agent installé sur le Mac imprime les étiquettes dès qu'elles arrivent. Les LIT ne sont jamais imprimés automatiquement.";
+    ? `${enAttente} étiquette${enAttente > 1 ? "s" : ""} en attente · LIT à la main`
+    : "";
 }
 
 document.getElementById("autoprint-toggle").addEventListener("click", async () => {
@@ -1352,6 +1356,10 @@ async function updatePushUI() {
   const panel = document.getElementById("push-panel");
   const state = document.getElementById("push-state");
   const hint = document.getElementById("push-hint");
+  const dis = (texte) => {
+    hint.textContent = texte;
+    hint.hidden = !texte;
+  };
   const enable = document.getElementById("push-enable");
   const test = document.getElementById("push-test");
   const disable = document.getElementById("push-disable");
@@ -1362,9 +1370,9 @@ async function updatePushUI() {
   if (!pushSupported) {
     state.textContent = "indisponible";
     state.className = "push-state push-off";
-    hint.textContent = isIOS
+    dis(isIOS
       ? "Sur iPhone, les notifications ne marchent que si le site est ajouté à l'écran d'accueil : bouton Partager → « Sur l'écran d'accueil », puis rouvre l'app depuis cette icône."
-      : "Ce navigateur ne gère pas les notifications push.";
+      : "Ce navigateur ne gère pas les notifications push.");
     enable.hidden = true;
     test.hidden = true;
     disable.hidden = true;
@@ -1374,7 +1382,7 @@ async function updatePushUI() {
   if (pushError) {
     state.textContent = "indisponible";
     state.className = "push-state push-off";
-    hint.textContent = `Les notifications n'ont pas pu démarrer sur cet appareil (${pushError}).`;
+    dis(`Les notifications n'ont pas pu démarrer sur cet appareil (${pushError}).`);
     enable.hidden = true;
     test.hidden = true;
     disable.hidden = true;
@@ -1391,14 +1399,12 @@ async function updatePushUI() {
   disable.hidden = !granted;
 
   if (Notification.permission === "denied") {
-    hint.textContent = isIOS
+    dis(isIOS
       ? "Notifications refusées. Réglages iOS → Notifications → DROP pour les réautoriser."
-      : "Notifications refusées. Réautorise-les dans les réglages du navigateur pour ce site.";
+      : "Notifications refusées. Réautorise-les dans les réglages du navigateur pour ce site.");
     enable.hidden = true;
-  } else if (granted) {
-    hint.textContent = "Tu recevras « +X colis · Y € » à chaque lot reçu, même app fermée.";
   } else {
-    hint.textContent = "Reçois une alerte dès qu'un lot de colis arrive, même app fermée.";
+    dis("");
   }
 }
 
