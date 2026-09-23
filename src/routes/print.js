@@ -8,9 +8,24 @@ const {
   getColisById,
   deleteColis,
   markPrinted,
+  dropColis,
+  consumeStock,
+  setColisPrice,
+  setColisNote,
 } = require("../db");
-const { carrierLabel } = require("../carrier");
-const { buildLabelsPdf, markButtonsPrinted, refreshGroupStats, getBot } = require("../bot");
+const { carrierLabel, CARRIERS } = require("../carrier");
+const {
+  buildLabelsPdf,
+  markButtonsPrinted,
+  refreshGroupStats,
+  refreshColisButtons,
+  corrigeTransporteur,
+  getBot,
+} = require("../bot");
+
+// "BJ" figure dans la liste des transporteurs parce que /transporteur sait le
+// corriger, mais c'est un type de colis : il n'a rien a faire dans le menu.
+const TRANSPORTEURS = CARRIERS.filter((c) => c.code !== "BJ").map((c) => ({ code: c.code, label: c.label }));
 
 // Impression depuis le site. Meme chaine que /imprime sur Telegram -- memes
 // etiquettes, meme mise en page, meme marquage -- mais le PDF s'ouvre dans un
@@ -59,6 +74,8 @@ router.get("/resume", (req, res) => {
     categories,
     total: categories.reduce((sum, c) => sum + c.count, 0),
     noted: categories.reduce((sum, c) => sum + c.noted, 0),
+    // la liste du menu d'edition vient d'ici : une seule reference
+    transporteurs: TRANSPORTEURS,
   });
 });
 
@@ -75,7 +92,11 @@ router.get("/colis", (req, res) => {
       fileName: row.file_name,
       kind: row.file_kind,
       note: row.note || null,
-      carrier: row.carrier_group || row.carrier,
+      price: row.price,
+      // le transporteur reel (null si non reconnu), pas le groupe d'affichage
+      // ou BJ et LIT masquent le transporteur
+      carrier: row.carrier || null,
+      type: row.type,
     })),
   });
 });
@@ -151,6 +172,62 @@ router.get("/job/:id.pdf", (req, res) => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="${job.name}"`);
   res.send(job.pdf);
+});
+
+// --- Modifier un colis -------------------------------------------------------
+// Le bouton Edit : prix, note, transporteur. Seuls les champs presents dans la
+// requete changent. Chaque champ passe par le meme chemin que sa commande
+// Telegram (/prix, /note, /transporteur), pour que le site et le bot ne
+// divergent jamais.
+router.patch("/colis/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const colis = getColisById(id);
+  if (!colis) return fail(res, new Error("colis introuvable"), 404);
+
+  const corps = req.body || {};
+  let appris = "";
+
+  if ("price" in corps) {
+    // un champ vide n'est pas "0 EUR" : Number("") vaudrait 0 sans broncher
+    const brut = String(corps.price ?? "").trim().replace(",", ".");
+    const prix = Number(brut);
+    if (!brut || !Number.isFinite(prix) || prix < 0) return fail(res, new Error("prix invalide"));
+    // Meme verrou que /prix : un tarif d'expediteur modifie plus tard ne doit
+    // pas ecraser un prix fixe a la main. Un prix renvoye tel quel ne verrouille
+    // rien -- sinon ouvrir puis enregistrer figerait le tarif sans le vouloir.
+    if (prix !== colis.price && !setColisPrice(id, prix)) {
+      return fail(res, new Error("prix : colis deja drope"));
+    }
+  }
+
+  if ("carrier" in corps) {
+    const code = corps.carrier || null;
+    if (code && !TRANSPORTEURS.some((t) => t.code === code)) {
+      return fail(res, new Error(`transporteur inconnu : ${code}`));
+    }
+    if ((colis.carrier || null) !== code) appris = corrigeTransporteur(id, code)?.appris || "";
+  }
+
+  if ("note" in corps) setColisNote(id, corps.note);
+
+  refreshColisButtons(id);
+  refreshGroupStats();
+  const maj = getColisById(id);
+  res.json({ ok: true, id, price: maj.price, carrier: maj.carrier, note: maj.note, appris });
+});
+
+// --- Drop a l'unite ----------------------------------------------------------
+// Une liasse imprimee part rarement d'un bloc : on solde les colis un par un a
+// mesure qu'on les poste. Meme compte de stock que les autres drops du site, et
+// le bouton sous le fichier Telegram passe a "Drope".
+router.post("/colis/:id/drop", (req, res) => {
+  const id = Number(req.params.id);
+  const drope = dropColis(id);
+  if (!drope) return fail(res, new Error("colis introuvable ou deja drope"), 404);
+  consumeStock(drope);
+  refreshColisButtons(id);
+  refreshGroupStats();
+  res.json({ ok: true, id });
 });
 
 // --- Retirer un colis --------------------------------------------------------

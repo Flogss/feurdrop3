@@ -2052,6 +2052,7 @@ async function loadImprime() {
     return;
   }
 
+  impTransporteurs = aFaire.transporteurs || [];
   const annotes = aFaire.noted > 0 ? ` · ${aFaire.noted} 📝` : "";
   document.getElementById("imp-total").textContent =
     aFaire.total > 0 ? `${aFaire.total} étiquette${aFaire.total > 1 ? "s" : ""}${annotes}` : "rien en attente";
@@ -2130,6 +2131,27 @@ document.addEventListener("click", async (e) => {
     });
   }
 
+  const edite = e.target.closest("[data-edit-colis]");
+  if (edite) return ouvreEdition(Number(edite.dataset.editColis));
+
+  if (e.target.closest("[data-edit-cancel]")) {
+    e.target.closest(".imp-edit").remove();
+    return;
+  }
+
+  const drope = e.target.closest("[data-drop-colis]");
+  if (drope) {
+    drope.disabled = true;
+    try {
+      await fetchJSON(`/api/print/colis/${drope.dataset.dropColis}/drop`, { method: "POST" });
+      await loadImprime();
+    } catch (err) {
+      drope.disabled = false;
+      alert(err.message);
+    }
+    return;
+  }
+
   const supprime = e.target.closest("[data-del-colis]");
   if (supprime) {
     if (!confirm("Retirer ce colis et effacer son fichier sur Telegram ?")) return;
@@ -2164,20 +2186,141 @@ async function fillCategory(cat) {
     return;
   }
 
+  for (const c of colis) impColis.set(c.id, c);
+
+  // Une etiquette deja imprimee n'a plus besoin d'etre supprimee d'ici : elle
+  // a besoin d'etre dropee quand on l'a postee, colis par colis.
+  const imprimee = scope === "printed";
   liste.innerHTML = colis
     .map(
-      (c) => `<div class="imp-row${c.note ? " noted" : ""}">
+      (c) => `<div class="imp-row${c.note ? " noted" : ""}" data-row="${c.id}">
         <div class="imp-row-main">
           <div class="imp-row-name">${escapeHtml(c.fileName || `colis #${c.id}`)}</div>
-          <div class="imp-row-sub">${escapeHtml(c.sender)}${c.kind === "image" ? " · photo" : ""}</div>
+          <div class="imp-row-sub">${escapeHtml(c.sender)} · ${euro(c.price)}${c.kind === "image" ? " · photo" : ""}</div>
           ${c.note ? `<div class="imp-row-note">📝 ${escapeHtml(c.note)}</div>` : ""}
         </div>
-        <button class="btn btn-ghost btn-small" data-print-one="${c.id}" data-scope="${scope}">🖨</button>
-        <button class="btn btn-ghost btn-small" data-del-colis="${c.id}">✕</button>
+        <button class="btn btn-ghost btn-small" data-edit-colis="${c.id}" title="Modifier">✎</button>
+        <button class="btn btn-ghost btn-small" data-print-one="${c.id}" data-scope="${scope}" title="Imprimer">🖨</button>
+        ${
+          imprimee
+            ? `<button class="btn btn-ghost btn-small imp-drop" data-drop-colis="${c.id}" title="Drop">📮</button>`
+            : `<button class="btn btn-ghost btn-small" data-del-colis="${c.id}" title="Supprimer">✕</button>`
+        }
       </div>`
     )
     .join("");
 }
+
+// --- Edition d'un colis ------------------------------------------------------
+// Prix, transporteur, note : les trois choses qu'on corrige a la main. Le
+// formulaire se deplie sous la ligne, sans quitter la liste.
+const impColis = new Map(); // id -> colis tel que charge, pour pre-remplir
+let impTransporteurs = [];
+
+function ouvreEdition(id) {
+  const ligne = document.querySelector(`.imp-row[data-row="${id}"]`);
+  if (!ligne) return;
+  // un deuxieme appui referme
+  const deja = ligne.nextElementSibling;
+  if (deja && deja.classList.contains("imp-edit")) {
+    deja.remove();
+    return;
+  }
+  document.querySelectorAll(".imp-edit").forEach((f) => f.remove());
+
+  const c = impColis.get(id);
+  const options = [`<option value="">— non reconnu —</option>`]
+    .concat(
+      impTransporteurs.map(
+        (t) => `<option value="${escapeAttr(t.code)}"${t.code === c.carrier ? " selected" : ""}>${escapeHtml(t.label)}</option>`
+      )
+    )
+    .join("");
+
+  ligne.insertAdjacentHTML(
+    "afterend",
+    `<form class="imp-edit" data-edit-form="${id}">
+      <div class="imp-edit-grid">
+        <label class="imp-edit-field">
+          <span class="price-tag">Prix €</span>
+          <input name="price" type="text" inputmode="decimal" value="${escapeAttr(String(c.price))}" />
+        </label>
+        <label class="imp-edit-field">
+          <span class="price-tag">Transporteur</span>
+          <select name="carrier">${options}</select>
+        </label>
+      </div>
+      <label class="imp-edit-field">
+        <span class="price-tag">Note</span>
+        <textarea name="note" rows="2" placeholder="fragile, avant 14h…">${escapeHtml(c.note || "")}</textarea>
+      </label>
+      <div class="imp-edit-actions">
+        <button type="button" class="btn btn-ghost btn-small" data-edit-cancel>Annuler</button>
+        <button type="submit" class="btn btn-primary btn-small">Enregistrer</button>
+      </div>
+    </form>`
+  );
+  ligne.nextElementSibling.querySelector("input").focus();
+}
+
+// On n'envoie que ce qui a change : renvoyer le prix tel quel le figerait
+// contre les futurs changements de tarif de l'expediteur.
+async function enregistreEdition(form) {
+  const id = Number(form.dataset.editForm);
+  const c = impColis.get(id);
+  const champs = new FormData(form);
+  const corps = {};
+
+  const prix = String(champs.get("price")).trim().replace(",", ".");
+  if (prix === "" || !Number.isFinite(Number(prix)) || Number(prix) < 0) {
+    form.querySelector("input[name=price]").classList.add("invalid");
+    return;
+  }
+  if (Number(prix) !== c.price) corps.price = Number(prix);
+
+  const transporteur = champs.get("carrier") || null;
+  if (transporteur !== (c.carrier || null)) corps.carrier = transporteur;
+
+  const note = String(champs.get("note")).trim();
+  if (note !== (c.note || "")) corps.note = note;
+
+  if (Object.keys(corps).length === 0) {
+    form.remove();
+    return;
+  }
+
+  const bouton = form.querySelector("[type=submit]");
+  bouton.disabled = true;
+  try {
+    const res = await fetchJSON(`/api/print/colis/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corps),
+    });
+    // corriger un transporteur apprend au bot, comme /transporteur : autant
+    // dire ce qu'il a retenu, et s'il a reclasse d'autres colis au passage
+    if (res.appris) signaleImprime(res.appris);
+    await loadImprime();
+  } catch (err) {
+    bouton.disabled = false;
+    alert(err.message);
+  }
+}
+
+function signaleImprime(texte) {
+  const box = document.getElementById("imp-notice");
+  box.textContent = texte;
+  box.hidden = false;
+  clearTimeout(signaleImprime.minuteur);
+  signaleImprime.minuteur = setTimeout(() => (box.hidden = true), 7000);
+}
+
+document.addEventListener("submit", (e) => {
+  const form = e.target.closest("[data-edit-form]");
+  if (!form) return;
+  e.preventDefault();
+  enregistreEdition(form);
+});
 
 // L'onglet s'ouvre AVANT la construction du PDF : un navigateur ne laisse
 // ouvrir une fenêtre que pendant le clic, pas après un aller-retour réseau.

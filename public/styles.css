@@ -1027,6 +1027,58 @@ main { margin-top: 16px; }
 .imp-row-sub { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 .imp-row .btn { flex-shrink: 0; padding: 3px 8px; font-size: 12px; }
 
+/* --- Edition d'un colis (bouton ✎) ---------------------------------------- */
+/* Memes champs que la fusion d'expediteurs : un seul langage de formulaire. */
+.imp-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin: -1px 0 2px;
+  border: 1px solid rgba(56,247,255,0.35);
+  border-radius: 9px;
+  background: rgba(56,247,255,0.04);
+  animation: imp-edit-in 0.18s ease-out;
+}
+@keyframes imp-edit-in { from { opacity: 0; transform: translateY(-4px); } }
+.imp-edit-grid { display: grid; grid-template-columns: 90px 1fr; gap: 8px; }
+.imp-edit-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.imp-edit-field input,
+.imp-edit-field select,
+.imp-edit-field textarea {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  width: 100%;
+}
+.imp-edit-field textarea { resize: vertical; min-height: 40px; }
+.imp-edit-field input:focus,
+.imp-edit-field select:focus,
+.imp-edit-field textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 8px rgba(56,247,255,0.2); }
+.imp-edit-field input.invalid { border-color: var(--rouge); box-shadow: 0 0 8px rgba(255,77,94,0.3); }
+.imp-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* le Drop d'une etiquette imprimee : vert, c'est le geste qui encaisse */
+.imp-row .imp-drop { border-color: rgba(182,255,62,0.4); color: var(--lime); }
+.imp-row .imp-drop:hover { background: rgba(182,255,62,0.12); box-shadow: 0 0 14px rgba(182,255,62,0.3); }
+
+/* ce que le bot a appris d'une correction de transporteur */
+.imp-notice {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(182,255,62,0.35);
+  background: rgba(182,255,62,0.06);
+  color: var(--lime);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.imp-notice[hidden] { display: none; }
+
 /* --- Colis annotes (/note) ------------------------------------------------ */
 /* Ils sortent en premier a l'impression : ils doivent se voir en premier ici
    aussi, categorie comprise pour ne pas avoir a tout deplier. */

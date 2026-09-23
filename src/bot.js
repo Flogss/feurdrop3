@@ -28,6 +28,9 @@ const {
   getPrintJobs,
   getPrintJobColis,
   getColisById,
+  dropColis,
+  consumeStock,
+  FREE_STATUS,
   getBatchColis,
   deleteColis,
   setBatchPrice,
@@ -373,7 +376,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune, special), sans toucher au fichier ni a sa legende.\n\nSous chaque etiquette republiee, trois boutons : Imprime, Clean, Del.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un colis : dans special, une image vaut 0 EUR\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -416,6 +419,10 @@ function startBot() {
     command((msg, match) => handlePrintCommand(bot, msg, match[2]))
   );
   bot.onText(/^\/special(@\w+)?$/i, command((msg) => handleMoveType(bot, msg, "special")));
+  // /normal ramene un colis dans normaux, d'ou qu'il vienne : special, LIT ou
+  // boite jaune. /normalall fait de meme pour tout le dernier lot.
+  bot.onText(/^\/normal(@\w+)?$/i, command((msg) => handleMoveType(bot, msg, "normal")));
+  bot.onText(/^\/normalall(@\w+)?$/i, command((msg) => handleBatchType(bot, msg, "normal")));
   bot.onText(/^\/del(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, true)));
   bot.onText(/^\/clear(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, false)));
 
@@ -466,6 +473,8 @@ async function registerCommands(bot) {
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
     { command: "special", description: "Deplacer le colis dans Special (en reponse)" },
+    { command: "normal", description: "Remettre le colis dans Normaux (en reponse)" },
+    { command: "normalall", description: "Remettre tout le dernier lot dans Normaux" },
     { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
     { command: "regles", description: "Voir ce que le bot a appris" },
     ...CARRIERS.map((carrier) => ({
@@ -628,6 +637,18 @@ function describeShape(shape) {
     .join(" + ");
 }
 
+// Correction du transporteur depuis le site : meme geste que /transporteur en
+// reponse a un colis, donc meme apprentissage -- la forme du numero et le
+// mot-cle servent aux fichiers suivants. "Non reconnu" (null) efface le
+// transporteur sans rien apprendre.
+function corrigeTransporteur(id, code) {
+  const colis = setColisCarrier(id, code || null);
+  if (!colis) return null;
+  if (!code) return { colis, appris: "" };
+  const { learned, reclassified } = learnFrom([colis], code);
+  return { colis, appris: describeLearned(learned, reclassified, code).trim() };
+}
+
 // "BJ" n'est pas un transporteur mais un type de colis : il se corrige avec la
 // meme commande parce que c'est une ligne de "compagnies a poster" comme
 // les autres.
@@ -701,23 +722,47 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
 // Boutons sous un PDF republie. Ils font exactement ce que font les commandes
 // /clear et /del, plus un "Imprime" qui sort l'etiquette de la file de
 // /imprime sans rien effacer.
-function fileButtons(colisId, { printed = false, note = null } = {}) {
+// Trois etats, dans l'ordre de la vie d'une etiquette :
+//   a imprimer : Imprime / Clean / Del
+//   imprimee   : Drop -- une liasse imprimee ne part pas forcement d'un bloc,
+//                on doit pouvoir solder les colis un par un a mesure qu'on
+//                les poste
+//   dropee     : une simple mention, plus rien a faire
+function fileButtons(colisId, { printed = false, dropped = false, note = null } = {}) {
   const lignes = [];
   // La note se lit sous le fichier sans y toucher : la legende reste celle de
   // l'expediteur. Le texte entier s'affiche en tapant dessus.
   if (note) {
     lignes.push([{ text: `📝 ${tronque(note, 40)}`, callback_data: `c:m:${colisId}` }]);
   }
-  lignes.push(
-    printed
-      ? [{ text: "✅ Deja imprime", callback_data: `c:n:${colisId}` }]
-      : [
-          { text: "🖨 Imprime", callback_data: `c:p:${colisId}` },
-          { text: "🧹 Clean", callback_data: `c:c:${colisId}` },
-          { text: "🗑 Del", callback_data: `c:d:${colisId}` },
-        ]
-  );
+  if (dropped) {
+    lignes.push([{ text: "✅ Drope", callback_data: `c:k:${colisId}` }]);
+  } else if (printed) {
+    lignes.push([{ text: "📮 Drop", callback_data: `c:x:${colisId}` }]);
+  } else {
+    lignes.push([
+      { text: "🖨 Imprime", callback_data: `c:p:${colisId}` },
+      { text: "🧹 Clean", callback_data: `c:c:${colisId}` },
+      { text: "🗑 Del", callback_data: `c:d:${colisId}` },
+    ]);
+  }
   return { inline_keyboard: lignes };
+}
+
+// Les boutons d'un colis se deduisent de son etat en base : un seul endroit
+// pour les calculer, quel que soit le geste qui vient de le modifier.
+function boutonsDe(colis) {
+  return fileButtons(colis.id, {
+    printed: Boolean(colis.printed_at),
+    dropped: colis.status === "dropped",
+    note: colis.note,
+  });
+}
+
+// Une image de "special" vaut 0 EUR et ne se drope pas : elle n'a rien a
+// faire de boutons. Tout le reste, PDF ou image, est un vrai colis.
+function aDesBoutons(colis) {
+  return Boolean(colis) && colis.status !== FREE_STATUS;
 }
 
 function tronque(texte, max) {
@@ -725,15 +770,16 @@ function tronque(texte, max) {
   return propre.length > max ? `${propre.slice(0, max - 1)}…` : propre;
 }
 
-// Repose les boutons d'un colis en relisant son etat : appele apres /note,
-// pour que la note apparaisse sous le fichier sans toucher a la legende.
+// Repose les boutons d'un colis en relisant son etat : appele apres /note, un
+// drop, une correction depuis le site.
 function refreshFileButtons(bot, colis) {
-  if (!colis || !colis.chat_id || !colis.message_id) return;
-  bot
-    .editMessageReplyMarkup(fileButtons(colis.id, { printed: Boolean(colis.printed_at), note: colis.note }), {
+  if (!colis || !colis.chat_id || !colis.message_id || !aDesBoutons(colis)) return;
+  ecritureGroupe(() =>
+    bot.editMessageReplyMarkup(boutonsDe(colis), {
       chat_id: colis.chat_id,
       message_id: colis.message_id,
     })
+  )
     // le message n'a pas forcement de boutons (colis d'avant cette version)
     .catch(() => {});
 }
@@ -829,29 +875,12 @@ async function termineProgression(bot, chatId, file) {
 }
 
 async function routeToTopic(bot, msg, attachment, batches) {
-  const type = classifyFile({
-    fileName: attachment.fileName,
-    caption: msg.caption,
-    kind: attachment.kind,
-  });
-
+  // normaux, LIT ou boite jaune : les trois topics existent toujours. Le
+  // classement n'envoie jamais rien dans "special" -- on y va a la main.
+  const type = classifyFile({ fileName: attachment.fileName, caption: msg.caption });
   const topic = TOPIC_BY_TYPE[type];
   const senderName = extractSenderName(msg);
   const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
-
-  // Topic inconnu (le "special" n'est pas encore configure) : on ne perd rien,
-  // le colis est compte la ou il est et on le dit.
-  if (!topic) {
-    const colis = registerRouted(msg, attachment, { senderName, carrier, type, batches,
-      chatId: msg.chat.id, messageId: msg.message_id });
-    await bot.sendMessage(
-      msg.chat.id,
-      `Classe en ${TYPE_LABELS[type] || type}, mais aucun topic "${TYPE_LABELS[type] || type}" n'est configure : ` +
-        `le fichier reste ici. Renseigne SPECIAL_TOPIC_ID pour qu'il parte au bon endroit.`,
-      { reply_to_message_id: msg.message_id }
-    ).catch(() => {});
-    return colis;
-  }
 
   // Le colis est cree AVANT la republication pour que ses boutons partent avec
   // le fichier : une seule ecriture au lieu de deux, soit deux fois moins de
@@ -868,6 +897,9 @@ async function routeToTopic(bot, msg, attachment, batches) {
     caption: msg.caption || null,
     fileId: attachment.fileId,
     fileKind: attachment.kind,
+    // le fichier d'origine en prive : y repondre /lit ou /normal doit marcher
+    sourceChatId: msg.chat.id,
+    sourceMessageId: msg.message_id,
   });
 
   let copie;
@@ -875,9 +907,7 @@ async function routeToTopic(bot, msg, attachment, batches) {
     copie = await ecritureGroupe(() =>
       bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
         message_thread_id: topic,
-        // Les boutons ne servent que pour une etiquette : une photo de
-        // "special" ne s'imprime pas et ne se drope pas.
-        ...(attachment.kind === "pdf" ? { reply_markup: fileButtons(colis.id) } : {}),
+        ...(aDesBoutons(colis) ? { reply_markup: fileButtons(colis.id) } : {}),
       })
     );
   } catch (err) {
@@ -895,27 +925,6 @@ async function routeToTopic(bot, msg, attachment, batches) {
   ajouteAuLot(batches, key, batch, colis, senderName);
 
   queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
-  return colis;
-}
-
-// Enregistre le colis et l'ajoute au lot en cours, comme le fait la reception
-// directe dans un topic.
-function registerRouted(msg, attachment, { senderName, carrier, type, batches, chatId, messageId }) {
-  const { batch, key } = lotCourant(batches, chatId, type);
-
-  const colis = addColis(senderName, {
-    chatId,
-    messageId,
-    batchId: batch.batchId,
-    type,
-    carrier,
-    fileName: attachment.fileName,
-    caption: msg.caption || null,
-    fileId: attachment.fileId,
-    fileKind: attachment.kind,
-  });
-
-  ajouteAuLot(batches, key, batch, colis, senderName);
   return colis;
 }
 
@@ -967,27 +976,45 @@ async function handleFileButton(bot, query) {
   const repondre = (texte, alerte = false) =>
     bot.answerCallbackQuery(query.id, { text: texte, show_alert: alerte }).catch(() => {});
 
-  if (action === "n") return repondre("Cette etiquette est deja sortie de l'imprimante.");
-
   const colis = getColisById(id);
   if (!colis) return repondre("Ce colis n'est plus suivi.", true);
 
   const chatId = query.message.chat.id;
   const messageId = query.message.message_id;
+  const poseBoutons = (etat) =>
+    bot.editMessageReplyMarkup(boutonsDe(etat), { chat_id: chatId, message_id: messageId }).catch(() => {});
 
   // le bouton de la note n'agit pas : il affiche le texte en entier, que le
   // bouton tronque a 40 caracteres
   if (action === "m") return repondre(colis.note || "Plus de note sur ce colis.", true);
 
+  // "Deja imprime" des messages d'avant le bouton Drop : on les met a jour au
+  // premier appui plutot que de laisser un bouton mort
+  if (action === "n") {
+    await poseBoutons(colis);
+    return repondre(colis.status === "dropped" ? "Deja drope." : "Imprimee. Appuie sur Drop une fois postee.");
+  }
+
+  if (action === "k") return repondre("Ce colis est deja drope.");
+
   if (action === "p") {
     markPrinted([id], query.from?.username ? `@${query.from.username}` : query.from?.first_name);
-    await bot
-      .editMessageReplyMarkup(fileButtons(id, { printed: true, note: colis.note }), {
-        chat_id: chatId,
-        message_id: messageId,
-      })
-      .catch(() => {});
-    return repondre("Marquee imprimee : elle ne ressortira plus dans /imprime.");
+    await poseBoutons(getColisById(id));
+    return repondre("Marquee imprimee. Appuie sur Drop une fois postee.");
+  }
+
+  // Drop d'un seul colis : une liasse imprimee part rarement d'un bloc. Le
+  // stock se decremente comme pour un drop depuis le site.
+  if (action === "x") {
+    const drope = dropColis(id);
+    if (drope) {
+      consumeStock(drope);
+      refreshGroupStats();
+    }
+    await poseBoutons(getColisById(id));
+    // deja drope ailleurs (site, "tout dropper") : le bouton se remet juste
+    // a jour, sans rien compter deux fois
+    return repondre(drope ? `Colis #${id} drope (${colis.price.toFixed(2)} EUR).` : "Ce colis etait deja drope.");
   }
 
   if (action === "c" || action === "d") {
@@ -1008,16 +1035,19 @@ async function handleFileButton(bot, query) {
 
 // Une etiquette sortie par /imprime ne doit plus proposer le bouton : on
 // remplace les boutons par la mention "deja imprime" sous le fichier concerne.
+// Une liasse de 30 etiquettes, c'est 30 editions dans le groupe : elles passent
+// par la file cadencee, sinon Telegram en refuse la moitie (429) et les
+// boutons Drop n'apparaissent que sous une partie des fichiers.
 function markButtonsPrinted(bot, ids) {
   for (const id of ids) {
     const colis = getColisById(id);
-    if (!colis || !colis.chat_id || !colis.message_id) continue;
-    if (colis.file_kind !== "pdf") continue;
-    bot
-      .editMessageReplyMarkup(fileButtons(id, { printed: true, note: colis.note }), {
+    if (!colis || !colis.chat_id || !colis.message_id || !aDesBoutons(colis)) continue;
+    ecritureGroupe(() =>
+      bot.editMessageReplyMarkup(boutonsDe(colis), {
         chat_id: colis.chat_id,
         message_id: colis.message_id,
       })
+    )
       // le message n'a pas forcement de boutons (colis poste avant cette
       // version, ou deja marque) : ce n'est pas une erreur
       .catch(() => {});
@@ -1038,11 +1068,21 @@ async function moveColis(bot, colis, type) {
   // deja au bon endroit : rien a faire
   if (colis.chat_id === AUTO_GROUP_CHAT_ID && colis.type === type) return false;
 
+  // L'etat APRES le changement de type decide des boutons : une image qui
+  // entre dans "special" les perd, la meme qui en ressort les retrouve.
+  const apres = getColisById(colis.id) || colis;
+
   let copie;
   try {
-    copie = await bot.copyMessage(AUTO_GROUP_CHAT_ID, colis.chat_id, colis.message_id, {
-      message_thread_id: topic,
-    });
+    // la copie, puis l'effacement de l'ancien : deux ecritures dans le groupe,
+    // qui passent par la file comme tout le reste -- /litall sur dix fichiers
+    // tombait sinon dans le meme 429 que l'envoi
+    copie = await ecritureGroupe(() =>
+      bot.copyMessage(AUTO_GROUP_CHAT_ID, colis.chat_id, colis.message_id, {
+        message_thread_id: topic,
+        ...(aDesBoutons(apres) ? { reply_markup: boutonsDe(apres) } : {}),
+      })
+    );
   } catch (err) {
     console.error("[bot] deplacement impossible :", err.message);
     return false;
@@ -1050,18 +1090,9 @@ async function moveColis(bot, colis, type) {
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
 
-  if (colis.file_kind === "pdf") {
-    await bot
-      .editMessageReplyMarkup(fileButtons(colis.id, { printed: Boolean(colis.printed_at) }), {
-        chat_id: AUTO_GROUP_CHAT_ID,
-        message_id: copie.message_id,
-      })
-      .catch(() => {});
-  }
-
-  await bot
-    .deleteMessage(colis.chat_id, colis.message_id)
-    .catch((err) => console.error("[bot] ancien message non efface :", err.message));
+  await ecritureGroupe(() => bot.deleteMessage(colis.chat_id, colis.message_id)).catch((err) =>
+    console.error("[bot] ancien message non efface :", err.message)
+  );
 
   return Boolean(maj);
 }
@@ -1446,11 +1477,17 @@ function progressBar(done, total) {
   return `${"█".repeat(filled)}${"░".repeat(PROGRESS_SLOTS - filled)} ${Math.round(ratio * 100)} %`;
 }
 
-async function startProgress(bot, chatId, total) {
+async function startProgress(
+  bot,
+  chatId,
+  total,
+  { titre = "Preparation des etiquettes", unite = "recuperees", threadId = null } = {}
+) {
   const text = (done, suffix) =>
-    `Preparation des etiquettes\n${progressBar(done, total)}\n${suffix || `${done}/${total} recuperees`}`;
+    `${titre}\n${progressBar(done, total)}\n${suffix || `${done}/${total} ${unite}`}`;
 
-  const message = await bot.sendMessage(chatId, text(0)).catch(() => null);
+  const opts = threadId ? { message_thread_id: threadId } : {};
+  const message = await bot.sendMessage(chatId, text(0), opts).catch(() => null);
   let done = 0;
   let lastEdit = 0;
 
@@ -1542,13 +1579,29 @@ async function handleBatchType(bot, msg, type) {
     return;
   }
 
+  // Chaque deplacement, c'est une copie et un effacement dans le groupe, a la
+  // cadence de la file : dix fichiers prennent une quinzaine de secondes. La
+  // barre dit ou on en est au lieu de laisser croire que rien ne se passe.
+  const progression =
+    colis.length >= 2
+      ? await startProgress(bot, msg.chat.id, colis.length, {
+          titre: `Passage en ${TYPE_LABELS[type]}`,
+          unite: "deplaces",
+          threadId: msg.message_thread_id,
+        })
+      : null;
+
   let deplaces = 0;
   for (const item of colis) {
-    // un fichier a la fois : Telegram limite les envois en rafale
+    // un fichier a la fois : c'est la file qui fixe la cadence
     // eslint-disable-next-line no-await-in-loop
     if (await moveColis(bot, item, type)) deplaces += 1;
     // eslint-disable-next-line no-await-in-loop
-    await sleep(120);
+    if (progression) await progression.step();
+  }
+  if (progression) {
+    await progression.finish(`✅ ${colis.length} en ${TYPE_LABELS[type]}`);
+    setTimeout(() => progression.remove(), 6000);
   }
 
   refreshGroupStats();
@@ -1766,4 +1819,15 @@ function refreshGroupStats() {
   }, 800);
 }
 
-module.exports = { startBot, refreshGroupStats, buildLabelsPdf, markButtonsPrinted, getBot: () => botInstance };
+module.exports = {
+  startBot,
+  refreshGroupStats,
+  buildLabelsPdf,
+  markButtonsPrinted,
+  corrigeTransporteur,
+  // le site modifie un colis (note, drop) : ses boutons suivent
+  refreshColisButtons: (id) => {
+    if (botInstance) refreshFileButtons(botInstance, getColisById(id));
+  },
+  getBot: () => botInstance,
+};

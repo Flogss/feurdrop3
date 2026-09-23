@@ -2,9 +2,6 @@
 //
 // Les regles sortent des fichiers reellement recus, pas d'une intuition :
 //
-//   - une PHOTO n'est jamais une etiquette. C'est une capture, un colis
-//     photographie, une question. Elle va dans "special", ou elle ne vaut rien
-//     et ne se drope pas ;
 //   - une boite jaune s'annonce par son nom de fichier : les bordereaux
 //     recus s'appellent BOITEJAUNE6N00028490616.pdf. Leur format est celui
 //     d'une etiquette ordinaire, 102 x 152 mm, donc seul le nom les trahit ;
@@ -12,10 +9,12 @@
 //     page avait ete essaye -- A4 contre 102 x 152 -- mais il change d'un
 //     expediteur a l'autre : un critere qui bouge tout seul ne vaut rien ici.
 //     Pour tout le reste, c'est /lit ou /litall qui tranche, a la main ;
-//   - le reste part en normaux.
+//   - le reste part en normaux, image comprise. Une image n'est pas envoyee
+//     d'office dans "special" : c'est seulement une fois la-bas (/special, ou
+//     postee directement dans le topic) qu'elle passe a 0 EUR.
 //
-// Le classement n'a pas besoin d'etre parfait : /special, /lit et /bj le
-// corrigent en un geste, et la correction deplace le message.
+// Le classement n'a pas besoin d'etre parfait : /special, /lit, /normal et
+// /bj le corrigent en un geste, et la correction deplace le message.
 
 const BJ_PATTERN = /bo[iî]te?[\s_-]*jaune|^bj[\s_-]/i;
 const LIT_PATTERN = /scotch/i;
@@ -30,11 +29,10 @@ function nomDitLit(fileName, caption) {
 }
 
 /**
- * @param {object} fichier { fileName, caption, kind: "pdf"|"image" }
- * @returns {"special"|"bj"|"lit"|"normal"}
+ * @param {object} fichier { fileName, caption }
+ * @returns {"bj"|"lit"|"normal"}
  */
-function classifyFile({ fileName, caption, kind }) {
-  if (kind === "image") return "special";
+function classifyFile({ fileName, caption }) {
   if (nomDitBoiteJaune(fileName, caption)) return "bj";
   if (nomDitLit(fileName, caption)) return "lit";
   return "normal";

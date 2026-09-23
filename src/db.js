@@ -127,6 +127,14 @@ if (!colisColumns.includes("print_job")) db.exec("ALTER TABLE colis ADD COLUMN p
 // rappelle". Un colis annote passe en tete de la file d'impression et sort en
 // rouge sur le site -- c'est tout l'interet d'en poser une.
 if (!colisColumns.includes("note")) db.exec("ALTER TABLE colis ADD COLUMN note TEXT");
+// Le message d'origine, pour un fichier envoye au bot en prive puis republie
+// dans le groupe : chat_id/message_id pointent sur la copie, mais repondre
+// /lit ou /normal au fichier qu'on vient d'envoyer doit marcher aussi.
+if (!colisColumns.includes("source_chat_id")) db.exec("ALTER TABLE colis ADD COLUMN source_chat_id INTEGER");
+if (!colisColumns.includes("source_message_id")) {
+  db.exec("ALTER TABLE colis ADD COLUMN source_message_id INTEGER");
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_colis_source ON colis(source_chat_id, source_message_id)");
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -289,7 +297,19 @@ function createBatch(chatId) {
 
 function addColis(
   senderName,
-  { chatId, messageId, batchId, type = "normal", carrier = null, fileName, caption, fileId, fileKind } = {}
+  {
+    chatId,
+    messageId,
+    batchId,
+    type = "normal",
+    carrier = null,
+    fileName,
+    caption,
+    fileId,
+    fileKind,
+    sourceChatId = null,
+    sourceMessageId = null,
+  } = {}
 ) {
   const sender = getOrCreateSender(senderName);
   const gratuit = isFreeSpecial(type, fileKind);
@@ -297,8 +317,8 @@ function addColis(
   const info = db
     .prepare(
       `INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier,
-                          file_name, caption, file_id, file_kind)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                          file_name, caption, file_id, file_kind, source_chat_id, source_message_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       sender.name,
@@ -312,9 +332,18 @@ function addColis(
       fileName || null,
       caption || null,
       fileId || null,
-      fileKind || null
+      fileKind || null,
+      sourceChatId,
+      sourceMessageId
     );
-  return { id: info.lastInsertRowid, sender_name: sender.name, price, type, carrier };
+  return {
+    id: info.lastInsertRowid,
+    sender_name: sender.name,
+    price,
+    type,
+    carrier,
+    status: gratuit ? FREE_STATUS : "pending",
+  };
 }
 
 // --- Regles de transporteur apprises ---------------------------------------
@@ -373,7 +402,8 @@ function printableScope(scope) {
 const PRINT_ORDER_SQL = "ORDER BY note IS NULL, id";
 
 function getPrintableColis(carrier, { scope = "new" } = {}) {
-  const base = `SELECT id, sender_name, file_id, file_kind, file_name, note, ${CARRIER_GROUP_SQL} AS carrier_group
+  const base = `SELECT id, sender_name, file_id, file_kind, file_name, note, price, carrier, type,
+                       ${CARRIER_GROUP_SQL} AS carrier_group
                 FROM colis WHERE ${printableScope(scope)}`;
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ${PRINT_ORDER_SQL}`).all();
   if (carrier === "Inconnu") {
@@ -392,7 +422,7 @@ function litScope(scope) {
 function getLitPrintable({ scope = "new" } = {}) {
   return db
     .prepare(
-      `SELECT id, sender_name, file_id, file_kind, file_name, note, 'LIT' AS carrier_group
+      `SELECT id, sender_name, file_id, file_kind, file_name, note, price, carrier, type, 'LIT' AS carrier_group
        FROM colis WHERE ${litScope(scope)} ${PRINT_ORDER_SQL}`
     )
     .all();
@@ -594,22 +624,42 @@ function dropColis(id) {
 // mais on doit pouvoir les retirer comme les autres.
 const VIVANT_SQL = `status IN ('pending', '${FREE_STATUS}')`;
 
+// Un message designe un colis de deux facons : c'est sa copie dans le groupe,
+// ou c'est le fichier d'origine envoye au bot en prive. Les deux doivent
+// repondre a /lit, /normal, /note... sinon repondre a son propre envoi en prive
+// ne trouve rien.
+const PAR_MESSAGE_SQL =
+  "((chat_id = ? AND message_id = ?) OR (source_chat_id = ? AND source_message_id = ?))";
+
 function findColisByMessage(chatId, messageId) {
   return db
-    .prepare(`SELECT * FROM colis WHERE chat_id = ? AND message_id = ? AND ${VIVANT_SQL}`)
-    .get(chatId, messageId);
+    .prepare(`SELECT * FROM colis WHERE ${PAR_MESSAGE_SQL} AND ${VIVANT_SQL} ORDER BY id DESC`)
+    .get(chatId, messageId, chatId, messageId);
 }
 
 // Sans filtre de statut : /note doit marcher meme sur un colis deja drope.
 function findAnyColisByMessage(chatId, messageId) {
-  return db.prepare("SELECT * FROM colis WHERE chat_id = ? AND message_id = ?").get(chatId, messageId);
+  return db
+    .prepare(`SELECT * FROM colis WHERE ${PAR_MESSAGE_SQL} ORDER BY id DESC`)
+    .get(chatId, messageId, chatId, messageId);
 }
 
+// Le dernier lot vu depuis un chat. Un fichier envoye en prive est republie
+// dans le groupe et son lot y est rattache : depuis le prive, le dernier lot
+// est donc celui du dernier fichier qu'on y a envoye, pas un lot "du prive"
+// qui n'existe plus. Sans ca, /litall ou /prix sans reponse tapes en prive
+// ne trouvaient rien.
 function getLatestBatchId(chatId) {
   const row = db
-    .prepare("SELECT id FROM batches WHERE chat_id = ? ORDER BY id DESC LIMIT 1")
-    .get(chatId);
-  return row ? row.id : null;
+    .prepare(
+      `SELECT MAX(id) AS id FROM (
+         SELECT id FROM batches WHERE chat_id = ?
+         UNION ALL
+         SELECT batch_id AS id FROM colis WHERE source_chat_id = ? AND batch_id IS NOT NULL
+       )`
+    )
+    .get(chatId, chatId);
+  return row && row.id ? row.id : null;
 }
 
 function setColisType(id, type) {
@@ -1066,6 +1116,7 @@ module.exports = {
   createBatch,
   findColisByMessage,
   findAnyColisByMessage,
+  FREE_STATUS,
   getLatestBatchId,
   setColisType,
   setBatchType,
