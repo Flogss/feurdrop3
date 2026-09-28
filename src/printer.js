@@ -141,10 +141,13 @@ function anchorFor(rotation, left, bottom, scaledW, scaledH) {
 // Tout le calcul geometrique en un seul endroit, sans dependre de pdf-lib :
 // quelle rotation, quel agrandissement, et ou poser le contenu sur la page
 // 4x6. `baseRotation` est la rotation propre de la page source (/Rotate).
-// `reserveHaut` garde une bande libre en haut de la page (le numero d'un
+// `reserveBas` garde une bande libre en bas de la page (le numero d'un
 // special) : l'etiquette est posee dans ce qui reste, sans rien recouvrir.
-function planPlacement(contentWidth, contentHeight, baseRotation = 0, { reserveHaut = 0 } = {}) {
-  const zoneH = LABEL_HEIGHT - reserveHaut;
+// `calerEnHaut` pousse l'etiquette contre le haut au lieu de la centrer : le
+// blanc qu'elle laisse -- une etiquette plus large que haute bute sur la
+// largeur -- passe alors tout entier en bas, la ou va le numero.
+function planPlacement(contentWidth, contentHeight, baseRotation = 0, { reserveBas = 0, calerEnHaut = false } = {}) {
+  const zoneH = LABEL_HEIGHT - reserveBas;
   // Les quatre orientations possibles, par ordre de preference a agrandissement
   // egal : l'orientation d'origine d'abord, puis un quart de tour d'un cote ou
   // de l'autre, et en dernier le demi-tour (une etiquette a l'envers n'est
@@ -158,7 +161,7 @@ function planPlacement(contentWidth, contentHeight, baseRotation = 0, { reserveH
   const { rotation, scale, footprintW, footprintH } = best;
 
   const left = (LABEL_WIDTH - footprintW) / 2;
-  const bottom = (zoneH - footprintH) / 2;
+  const bottom = reserveBas + (calerEnHaut ? zoneH - footprintH : (zoneH - footprintH) / 2);
   const scaledW = contentWidth * scale;
   const scaledH = contentHeight * scale;
 
@@ -177,33 +180,35 @@ function planPlacement(contentWidth, contentHeight, baseRotation = 0, { reserveH
 
 // --- Numero des speciaux -------------------------------------------------
 // Devant le locker, on prend un colis, on lit son numero, le telephone montre
-// le code-barre du meme numero. Le numero est donc imprime en gros, dans une
-// bande au-dessus de l'etiquette : l'etiquette est reduite d'environ 7 % pour
-// lui laisser la place plutot que de recouvrir une adresse ou un code-barre.
-const BANDE_NUMERO = 30;
+// le code-barre du meme numero. Le numero s'imprime en petit, en bas a droite :
+// l'etiquette est calee en haut de la page, si bien que le blanc qu'elle laisse
+// souvent (elle bute sur la largeur) se retrouve en bas. Une marge minimale est
+// gardee pour celles qui remplissent toute la page, qui perdent alors a peine 4 %.
+const MARGE_NUMERO = 16;
+
+function placementSpecial(largeur, hauteur, rotation, numero) {
+  return numero
+    ? planPlacement(largeur, hauteur, rotation, { reserveBas: MARGE_NUMERO, calerEnHaut: true })
+    : planPlacement(largeur, hauteur, rotation);
+}
 
 async function tamponneNumero(out, page, numero) {
   const gras = await out.embedFont(StandardFonts.HelveticaBold);
   const texte = `#${numero}`;
-  const taille = 24;
-  const y = LABEL_HEIGHT - BANDE_NUMERO + (BANDE_NUMERO - taille * 0.72) / 2;
-  page.drawText(texte, { x: 10, y, size: taille, font: gras, color: rgb(0, 0, 0) });
-  const mention = "SPECIAL - code locker";
-  const petite = 9;
-  page.drawText(mention, {
-    x: LABEL_WIDTH - 10 - gras.widthOfTextAtSize(mention, petite),
-    y: y + 2,
-    size: petite,
-    font: gras,
-    color: rgb(0, 0, 0),
+  const taille = 12;
+  const largeur = gras.widthOfTextAtSize(texte, taille);
+  const x = LABEL_WIDTH - 6 - largeur;
+  const y = 4;
+  // un cadre fin le detache de ce qui l'entoure : on le trouve du premier coup
+  page.drawRectangle({
+    x: x - 3,
+    y: y - 2,
+    width: largeur + 6,
+    height: taille + 1,
+    borderColor: rgb(0, 0, 0),
+    borderWidth: 0.8,
   });
-  // un filet separe la bande de l'etiquette : on coupe au bon endroit
-  page.drawLine({
-    start: { x: 6, y: LABEL_HEIGHT - BANDE_NUMERO },
-    end: { x: LABEL_WIDTH - 6, y: LABEL_HEIGHT - BANDE_NUMERO },
-    thickness: 0.8,
-    color: rgb(0, 0, 0),
-  });
+  page.drawText(texte, { x, y: y + 0.5, size: taille, font: gras, color: rgb(0, 0, 0) });
 }
 
 async function addPdfPages(out, bytes, numero = null) {
@@ -213,9 +218,7 @@ async function addPdfPages(out, bytes, numero = null) {
   for (let i = 0; i < pageCount; i += 1) {
     const srcPage = src.getPage(i);
     const box = usableBox(srcPage);
-    const plan = planPlacement(box.width, box.height, pageRotation(srcPage), {
-      reserveHaut: numero ? BANDE_NUMERO : 0,
-    });
+    const plan = placementSpecial(box.width, box.height, pageRotation(srcPage), numero);
 
     const embedded = await out.embedPage(srcPage, {
       left: box.left,
@@ -242,7 +245,7 @@ async function addImagePage(out, bytes, numero = null) {
   const isPng = header[0] === 0x89 && header[1] === 0x50;
   const image = isPng ? await out.embedPng(bytes) : await out.embedJpg(bytes);
 
-  const plan = planPlacement(image.width, image.height, 0, { reserveHaut: numero ? BANDE_NUMERO : 0 });
+  const plan = placementSpecial(image.width, image.height, 0, numero);
   const page = out.addPage([LABEL_WIDTH, LABEL_HEIGHT]);
   page.drawImage(image, {
     x: plan.x,
@@ -257,7 +260,7 @@ async function addImagePage(out, bytes, numero = null) {
 
 // Assemble les etiquettes bout a bout, une par page au format de l'imprimante.
 // `labels` : [{ bytes, kind: "pdf" | "image", label, numero? }]. `numero` est
-// celui d'un special : il s'imprime dans une bande en haut. Renvoie le PDF final et
+// celui d'un special : il s'imprime en petit en bas a droite. Renvoie le PDF final et
 // la liste des etiquettes qui n'ont pas pu etre lues.
 async function mergeLabels(labels) {
   const out = await PDFDocument.create();
