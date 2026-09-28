@@ -150,6 +150,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_paires_colis ON paires_special(colis_id);
 `);
+{
+  const colonnes = db.prepare("PRAGMA table_info(paires_special)").all().map((c) => c.name);
+  // le code qui ouvre le locker n'est pas toujours une image : parfois un PDF
+  if (!colonnes.includes("code_file_kind")) db.exec("ALTER TABLE paires_special ADD COLUMN code_file_kind TEXT");
+}
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
@@ -198,18 +203,13 @@ function setSetting(key, value) {
 function priceForType(sender, type) {
   if (type === "lit") return sender.lit_price;
   if (type === "bj") return sender.bj_price;
-  return sender.price; // "special" suit le tarif normal : seules ses images sont gratuites
+  return sender.price; // "special" suit le tarif normal
 }
 
-// Une image postee dans "special" n'est pas une etiquette : c'est une photo de
-// contexte. Elle ne vaut rien, ne se drope pas et ne s'imprime pas. Un PDF
-// dans "special" reste un colis ordinaire.
-function isFreeSpecial(type, fileKind) {
-  return type === "special" && fileKind === "image";
-}
-
-// Les colis "offerts" sortent de tous les comptes : le statut suffit, puisque
-// tout ce qui compte filtre deja sur status = 'pending'.
+// Statut des anciennes images de "special", qui valaient 0 EUR. Depuis que le
+// code-barre d'un locker n'est plus un colis du tout (voir specials.js), plus
+// rien n'est cree avec ce statut ; il reste pour les lignes d'avant, qui
+// sortent de tous les comptes puisque tout filtre sur status = 'pending'.
 const FREE_STATUS = "free";
 
 // Jour comptable : rien ne se poste le dimanche, donc l'argent fait ce jour-la
@@ -327,8 +327,7 @@ function addColis(
   } = {}
 ) {
   const sender = getOrCreateSender(senderName);
-  const gratuit = isFreeSpecial(type, fileKind);
-  const price = gratuit ? 0 : priceForType(sender, type);
+  const price = priceForType(sender, type);
   const info = db
     .prepare(
       `INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier,
@@ -339,7 +338,7 @@ function addColis(
       sender.name,
       type,
       price,
-      gratuit ? FREE_STATUS : "pending",
+      "pending",
       chatId || null,
       messageId || null,
       batchId || null,
@@ -357,7 +356,7 @@ function addColis(
     price,
     type,
     carrier,
-    status: gratuit ? FREE_STATUS : "pending",
+    status: "pending",
   };
 }
 
@@ -703,11 +702,8 @@ function setColisType(id, type) {
   const colis = db.prepare(`SELECT * FROM colis WHERE id = ? AND ${VIVANT_SQL}`).get(id);
   if (!colis) return null;
 
-  // Une image qui entre dans "special" devient gratuite et sort des comptes ;
-  // la meme image qui en ressort redevient un colis ordinaire.
-  const gratuit = isFreeSpecial(type, colis.file_kind);
-  const price = gratuit ? 0 : priceForType(getOrCreateSender(colis.sender_name), type);
-  const status = gratuit ? FREE_STATUS : "pending";
+  const price = priceForType(getOrCreateSender(colis.sender_name), type);
+  const status = "pending";
 
   // changer de type reapplique le tarif de l'expediteur, meme si un prix avait
   // ete fixe manuellement
@@ -1136,7 +1132,6 @@ module.exports = {
   dropByCarrier,
   dropAll,
   dropAllExceptLit,
-  isFreeSpecial,
   dropBySender,
   dropColis,
   getTourStart,

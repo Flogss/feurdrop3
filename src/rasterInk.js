@@ -190,7 +190,43 @@ async function rasterInkBox(bytes, pageIndex, { rotation = 0 } = {}) {
     // l'image a son origine en haut, le PDF en bas
     bottom: pageHeight - Math.min(height, maxY + STEP + 1) * toPt,
     top: pageHeight - Math.max(0, minY - STEP) * toPt,
+    // la page telle qu'elle a ete rendue, pour ceux qui recadrent un rendu
+    pageWidth: width * toPt,
+    pageHeight,
   };
 }
 
-module.exports = { rasterInkBox, isAvailable };
+// Premiere page d'un PDF en PNG, recadree sur ce qu'elle porte. Sert au mode
+// locker : un code d'ouverture envoye en PDF tient souvent dans un coin d'une
+// page A4, et affiche tel quel sur un telephone il serait minuscule. La marge
+// garde une zone blanche autour du code -- un lecteur en a besoin pour le lire.
+async function renduPng(bytes, { dpi = 200, margePt = 14 } = {}) {
+  if (!isAvailable()) return null;
+  const boite = await rasterInkBox(bytes, 0).catch(() => null);
+
+  const args = ["-png", "-r", String(dpi), "-f", "1", "-l", "1"];
+  if (boite) {
+    const px = (pt) => Math.max(0, Math.round((pt * dpi) / 72));
+    const gauche = Math.max(0, boite.left - margePt);
+    const haut = Math.max(0, boite.pageHeight - boite.top - margePt);
+    const droite = Math.min(boite.pageWidth, boite.right + margePt);
+    const bas = Math.min(boite.pageHeight, boite.pageHeight - boite.bottom + margePt);
+    args.push("-x", String(px(gauche)), "-y", String(px(haut)));
+    args.push("-W", String(px(droite - gauche)), "-H", String(px(bas - haut)));
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn("pdftoppm", args, { timeout: TIMEOUT_MS });
+    const morceaux = [];
+    child.stdout.on("data", (c) => morceaux.push(c));
+    child.on("error", () => resolve(null));
+    child.on("close", () => {
+      const png = Buffer.concat(morceaux);
+      resolve(png.length > 8 ? png : null);
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(Buffer.from(bytes));
+  });
+}
+
+module.exports = { rasterInkBox, renduPng, isAvailable };

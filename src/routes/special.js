@@ -1,6 +1,7 @@
 const express = require("express");
 const { listePaires, getPaire } = require("../specials");
 const { getBot } = require("../bot");
+const { renduPng } = require("../rasterInk");
 
 // Mode locker : les codes-barres du topic special, dans l'ordre des numeros
 // imprimes sur les etiquettes. Devant le locker, on lit "#3" sur le colis et
@@ -47,8 +48,17 @@ router.get("/code/:id", async (req, res) => {
     const lien = await bot.getFileLink(paire.code_file_id);
     const reponse = await fetch(lien);
     if (!reponse.ok) throw new Error(`Telegram HTTP ${reponse.status}`);
-    const bytes = Buffer.from(await reponse.arrayBuffer());
-    const type = reponse.headers.get("content-type") || "image/jpeg";
+    let bytes = Buffer.from(await reponse.arrayBuffer());
+    let type = reponse.headers.get("content-type") || "image/jpeg";
+
+    // un code arrive parfois en PDF : un navigateur ne l'affiche pas dans une
+    // balise image, on le rend donc en PNG, recadre sur le code
+    if (paire.code_file_kind === "pdf" || bytes.subarray(0, 5).toString() === "%PDF-") {
+      const png = await renduPng(bytes);
+      if (!png) throw new Error("rendu du PDF impossible (poppler absent ?)");
+      bytes = png;
+      type = "image/png";
+    }
 
     cache.set(id, { bytes, type });
     if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);

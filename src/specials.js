@@ -16,7 +16,29 @@
 // libere ensuite pour la fournee suivante.
 
 // la table paires_special est creee avec le reste du schema, dans db.js
-const { db } = require("./db");
+const { db, addColis, deleteColis, getColisById } = require("./db");
+
+// --- Code ou colis ? -------------------------------------------------------------
+// Le code qui ouvre le locker est le plus souvent une image, mais pas toujours :
+// il arrive en PDF. Et le colis peut arriver en image. La legende tranche quand
+// elle parle : "t'ouvres le locker avec ca" d'un cote, "et tu mets lui dedans"
+// de l'autre. Sinon, a defaut d'indice, image = code et PDF = colis ; les
+// commandes /special image N et /special pdf N corrigent a la main.
+const OUVRE = /ouvr|ouverture|d[ée]verrouill/i;
+// "fragile, ne pas ouvrir" parle d'un colis, pas d'un code
+const OUVRE_NIE = /\bn['’]\s*ouvr|\bpas\s+(l['’]\s*)?ouvr/i;
+const DEDANS = /dedans|[àa]\s*l['’]?\s*int[ée]rieur|\bmets?\b|\bmettre\b|d[ée]pos/i;
+
+function roleSpecial(fileKind, legende) {
+  const texte = legende || "";
+  const ouvre = OUVRE.test(texte) && !OUVRE_NIE.test(texte);
+  const dedans = DEDANS.test(texte);
+  // une legende qui dit les deux ("ouvre avec ca et mets-le dedans") ne
+  // tranche pas : on retombe sur la nature du fichier
+  if (ouvre && !dedans) return "code";
+  if (dedans && !ouvre) return "colis";
+  return fileKind === "image" ? "code" : "colis";
+}
 
 // Une paire est en cours tant que son colis attend d'etre drope dans special.
 // Un code encore seul attend son PDF une semaine : au-dela, c'est un code
@@ -82,7 +104,7 @@ function apparieColis(colisId, senderName) {
  * sans code du meme expediteur, ou ouvre une paire en attendant le sien.
  * @returns {{ paire, completee: boolean }}
  */
-function apparieCode(fileId, senderName) {
+function apparieCode(fileId, senderName, fileKind = "image") {
   const attente = db
     .prepare(
       `SELECT * FROM paires_special p
@@ -92,13 +114,17 @@ function apparieCode(fileId, senderName) {
     .get(senderName || null);
 
   if (attente) {
-    db.prepare("UPDATE paires_special SET code_file_id = ? WHERE id = ?").run(fileId, attente.id);
+    db.prepare("UPDATE paires_special SET code_file_id = ?, code_file_kind = ? WHERE id = ?").run(
+      fileId,
+      fileKind,
+      attente.id
+    );
     return { paire: getPaire(attente.id), completee: true };
   }
 
   const info = db
-    .prepare("INSERT INTO paires_special (numero, sender_name, code_file_id) VALUES (?, ?, ?)")
-    .run(numeroLibre(), senderName || null, fileId);
+    .prepare("INSERT INTO paires_special (numero, sender_name, code_file_id, code_file_kind) VALUES (?, ?, ?, ?)")
+    .run(numeroLibre(), senderName || null, fileId, fileKind);
   return { paire: getPaire(info.lastInsertRowid), completee: false };
 }
 
@@ -137,13 +163,176 @@ function numerosDesColis(ids) {
   return new Map(lignes.map((l) => [l.colis_id, { numero: l.numero, code: Boolean(l.code) }]));
 }
 
+// --- Retrouver, relier, retirer -------------------------------------------------
+
+function paireParNumero(numero) {
+  return (
+    db
+      .prepare(`SELECT * FROM paires_special p WHERE p.numero = ? AND ${EN_COURS_SQL} ORDER BY id DESC`)
+      .get(numero) || null
+  );
+}
+
+// La paire dont ce message est le code (le code republie par le bot, ou
+// l'original quand le bot n'a pas pu l'effacer).
+function paireDuCode(chatId, messageId) {
+  return (
+    db
+      .prepare(
+        `SELECT * FROM paires_special p
+         WHERE p.code_chat_id = ? AND p.code_message_id = ? AND ${EN_COURS_SQL} ORDER BY id DESC`
+      )
+      .get(chatId, messageId) || null
+  );
+}
+
+const PLACE_CODE = ["code_file_id", "code_file_kind", "code_chat_id", "code_message_id"];
+
+function codeDe(paire) {
+  if (!paire.code_file_id) return null;
+  return {
+    role: "code",
+    paireId: paire.id,
+    fileId: paire.code_file_id,
+    fileKind: paire.code_file_kind || "image",
+    chatId: paire.code_chat_id,
+    messageId: paire.code_message_id,
+    sender: paire.sender_name,
+  };
+}
+
+function colisDe(paire) {
+  const colis = paire.colis_id ? getColisById(paire.colis_id) : null;
+  if (!colis) return null;
+  return {
+    role: "colis",
+    paireId: paire.id,
+    colisId: colis.id,
+    fileId: colis.file_id,
+    fileKind: colis.file_kind,
+    fileName: colis.file_name,
+    caption: colis.caption,
+    chatId: colis.chat_id,
+    messageId: colis.message_id,
+    sender: colis.sender_name,
+  };
+}
+
+function videPlace(paireId, role) {
+  if (role === "code") {
+    db.prepare(`UPDATE paires_special SET ${PLACE_CODE.map((c) => `${c} = NULL`).join(", ")} WHERE id = ?`).run(
+      paireId
+    );
+  } else {
+    db.prepare("UPDATE paires_special SET colis_id = NULL WHERE id = ?").run(paireId);
+  }
+}
+
+// Un element qui change de role change de nature : un code devenu colis entre
+// dans les comptes (prix, drop, impression), un colis devenu code en sort --
+// le fichier, lui, reste ou il est.
+function enRole(element, role) {
+  if (role === "code") {
+    if (element.role === "colis") deleteColis(element.colisId);
+    return {
+      code_file_id: element.fileId,
+      code_file_kind: element.fileKind || "image",
+      code_chat_id: element.chatId,
+      code_message_id: element.messageId,
+    };
+  }
+  if (element.role === "colis") return { colis_id: element.colisId };
+  const colis = addColis(element.sender || "Inconnu", {
+    chatId: element.chatId,
+    messageId: element.messageId,
+    type: "special",
+    fileName: element.fileName || null,
+    caption: element.caption || null,
+    fileId: element.fileId,
+    fileKind: element.fileKind,
+  });
+  return { colis_id: colis.id };
+}
+
+function remplitPlace(paireId, valeurs) {
+  const cles = Object.keys(valeurs);
+  db.prepare(`UPDATE paires_special SET ${cles.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`).run(
+    ...cles.map((c) => valeurs[c]),
+    paireId
+  );
+}
+
+function supprimeSiVide(paireId) {
+  db.prepare("DELETE FROM paires_special WHERE id = ? AND colis_id IS NULL AND code_file_id IS NULL").run(paireId);
+}
+
+/**
+ * /special image N (role "code") ou /special pdf N (role "colis") : place un
+ * fichier dans la paire N, quel qu'il soit -- code, colis, ou fichier que le
+ * bot ne suivait pas.
+ *
+ * Ce qui occupait deja cette place n'est pas perdu :
+ *   - meme paire, roles inverses (le code etait en fait le colis) : les deux
+ *     echangent leurs roles ;
+ *   - le fichier venait d'une autre paire, a la meme place : les deux
+ *     echangent leurs paires -- c'est la correction de deux codes croises ;
+ *   - sinon l'occupant garde une paire a lui, avec son propre numero, pour
+ *     etre relie plus tard.
+ *
+ * @param {object} element { role: "code"|"colis"|null, paireId, colisId,
+ *   fileId, fileKind, fileName, caption, chatId, messageId, sender }
+ * @returns {{ cible, deja?, deloge?: { numero, role } }}
+ */
+function relie(numero, role, element) {
+  const cible = paireParNumero(numero);
+  if (!cible) throw new Error(`Aucune paire #${numero} en cours.`);
+
+  const source = element.paireId ? getPaire(element.paireId) : null;
+  if (source && source.id === cible.id && element.role === role) return { cible, deja: true };
+
+  const occupant = role === "code" ? codeDe(cible) : colisDe(cible);
+  if (source && element.role) videPlace(source.id, element.role);
+  if (occupant) videPlace(cible.id, role);
+
+  remplitPlace(cible.id, enRole(element, role));
+
+  let deloge = null;
+  if (occupant) {
+    if (source && source.id === cible.id) {
+      // les roles etaient inverses : l'occupant prend celui que l'element quitte
+      remplitPlace(cible.id, enRole(occupant, element.role));
+      deloge = { numero: cible.numero, role: element.role };
+    } else if (source && element.role === role) {
+      remplitPlace(source.id, enRole(occupant, role));
+      deloge = { numero: source.numero, role };
+    } else {
+      const info = db
+        .prepare("INSERT INTO paires_special (numero, sender_name) VALUES (?, ?)")
+        .run(numeroLibre(), occupant.sender || cible.sender_name);
+      remplitPlace(info.lastInsertRowid, enRole(occupant, role));
+      deloge = { numero: getPaire(info.lastInsertRowid).numero, role };
+    }
+  }
+
+  if (source && source.id !== cible.id) supprimeSiVide(source.id);
+  return { cible: getPaire(cible.id), deloge };
+}
+
+// /del ou /clear sur un code : il sort de sa paire. Le colis, s'il y en a un,
+// repasse "code en attente".
+function retireCode(paireId) {
+  videPlace(paireId, "code");
+  supprimeSiVide(paireId);
+  return getPaire(paireId);
+}
+
 // Toutes les paires en cours, dans l'ordre des numeros : c'est la liste du
 // mode locker. Une paire peut etre incomplete -- un PDF dont le code n'est pas
 // arrive, un code dont le PDF manque -- et doit se voir comme telle.
 function listePaires() {
   return db
     .prepare(
-      `SELECT p.id, p.numero, p.sender_name, p.code_file_id IS NOT NULL AS code,
+      `SELECT p.id, p.numero, p.sender_name, p.code_file_id IS NOT NULL AS code, p.code_file_kind,
               c.id AS colis_id, c.file_name, c.note, c.printed_at, c.price
        FROM paires_special p
        LEFT JOIN colis c ON c.id = p.colis_id
@@ -155,6 +344,11 @@ function listePaires() {
 }
 
 module.exports = {
+  roleSpecial,
+  paireParNumero,
+  paireDuCode,
+  relie,
+  retireCode,
   listePaires,
   apparieColis,
   apparieCode,

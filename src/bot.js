@@ -47,7 +47,19 @@ const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = req
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
 const { createWriteQueue } = require("./throttle");
-const { apparieColis, apparieCode, paireDuColis, getPaire, setCodeMessage, oublieCode } = require("./specials");
+const {
+  apparieColis,
+  apparieCode,
+  paireDuColis,
+  getPaire,
+  setCodeMessage,
+  oublieCode,
+  roleSpecial,
+  paireDuCode,
+  paireParNumero,
+  relie,
+  retireCode,
+} = require("./specials");
 const { notifyNewColis } = require("./push");
 const { classifyFile } = require("./classify");
 
@@ -307,7 +319,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, une image est le code-barre du locker : hors suivi comme apres /clear, mais numerotee avec son PDF (meme numero sous les deux, dans l'ordre d'envoi, par client).\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un colis : dans special, une image vaut 0 EUR\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -350,6 +362,20 @@ function startBot() {
     command((msg, match) => handlePrintCommand(bot, msg, match[2]))
   );
   bot.onText(/^\/special(@\w+)?$/i, command((msg) => handleMoveType(bot, msg, "special")));
+  // /special image 3 : ce fichier est le code qui ouvre le locker du #3
+  // /special pdf 3   : ce fichier est le colis a mettre dans le locker du #3
+  // "image" et "pdf" disent le role, pas la nature : un code peut etre un PDF
+  bot.onText(
+    /^\/special(@\w+)?\s+(image|img|code|pdf|colis)\s*#?\s*(\d+)\s*$/i,
+    command((msg, m) => handleLienSpecial(bot, msg, /^(image|img|code)$/i.test(m[2]) ? "code" : "colis", Number(m[3])))
+  );
+  bot.onText(
+    /^\/special(@\w+)?\s+(image|img|code|pdf|colis)\s*$/i,
+    command((msg) =>
+      replyEphemeral(bot, msg, "Il manque le numero : /special image 3 (ce fichier ouvre le locker du #3) " +
+        "ou /special pdf 3 (ce fichier est le colis du #3).", {}, 12000)
+    )
+  );
   // /normal ramene un colis dans normaux, d'ou qu'il vienne : special, LIT ou
   // boite jaune. /normalall fait de meme pour tout le dernier lot.
   bot.onText(/^\/normal(@\w+)?$/i, command((msg) => handleMoveType(bot, msg, "normal")));
@@ -404,7 +430,7 @@ async function registerCommands(bot) {
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
-    { command: "special", description: "Deplacer le colis dans Special (en reponse)" },
+    { command: "special", description: "Dans Special (en reponse). /special image 3 ou /special pdf 3 : relier au #3" },
     { command: "normal", description: "Remettre le colis dans Normaux (en reponse)" },
     { command: "normalall", description: "Remettre tout le dernier lot dans Normaux" },
     { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
@@ -621,16 +647,21 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
 
   const colis = findColisByMessage(msg.chat.id, reply.message_id);
   if (!colis) {
-    return replyEphemeral(bot, msg, "Ce message n'est pas un colis en attente.", {}, 8000);
+    // le code qui ouvre un locker n'est pas un colis, mais il se retire pareil
+    const paire = paireDuCode(msg.chat.id, reply.message_id);
+    if (paire) return retireCodeSpecial(bot, msg, paire, alsoDeleteFile);
+    return replyEphemeral(bot, msg, "Ce message n'est ni un colis en attente ni un code de locker.", {}, 8000);
   }
 
   const removed = deleteColis(colis.id);
   if (!removed) return replyEphemeral(bot, msg, "Colis introuvable.", {}, 8000);
 
-  if (alsoDeleteFile) {
-    bot
-      .deleteMessage(msg.chat.id, reply.message_id)
-      .catch((err) => console.error("[bot] suppression du fichier impossible :", err.message));
+  if (alsoDeleteFile && removed.chat_id && removed.message_id) {
+    // le fichier du topic, meme quand on repond a l'original dans le prive :
+    // c'est lui qu'on veut voir disparaitre
+    ecritureGroupe(() => bot.deleteMessage(removed.chat_id, removed.message_id)).catch((err) =>
+      console.error("[bot] suppression du fichier impossible :", err.message)
+    );
   }
 
   refreshGroupStats();
@@ -639,6 +670,32 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
     msg,
     `Colis #${removed.id} (${removed.sender_name}, ${removed.price.toFixed(2)} EUR) retire du suivi` +
       `${alsoDeleteFile ? " et efface du fil." : ". Le fichier reste dans la conversation."}`
+  );
+}
+
+// /del sur un code : il sort de sa paire et le fichier est efface. /clear : il
+// sort de sa paire, le fichier reste. Dans les deux cas son colis, s'il en a
+// un, repasse "code en attente" -- et garde son numero.
+function retireCodeSpecial(bot, msg, paire, alsoDeleteFile) {
+  const numero = paire.numero;
+  const { code_chat_id: chatId, code_message_id: messageId } = paire;
+  const reste = retireCode(paire.id);
+
+  if (alsoDeleteFile) {
+    ecritureGroupe(() => bot.deleteMessage(chatId, messageId)).catch((err) =>
+      console.error("[bot] suppression du code impossible :", err.message)
+    );
+  } else {
+    ecritureGroupe(() => bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }))
+      .catch(() => {});
+  }
+  if (reste?.colis_id) refreshFileButtons(bot, getColisById(reste.colis_id));
+
+  replyEphemeral(
+    bot,
+    msg,
+    `Code #${numero} retire${alsoDeleteFile ? " et efface du fil" : ""}.` +
+      (reste?.colis_id ? ` Le colis #${numero} attend un autre code.` : "")
   );
 }
 
@@ -856,8 +913,11 @@ async function routeToTopic(bot, msg, attachment, batches) {
     ? resolveForcedType(msg)
     : classifyFile({ fileName: attachment.fileName, caption: msg.caption });
 
-  // un code-barre de locker, pas un colis : voir republieCode
-  if (direct && type === "special" && attachment.kind === "image") return republieCode(bot, msg, attachment);
+  // le code qui ouvre le locker, pas un colis : voir republieCode. La legende
+  // dit lequel des deux c'est ; sans indice, image = code, PDF = colis.
+  if (direct && type === "special" && roleSpecial(attachment.kind, msg.caption) === "code") {
+    return republieCode(bot, msg, attachment);
+  }
 
   const topic = TOPIC_BY_TYPE[type];
   const senderName = extractSenderName(msg);
@@ -974,7 +1034,7 @@ async function effaceOriginal(bot, msg, copieId) {
 // drop, pas d'impression -- mais elle est numerotee avec son PDF (voir
 // specials.js), et le numero s'affiche sous les deux.
 async function republieCode(bot, msg, attachment) {
-  const { paire, completee } = apparieCode(attachment.fileId, extractSenderName(msg));
+  const { paire, completee } = apparieCode(attachment.fileId, extractSenderName(msg), attachment.kind);
 
   let copie;
   try {
@@ -1176,33 +1236,33 @@ function markButtonsPrinted(bot, ids) {
 
 // Deplace un seul colis. Renvoie vrai si le FICHIER a bouge ; le type, lui,
 // est toujours applique, meme quand le deplacement echoue.
-async function moveColis(bot, colis, type) {
-  const deplace = await deplaceFichier(bot, colis, type);
-  // Une image qui arrive dans "special" sort du suivi, comme apres un /clear :
-  // le fichier est bien deplace, le colis disparait des comptes. Que la copie
-  // ait reussi ou non -- une image dans special n'est jamais un colis.
-  const apres = getColisById(colis.id);
-  if (apres && apres.status === FREE_STATUS) deleteColis(colis.id);
+async function moveColis(bot, colis, type, { apparier = true } = {}) {
+  // Dans special, un fichier est soit un colis, soit le code qui ouvre le
+  // locker (voir specials.js). Un code n'est pas un colis : une fois deplace,
+  // il sort des comptes, comme apres un /clear -- que la copie ait reussi ou non.
+  const code = type === "special" && apparier && roleSpecial(colis.file_kind, colis.caption) === "code";
+  const deplace = await deplaceFichier(bot, colis, type, { code, apparier });
+  if (code) deleteColis(colis.id);
   return deplace;
 }
 
-async function deplaceFichier(bot, colis, type) {
+async function deplaceFichier(bot, colis, type, { code = false, apparier = true } = {}) {
   const maj = setColisType(colis.id, type);
   const topic = TOPIC_BY_TYPE[type];
   if (!topic || !colis.chat_id || !colis.message_id) return false;
   // deja au bon endroit : rien a faire
   if (colis.chat_id === AUTO_GROUP_CHAT_ID && colis.type === type) return false;
 
-  // L'etat APRES le changement de type decide des boutons : une image qui
-  // entre dans "special" devient un code-barre numerote, un PDF qui y entre
-  // rejoint (ou attend) son code.
+  // L'etat APRES le changement de type decide des boutons : un code qui entre
+  // dans "special" y devient un code numerote, un colis y rejoint (ou attend)
+  // son code.
   const apres = getColisById(colis.id) || colis;
   let appairage = null;
   let boutons = aDesBoutons(apres) ? boutonsDe(apres) : null;
-  if (type === "special" && apres.status === FREE_STATUS) {
-    appairage = apparieCode(colis.file_id, colis.sender_name);
+  if (code) {
+    appairage = apparieCode(colis.file_id, colis.sender_name, colis.file_kind);
     boutons = boutonsCode(appairage.paire);
-  } else if (type === "special") {
+  } else if (type === "special" && apparier) {
     appairage = apparieColis(colis.id, colis.sender_name);
     boutons = boutonsDe(getColisById(colis.id));
   }
@@ -1220,12 +1280,12 @@ async function deplaceFichier(bot, colis, type) {
     );
   } catch (err) {
     console.error("[bot] deplacement impossible :", err.message);
-    if (appairage && apres.status === FREE_STATUS) oublieCode(appairage.paire.id);
+    if (code && appairage) oublieCode(appairage.paire.id);
     return false;
   }
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
-  if (appairage && apres.status === FREE_STATUS) {
+  if (code) {
     setCodeMessage(appairage.paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
     if (appairage.completee) refreshFileButtons(bot, getColisById(appairage.paire.colis_id));
   } else if (appairage?.completee) {
@@ -1266,8 +1326,8 @@ async function handleMoveType(bot, msg, type) {
     return replyEphemeral(
       bot,
       msg,
-      `Image passee en ${TYPE_LABELS[type]}${deplace ? ", fichier deplace" : ""} : code-barre numerote, ` +
-        `hors suivi comme apres un /clear.`
+      `Passe en ${TYPE_LABELS[type]} comme code du locker${deplace ? ", fichier deplace" : ""} : ` +
+        `numerote avec son colis, hors suivi comme apres un /clear.`
     );
   }
   replyEphemeral(
@@ -1276,6 +1336,102 @@ async function handleMoveType(bot, msg, type) {
     `Colis #${colis.id} passe en ${TYPE_LABELS[type]} — ${apres.price.toFixed(2)} EUR` +
       (deplace ? ", fichier deplace." : ".")
   );
+}
+
+// --- Relier a la main dans special ------------------------------------------------
+// L'appairage automatique suit l'ordre d'arrivee et la legende ; quand il se
+// trompe -- un client qui envoie deux codes pour un colis, une legende muette --
+// on dit soi-meme ou va un fichier. Le fichier peut etre un colis, un code, ou
+// un fichier que le bot ne suivait pas.
+async function handleLienSpecial(bot, msg, role, numero) {
+  const reply = msg.reply_to_message;
+  const commande = `/special ${role === "code" ? "image" : "pdf"} ${numero}`;
+  if (!reply) return replyEphemeral(bot, msg, `Reponds au fichier avec ${commande}.`, {}, 8000);
+
+  let element;
+  const colis = findColisByMessage(msg.chat.id, reply.message_id);
+  const paireCode = colis ? null : paireDuCode(msg.chat.id, reply.message_id);
+
+  if (colis) {
+    // un colis d'un autre topic rejoint special d'abord -- sans appairage
+    // automatique : c'est la commande qui dit ou il va
+    if (colis.type !== "special") await moveColis(bot, colis, "special", { apparier: false });
+    const frais = getColisById(colis.id);
+    element = {
+      role: "colis",
+      paireId: paireDuColis(colis.id)?.id || null,
+      colisId: frais.id,
+      fileId: frais.file_id,
+      fileKind: frais.file_kind,
+      fileName: frais.file_name,
+      caption: frais.caption,
+      chatId: frais.chat_id,
+      messageId: frais.message_id,
+      sender: frais.sender_name,
+    };
+  } else if (paireCode) {
+    element = {
+      role: "code",
+      paireId: paireCode.id,
+      fileId: paireCode.code_file_id,
+      fileKind: paireCode.code_file_kind || "image",
+      fileName: reply.document?.file_name || null,
+      caption: reply.caption || null,
+      chatId: paireCode.code_chat_id,
+      messageId: paireCode.code_message_id,
+      sender: paireCode.sender_name,
+    };
+  } else {
+    // un fichier que le bot ne suivait pas (poste avant, retire par /clear...)
+    const piece = colisAttachment(reply);
+    if (!piece) return replyEphemeral(bot, msg, "Reponds a un fichier : une image ou un PDF.", {}, 8000);
+    element = {
+      role: null,
+      fileId: piece.fileId,
+      fileKind: piece.kind,
+      fileName: piece.fileName,
+      caption: reply.caption || null,
+      chatId: reply.chat?.id || msg.chat.id,
+      messageId: reply.message_id,
+      sender: extractSenderName(reply),
+    };
+  }
+
+  let resultat;
+  try {
+    resultat = relie(numero, role, element);
+  } catch (err) {
+    return replyEphemeral(bot, msg, err.message, {}, 10000);
+  }
+  const nom = (r) => (r === "code" ? "code" : "colis");
+  if (resultat.deja) return replyEphemeral(bot, msg, `C'est deja le ${nom(role)} du #${numero}.`, {}, 8000);
+
+  // tout ce qui a bouge reprend ses boutons : les deux elements de la paire
+  // visee, l'ancienne paire du fichier, et celle de l'element deloge
+  const touchees = new Set([resultat.cible.id]);
+  if (element.paireId) touchees.add(element.paireId);
+  if (resultat.deloge) {
+    const p = paireParNumero(resultat.deloge.numero);
+    if (p) touchees.add(p.id);
+  }
+  for (const id of touchees) {
+    const p = getPaire(id);
+    if (!p) continue; // paire videe, supprimee
+    if (p.code_message_id) majBoutonsCode(bot, p);
+    if (p.colis_id) refreshFileButtons(bot, getColisById(p.colis_id));
+  }
+  refreshGroupStats();
+
+  let texte = `${role === "code" ? "Code" : "Colis"} relie au #${numero}.`;
+  if (resultat.deloge) {
+    texte +=
+      resultat.deloge.numero === numero
+        ? ` L'autre fichier du #${numero} devient son ${nom(resultat.deloge.role)}.`
+        : ` L'ancien ${nom(resultat.deloge.role)} du #${numero} passe au #${resultat.deloge.numero}.`;
+  }
+  if (!resultat.cible.code_file_id) texte += " Code encore en attente.";
+  if (!resultat.cible.colis_id) texte += " Colis encore en attente.";
+  replyEphemeral(bot, msg, texte, {}, 12000);
 }
 
 // --- Impression ------------------------------------------------------------
