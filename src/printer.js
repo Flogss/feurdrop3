@@ -1,4 +1,4 @@
-const { PDFDocument, degrees } = require("pdf-lib");
+const { PDFDocument, StandardFonts, degrees, rgb } = require("pdf-lib");
 const { contentBoxes } = require("./pdfContent");
 
 // Imprimante MUNBYN thermique 4x6 pouces = 101,6 x 152,4 mm.
@@ -115,11 +115,11 @@ function pageRotation(page) {
 // Choisit entre "tel quel" et "pivote d'un quart de tour" celui qui remplit le
 // mieux l'etiquette, puis centre le resultat. C'est ce qui evite a la fois le
 // trop-zoome et le timbre-poste au milieu de la page.
-function fitScale(contentWidth, contentHeight, rotation) {
+function fitScale(contentWidth, contentHeight, rotation, zoneH = LABEL_HEIGHT) {
   const rotated = rotation % 180 !== 0;
   const visibleW = rotated ? contentHeight : contentWidth;
   const visibleH = rotated ? contentWidth : contentHeight;
-  const scale = Math.min(LABEL_WIDTH / visibleW, LABEL_HEIGHT / visibleH);
+  const scale = Math.min(LABEL_WIDTH / visibleW, zoneH / visibleH);
   return { scale, footprintW: visibleW * scale, footprintH: visibleH * scale };
 }
 
@@ -141,21 +141,24 @@ function anchorFor(rotation, left, bottom, scaledW, scaledH) {
 // Tout le calcul geometrique en un seul endroit, sans dependre de pdf-lib :
 // quelle rotation, quel agrandissement, et ou poser le contenu sur la page
 // 4x6. `baseRotation` est la rotation propre de la page source (/Rotate).
-function planPlacement(contentWidth, contentHeight, baseRotation = 0) {
+// `reserveHaut` garde une bande libre en haut de la page (le numero d'un
+// special) : l'etiquette est posee dans ce qui reste, sans rien recouvrir.
+function planPlacement(contentWidth, contentHeight, baseRotation = 0, { reserveHaut = 0 } = {}) {
+  const zoneH = LABEL_HEIGHT - reserveHaut;
   // Les quatre orientations possibles, par ordre de preference a agrandissement
   // egal : l'orientation d'origine d'abord, puis un quart de tour d'un cote ou
   // de l'autre, et en dernier le demi-tour (une etiquette a l'envers n'est
   // jamais preferable a une etiquette de cote).
   const candidates = [0, 90, 270, 180].map((delta) => {
     const rotation = ((baseRotation + delta) % 360 + 360) % 360;
-    return { rotation, ...fitScale(contentWidth, contentHeight, rotation) };
+    return { rotation, ...fitScale(contentWidth, contentHeight, rotation, zoneH) };
   });
   const best = candidates.reduce((a, b) => (b.scale > a.scale + 1e-9 ? b : a));
 
   const { rotation, scale, footprintW, footprintH } = best;
 
   const left = (LABEL_WIDTH - footprintW) / 2;
-  const bottom = (LABEL_HEIGHT - footprintH) / 2;
+  const bottom = (zoneH - footprintH) / 2;
   const scaledW = contentWidth * scale;
   const scaledH = contentHeight * scale;
 
@@ -167,19 +170,52 @@ function planPlacement(contentWidth, contentHeight, baseRotation = 0) {
     scaledW,
     scaledH,
     // taux de remplissage de l'etiquette, pour signaler les sources mal cadrees
-    coverage: (footprintW * footprintH) / (LABEL_WIDTH * LABEL_HEIGHT),
+    coverage: (footprintW * footprintH) / (LABEL_WIDTH * zoneH),
     ...anchorFor(rotation, left, bottom, scaledW, scaledH),
   };
 }
 
-async function addPdfPages(out, bytes) {
+// --- Numero des speciaux -------------------------------------------------
+// Devant le locker, on prend un colis, on lit son numero, le telephone montre
+// le code-barre du meme numero. Le numero est donc imprime en gros, dans une
+// bande au-dessus de l'etiquette : l'etiquette est reduite d'environ 7 % pour
+// lui laisser la place plutot que de recouvrir une adresse ou un code-barre.
+const BANDE_NUMERO = 30;
+
+async function tamponneNumero(out, page, numero) {
+  const gras = await out.embedFont(StandardFonts.HelveticaBold);
+  const texte = `#${numero}`;
+  const taille = 24;
+  const y = LABEL_HEIGHT - BANDE_NUMERO + (BANDE_NUMERO - taille * 0.72) / 2;
+  page.drawText(texte, { x: 10, y, size: taille, font: gras, color: rgb(0, 0, 0) });
+  const mention = "SPECIAL - code locker";
+  const petite = 9;
+  page.drawText(mention, {
+    x: LABEL_WIDTH - 10 - gras.widthOfTextAtSize(mention, petite),
+    y: y + 2,
+    size: petite,
+    font: gras,
+    color: rgb(0, 0, 0),
+  });
+  // un filet separe la bande de l'etiquette : on coupe au bon endroit
+  page.drawLine({
+    start: { x: 6, y: LABEL_HEIGHT - BANDE_NUMERO },
+    end: { x: LABEL_WIDTH - 6, y: LABEL_HEIGHT - BANDE_NUMERO },
+    thickness: 0.8,
+    color: rgb(0, 0, 0),
+  });
+}
+
+async function addPdfPages(out, bytes, numero = null) {
   const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pageCount = src.getPageCount();
 
   for (let i = 0; i < pageCount; i += 1) {
     const srcPage = src.getPage(i);
     const box = usableBox(srcPage);
-    const plan = planPlacement(box.width, box.height, pageRotation(srcPage));
+    const plan = planPlacement(box.width, box.height, pageRotation(srcPage), {
+      reserveHaut: numero ? BANDE_NUMERO : 0,
+    });
 
     const embedded = await out.embedPage(srcPage, {
       left: box.left,
@@ -196,16 +232,17 @@ async function addPdfPages(out, bytes) {
       height: plan.scaledH,
       rotate: degrees(plan.rotation),
     });
+    if (numero) await tamponneNumero(out, page, numero);
   }
   return pageCount;
 }
 
-async function addImagePage(out, bytes) {
+async function addImagePage(out, bytes, numero = null) {
   const header = Buffer.from(bytes.slice(0, 4));
   const isPng = header[0] === 0x89 && header[1] === 0x50;
   const image = isPng ? await out.embedPng(bytes) : await out.embedJpg(bytes);
 
-  const plan = planPlacement(image.width, image.height, 0);
+  const plan = planPlacement(image.width, image.height, 0, { reserveHaut: numero ? BANDE_NUMERO : 0 });
   const page = out.addPage([LABEL_WIDTH, LABEL_HEIGHT]);
   page.drawImage(image, {
     x: plan.x,
@@ -214,11 +251,13 @@ async function addImagePage(out, bytes) {
     height: plan.scaledH,
     rotate: degrees(plan.rotation),
   });
+  if (numero) await tamponneNumero(out, page, numero);
   return 1;
 }
 
 // Assemble les etiquettes bout a bout, une par page au format de l'imprimante.
-// `labels` : [{ bytes, kind: "pdf" | "image", label }]. Renvoie le PDF final et
+// `labels` : [{ bytes, kind: "pdf" | "image", label, numero? }]. `numero` est
+// celui d'un special : il s'imprime dans une bande en haut. Renvoie le PDF final et
 // la liste des etiquettes qui n'ont pas pu etre lues.
 async function mergeLabels(labels) {
   const out = await PDFDocument.create();
@@ -227,7 +266,10 @@ async function mergeLabels(labels) {
 
   for (const item of labels) {
     try {
-      pages += item.kind === "image" ? await addImagePage(out, item.bytes) : await addPdfPages(out, item.bytes);
+      pages +=
+        item.kind === "image"
+          ? await addImagePage(out, item.bytes, item.numero)
+          : await addPdfPages(out, item.bytes, item.numero);
     } catch (err) {
       failed.push({ label: item.label, reason: err.message });
     }

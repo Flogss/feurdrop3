@@ -4,6 +4,7 @@ const path = require("path");
 const express = require("express");
 const apiRouter = require("./routes/api");
 const printRouter = require("./routes/print");
+const specialRouter = require("./routes/special");
 const suiviRouter = require("./routes/suivi");
 const { startBot } = require("./bot");
 const { startSuiviBot } = require("./suivi/runner");
@@ -13,6 +14,7 @@ const app = express();
 app.use(express.json());
 app.use("/api", apiRouter);
 app.use("/api/print", printRouter);
+app.use("/api/special", specialRouter);
 app.use("/api/suivi", suiviRouter);
 app.use(express.static(path.join(__dirname, "..", "public")));
 

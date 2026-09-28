@@ -137,7 +137,25 @@ function numerosDesColis(ids) {
   return new Map(lignes.map((l) => [l.colis_id, { numero: l.numero, code: Boolean(l.code) }]));
 }
 
+// Toutes les paires en cours, dans l'ordre des numeros : c'est la liste du
+// mode locker. Une paire peut etre incomplete -- un PDF dont le code n'est pas
+// arrive, un code dont le PDF manque -- et doit se voir comme telle.
+function listePaires() {
+  return db
+    .prepare(
+      `SELECT p.id, p.numero, p.sender_name, p.code_file_id IS NOT NULL AS code,
+              c.id AS colis_id, c.file_name, c.note, c.printed_at, c.price
+       FROM paires_special p
+       LEFT JOIN colis c ON c.id = p.colis_id
+       WHERE ${EN_COURS_SQL}
+       ORDER BY p.numero`
+    )
+    .all()
+    .map((l) => ({ ...l, code: Boolean(l.code) }));
+}
+
 module.exports = {
+  listePaires,
   apparieColis,
   apparieCode,
   paireDuColis,

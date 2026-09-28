@@ -1449,3 +1449,99 @@ main { margin-top: 16px; }
 .suivi-drop-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
 /* les deux boutons de drop groupe : "sauf LIT" d'abord, le plus large ensuite */
 .drop-all-group { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* --- Mode locker ------------------------------------------------------------ */
+.special-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.sp-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid var(--panel-border);
+  border-radius: 11px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.sp-card:hover { border-color: rgba(255,215,106,0.45); background: rgba(255,215,106,0.05); }
+/* une paire incomplete doit sauter aux yeux avant de partir */
+.sp-card.incomplete { border-color: rgba(255,77,94,0.5); background: rgba(255,77,94,0.06); }
+.sp-num { font-size: 20px; font-weight: 800; color: #ffd76a; line-height: 1; }
+.sp-card.incomplete .sp-num { color: var(--rouge); }
+.sp-thumb {
+  width: 100%;
+  height: 64px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 6px;
+}
+.sp-thumb-vide { display: flex; align-items: center; justify-content: center; color: var(--rouge); font-size: 18px; background: rgba(255,77,94,0.08); }
+.sp-name { font-size: 11px; font-weight: 600; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-sub { font-size: 9.5px; color: var(--text-dim); }
+.sp-sub b { color: var(--rouge); font-weight: 700; }
+
+/* La visionneuse est un outil de terrain, pas une vitrine : fond blanc (le
+   lecteur du locker lit un code-barre noir sur blanc, et l'ecran eclaire
+   davantage), numero enorme, gros boutons pour le pouce. */
+.locker {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #000;
+  padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+}
+.locker[hidden] { display: none; }
+body.locker-ouvert { overflow: hidden; }
+.locker-top { display: flex; align-items: center; gap: 12px; }
+.locker-num { font-size: 64px; font-weight: 900; line-height: 1; letter-spacing: -0.02em; }
+.locker-pos { flex: 1; font-size: 14px; color: #666; }
+.locker-close {
+  width: 44px; height: 44px;
+  border: 2px solid #000; border-radius: 50%;
+  background: #fff; color: #000; font-size: 18px; font-weight: 700;
+}
+.locker-code {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  margin: 12px 0;
+  touch-action: pan-y;
+}
+.locker-code img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated; }
+.locker-code img[hidden] { display: none; }
+.locker-missing {
+  padding: 18px 22px;
+  border: 3px dashed #d00;
+  border-radius: 14px;
+  color: #d00;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+}
+.locker-missing[hidden] { display: none; }
+.locker-info { text-align: center; margin-bottom: 12px; }
+.locker-file { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.locker-sub { font-size: 12.5px; color: #555; margin-top: 3px; }
+.locker-actions { display: grid; grid-template-columns: 64px 1fr 64px; gap: 10px; }
+.locker-btn {
+  height: 58px;
+  border: 2px solid #000;
+  border-radius: 14px;
+  background: #fff;
+  color: #000;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 800;
+}
+.locker-btn:disabled { opacity: 0.25; }
+.locker-drop { font-size: 17px; background: #000; color: #fff; }
+.locker-drop.arme { background: #0a8f2e; border-color: #0a8f2e; }

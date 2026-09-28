@@ -1594,6 +1594,9 @@ async function downloadLabels(bot, rows, onStep) {
         kind: row.file_kind === "image" ? "image" : "pdf",
         label: row.file_name || `colis #${row.id}`,
         colisId: row.id,
+        // un special sort avec son numero de paire imprime en gros : c'est lui
+        // qu'on lit sur le colis devant le locker
+        numero: row.type === "special" ? paireDuColis(row.id)?.numero || null : null,
       });
     } catch (err) {
       missing.push({ id: row.id, label: row.file_name || `colis #${row.id}`, reason: err.message });

@@ -40,6 +40,29 @@
   <span style="left:73%; bottom:-20px; width:3px; height:3px; background:#38f7ff; --p-dx:20px; --p-dy:-72vh; --p-op:0.3; animation-duration:21s; animation-delay:0.5s;"></span>
 </div>
 
+<!-- Mode locker : le code-barre en plein ecran, sur fond blanc pour le
+     lecteur, le numero en tres gros pour le rapprocher du colis. -->
+<div class="locker" id="locker" hidden>
+  <div class="locker-top">
+    <span class="locker-num" id="locker-num">#1</span>
+    <span class="locker-pos" id="locker-pos">1 / 1</span>
+    <button class="locker-close" id="locker-close" type="button" aria-label="Fermer">✕</button>
+  </div>
+  <div class="locker-code" id="locker-code">
+    <img id="locker-img" alt="" />
+    <div class="locker-missing" id="locker-missing" hidden>Code pas encore arrivé</div>
+  </div>
+  <div class="locker-info">
+    <div class="locker-file" id="locker-file">—</div>
+    <div class="locker-sub" id="locker-sub">—</div>
+  </div>
+  <div class="locker-actions">
+    <button class="locker-btn" id="locker-prev" type="button" aria-label="Précédent">←</button>
+    <button class="locker-btn locker-drop" id="locker-drop" type="button">📮 Déposé</button>
+    <button class="locker-btn" id="locker-next" type="button" aria-label="Suivant">→</button>
+  </div>
+</div>
+
 <div class="app">
   <header class="topbar">
     <button class="brand" id="brand-home" type="button">
@@ -160,6 +183,12 @@
         <span class="suivi-link-count" id="suivi-link-count"></span>
       </button>
 
+      <button class="settings-link suivi-link" id="special-link" type="button">
+        <svg viewBox="0 0 24 24"><path d="M4 5v14M7 5v14M10 5v14M13 5v14M15 5v14M18 5v14M20 5v14"/></svg>
+        <span>Mode locker</span>
+        <span class="suivi-link-count" id="special-link-count"></span>
+      </button>
+
       <button class="settings-link" id="settings-link" type="button">
         <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5v.2a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H2.9a2 2 0 010-4H3a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.2a2 2 0 010 4H21a1.7 1.7 0 00-1.5 1z"/></svg>
         <span>Réglages</span>
@@ -242,6 +271,22 @@
         </div>
         <div id="merge-rows" class="rows"></div>
         <button class="btn btn-ghost" id="merge-to-other-btn" disabled>Fusionner la sélection en "Autre"</button>
+      </div>
+    </section>
+
+    <section id="view-special" class="view">
+      <div class="view-head">
+        <button class="btn btn-ghost btn-small" id="special-back" type="button">← Dashboard</button>
+        <h1>Mode locker</h1>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Codes spéciaux</h2>
+          <span class="chart-range" id="special-count">—</span>
+        </div>
+        <button class="btn btn-primary imp-go" id="special-start" type="button">🔑 Ouvrir au #1</button>
+        <div id="special-list" class="special-list"></div>
       </div>
     </section>
 

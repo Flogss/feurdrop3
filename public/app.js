@@ -32,6 +32,7 @@ function switchView(view) {
   // l'onglet Plan interroge des services exterieurs : on ne charge qu'en y
   // arrivant, jamais dans le rafraichissement de fond
   if (view === "imprime" && currentView !== "imprime") loadImprime();
+  if (view === "special" && currentView !== "special") loadSpecial();
   // le suivi lit une base a part : on ne la sollicite qu'en arrivant dessus
   if (view === "suivi" && currentView !== "suivi") loadSuivi().catch(() => {});
   currentView = view;
@@ -1177,6 +1178,7 @@ async function refreshAll() {
     loadMergeCandidates(),
     loadRevenueStats(false),
     loadStock(),
+    loadSpecialCount(),
   ]);
 }
 
@@ -2374,3 +2376,201 @@ async function lancerImpression(bouton, corps) {
 document.getElementById("imp-all").addEventListener("click", (e) =>
   lancerImpression(e.currentTarget, { categorie: "*", scope: "new" })
 );
+
+// --- Mode locker --------------------------------------------------------------
+// Devant le locker : on prend un colis, on lit le "#3" imprime dans la bande de
+// son etiquette, le telephone montre le code-barre #3. La visionneuse suit
+// l'ordre des numeros, donc l'ordre de la liasse imprimee.
+
+let lockerPaires = [];
+let lockerIndex = 0;
+let lockerVerrou = null;
+
+async function loadSpecialCount() {
+  try {
+    const { paires } = await fetchJSON("/api/special/paires");
+    document.getElementById("special-link-count").textContent = paires.length ? String(paires.length) : "";
+  } catch {
+    // le compteur est un confort : une erreur ici ne doit rien casser
+  }
+}
+
+async function loadSpecial() {
+  const liste = document.getElementById("special-list");
+  let paires;
+  try {
+    ({ paires } = await fetchJSON("/api/special/paires"));
+  } catch (err) {
+    liste.innerHTML = `<div class="empty-row">${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  lockerPaires = paires;
+  const avecCode = paires.filter((p) => p.code).length;
+  document.getElementById("special-count").textContent = paires.length
+    ? `${paires.length} colis · ${avecCode} code${avecCode > 1 ? "s" : ""}`
+    : "aucun";
+  document.getElementById("special-link-count").textContent = paires.length ? String(paires.length) : "";
+  document.getElementById("special-start").disabled = paires.length === 0;
+
+  if (paires.length === 0) {
+    liste.innerHTML = `<div class="empty-row">Aucun code en attente.</div>`;
+    return;
+  }
+
+  // une paire incomplete se voit tout de suite : c'est avant de partir qu'il
+  // faut s'en rendre compte, pas devant le locker
+  liste.innerHTML = paires
+    .map((p, i) => {
+      const manque = !p.code ? "code pas arrivé" : !p.colis ? "PDF pas arrivé" : "";
+      return `<button class="sp-card${manque ? " incomplete" : ""}" data-locker="${i}" type="button">
+        <span class="sp-num">#${p.numero}</span>
+        ${
+          p.code
+            ? `<img class="sp-thumb" loading="lazy" src="/api/special/code/${p.id}" alt="" />`
+            : `<span class="sp-thumb sp-thumb-vide">🔑?</span>`
+        }
+        <span class="sp-name">${escapeHtml(p.colis?.fileName || "—")}</span>
+        <span class="sp-sub">${escapeHtml(p.sender || "")}${
+          manque ? ` · <b>${manque}</b>` : p.colis?.printed ? " · imprimé" : " · pas imprimé"
+        }</span>
+      </button>`;
+    })
+    .join("");
+}
+
+function ouvreLocker(index) {
+  if (lockerPaires.length === 0) return;
+  lockerIndex = Math.max(0, Math.min(index, lockerPaires.length - 1));
+  document.getElementById("locker").hidden = false;
+  document.body.classList.add("locker-ouvert");
+  afficheLocker();
+  garderEcranAllume();
+}
+
+function fermeLocker() {
+  document.getElementById("locker").hidden = true;
+  document.body.classList.remove("locker-ouvert");
+  if (lockerVerrou) lockerVerrou.release().catch(() => {});
+  lockerVerrou = null;
+  loadSpecial();
+}
+
+function afficheLocker() {
+  const p = lockerPaires[lockerIndex];
+  document.getElementById("locker-num").textContent = `#${p.numero}`;
+  document.getElementById("locker-pos").textContent = `${lockerIndex + 1} / ${lockerPaires.length}`;
+
+  const img = document.getElementById("locker-img");
+  img.hidden = !p.code;
+  document.getElementById("locker-missing").hidden = Boolean(p.code);
+  if (p.code) img.src = `/api/special/code/${p.id}`;
+
+  document.getElementById("locker-file").textContent = p.colis?.fileName || "PDF pas encore arrivé";
+  document.getElementById("locker-sub").textContent = [p.sender, p.colis?.note ? `📝 ${p.colis.note}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+
+  const drop = document.getElementById("locker-drop");
+  drop.disabled = !p.colis;
+  desarmeDrop();
+  document.getElementById("locker-prev").disabled = lockerIndex === 0;
+  document.getElementById("locker-next").disabled = lockerIndex === lockerPaires.length - 1;
+
+  // le suivant est deja charge quand on balaie
+  const suivant = lockerPaires[lockerIndex + 1];
+  if (suivant?.code) new Image().src = `/api/special/code/${suivant.id}`;
+}
+
+function bougeLocker(pas) {
+  const cible = lockerIndex + pas;
+  if (cible < 0 || cible >= lockerPaires.length) return;
+  lockerIndex = cible;
+  afficheLocker();
+}
+
+// L'ecran qui s'eteint au moment de scanner, c'est ce qui arrive toujours.
+async function garderEcranAllume() {
+  try {
+    if ("wakeLock" in navigator) lockerVerrou = await navigator.wakeLock.request("screen");
+  } catch {
+    // refuse (batterie faible, navigateur) : on fait sans
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !document.getElementById("locker").hidden) garderEcranAllume();
+});
+
+// "Deposé" en deux appuis : un drop ne s'annule pas, et devant un locker on a
+// vite fait de toucher le mauvais bouton.
+let dropArme = null;
+
+function desarmeDrop() {
+  clearTimeout(dropArme);
+  dropArme = null;
+  const drop = document.getElementById("locker-drop");
+  drop.classList.remove("arme");
+  drop.textContent = "📮 Déposé";
+}
+
+document.getElementById("locker-drop").addEventListener("click", async (e) => {
+  const bouton = e.currentTarget;
+  const p = lockerPaires[lockerIndex];
+  if (!p?.colis) return;
+
+  if (!dropArme) {
+    bouton.classList.add("arme");
+    bouton.textContent = "Confirmer ?";
+    dropArme = setTimeout(desarmeDrop, 3000);
+    return;
+  }
+
+  desarmeDrop();
+  bouton.disabled = true;
+  try {
+    await fetchJSON(`/api/print/colis/${p.colis.id}/drop`, { method: "POST" });
+    // le colis quitte la liste : on reste a la meme place, qui montre le suivant
+    lockerPaires.splice(lockerIndex, 1);
+    if (lockerPaires.length === 0) return fermeLocker();
+    lockerIndex = Math.min(lockerIndex, lockerPaires.length - 1);
+    afficheLocker();
+  } catch (err) {
+    bouton.disabled = false;
+    alert(err.message);
+  }
+});
+
+document.getElementById("locker-prev").addEventListener("click", () => bougeLocker(-1));
+document.getElementById("locker-next").addEventListener("click", () => bougeLocker(1));
+document.getElementById("locker-close").addEventListener("click", fermeLocker);
+document.getElementById("special-start").addEventListener("click", () => ouvreLocker(0));
+document.getElementById("special-link").addEventListener("click", () => switchView("special"));
+document.getElementById("special-back").addEventListener("click", () => switchView("dashboard"));
+
+document.getElementById("special-list").addEventListener("click", (e) => {
+  const carte = e.target.closest("[data-locker]");
+  if (carte) ouvreLocker(Number(carte.dataset.locker));
+});
+
+document.addEventListener("keydown", (e) => {
+  if (document.getElementById("locker").hidden) return;
+  if (e.key === "ArrowLeft") bougeLocker(-1);
+  if (e.key === "ArrowRight") bougeLocker(1);
+  if (e.key === "Escape") fermeLocker();
+});
+
+// balayage : a une main, le colis dans l'autre
+{
+  let departX = null;
+  const zone = document.getElementById("locker-code");
+  zone.addEventListener("touchstart", (e) => (departX = e.touches[0].clientX), { passive: true });
+  zone.addEventListener("touchend", (e) => {
+    if (departX === null) return;
+    const ecart = e.changedTouches[0].clientX - departX;
+    departX = null;
+    if (Math.abs(ecart) > 50) bougeLocker(ecart < 0 ? 1 : -1);
+  });
+}
+
+loadSpecialCount();
