@@ -46,7 +46,7 @@ const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
-const { createWriteQueue } = require("./throttle");
+const { createWriteQueue, delaiDemande } = require("./throttle");
 const {
   apparieColis,
   apparieCode,
@@ -211,8 +211,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Toutes les ecritures vers le groupe passent par une file cadencee : voir
 // throttle.js pour le pourquoi.
+// Les envois (copies de fichiers) sont doses sur le plafond de Telegram ; le
+// reste -- editions, suppressions groupees, image de stats -- passe dans la
+// meme file, a un rythme plus serre, puisqu'il ne compte pas dans ce plafond.
 const ecritureGroupe = createWriteQueue({
-  intervalMs: Number(process.env.GROUP_WRITE_INTERVAL_MS || 700),
+  intervalMs: Number(process.env.GROUP_WRITE_INTERVAL_MS || 350),
+  envoisParMinute: Number(process.env.GROUP_SENDS_PER_MIN || 20),
+  fenetreMs: Number(process.env.GROUP_SENDS_WINDOW_MS || 60000),
   onWait: (secondes) => console.warn(`[bot] 429 : pause de ${secondes}s avant de reessayer`),
 });
 
@@ -223,6 +228,15 @@ function queueReaction(bot, chatId, messageId, emoji, fallbackEmoji) {
   if (!chatId || !messageId) return;
   const react = (value) =>
     bot.setMessageReaction(chatId, messageId, { reaction: [{ type: "emoji", emoji: value }] });
+
+  // dans le groupe, une reaction est une ecriture comme une autre : elle prend
+  // sa place dans la file au lieu de doubler les copies en cours
+  if (chatId === AUTO_GROUP_CHAT_ID) {
+    ecritureGroupe(() => react(emoji))
+      .catch(() => (fallbackEmoji ? ecritureGroupe(() => react(fallbackEmoji)) : null))
+      .catch((err) => console.error("[bot] reaction", err.message));
+    return;
+  }
 
   reactionQueue = reactionQueue
     .then(() => sleep(120))
@@ -838,7 +852,20 @@ async function videFilePrivee(bot, chatId, file, batches) {
 
   file.actif = false;
   filesPrivees.delete(chatId);
+  await effaceOriginaux(bot, chatId);
+  // les PDF dont le code est arrive pendant la file passent a "code lie", une
+  // edition chacun, apres les envois
+  for (const id of boutonsEnFinDeFile) refreshFileButtons(bot, getColisById(id));
+  boutonsEnFinDeFile.clear();
   await termineProgression(bot, chatId, file);
+}
+
+// Vrai tant qu'une file traite encore des fichiers : le recapitulatif du lot
+// (image de stats, notification) attend qu'elle ait fini, au lieu de se
+// refaire a chaque pause.
+function filesEnCours() {
+  for (const file of filesPrivees.values()) if (file.actif) return true;
+  return false;
 }
 
 // Un fichier seul n'a pas besoin d'une barre : elle n'apparait qu'a partir du
@@ -955,7 +982,8 @@ async function routeToTopic(bot, msg, attachment, batches) {
       bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
         message_thread_id: topic,
         ...(aDesBoutons(colis) ? { reply_markup: boutonsDe(getColisById(colis.id)) } : {}),
-      })
+      }),
+      { envoi: true }
     );
   } catch (err) {
     console.error("[bot] republication impossible :", err.message);
@@ -977,17 +1005,15 @@ async function routeToTopic(bot, msg, attachment, batches) {
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
 
-  if (direct && !(await effaceOriginal(bot, msg, copie.message_id))) {
-    // pas le droit d'effacer : on retire notre copie et on garde l'original,
-    // pour ne pas laisser le meme fichier deux fois dans le topic
-    setColisMessage(colis.id, msg.chat.id, msg.message_id);
-  }
+  if (direct) planifieEffacement(msg, copie.message_id, { colisId: colis.id });
 
   ajouteAuLot(batches, key, batch, colis, senderName);
   // transporteur inconnu : point d'interrogation sur le fichier republie, apres
   // une derniere tentative a la fin du lot (la legende de l'album peut arriver
-  // apres)
-  if (!carrier && type !== "bj") {
+  // apres). Pas pour un special : il part au locker avec son code, son
+  // transporteur ne change rien -- et chaque reaction est une ecriture de plus
+  // dans le groupe, que Telegram compte.
+  if (!carrier && type !== "bj" && type !== "special") {
     batch.unresolved.push({
       colisId: colis.id,
       fileName: attachment.fileName,
@@ -997,34 +1023,55 @@ async function routeToTopic(bot, msg, attachment, batches) {
       messageId: getColisById(colis.id)?.message_id,
     });
   }
-  if (appairage?.completee) majBoutonsCode(bot, appairage.paire);
 
   if (!direct) queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
   return colis;
 }
 
-// Efface le fichier poste a la main une fois sa copie en place. Sans le droit
-// "Supprimer les messages", Telegram refuse : on retire alors la copie pour ne
-// pas doubler le fichier, et on le dit une fois.
-async function effaceOriginal(bot, msg, copieId) {
+// Les fichiers postes a la main sont effaces une fois leur copie en place --
+// par paquets de 10, en un seul appel (deleteMessages), plutot qu'un appel par
+// fichier : trente fichiers faisaient trente suppressions, autant d'appels qui
+// ralentissaient la file. Le reste du paquet part quand la file se vide.
+const originauxAEffacer = new Map(); // chatId -> [{ msg, copieId, colisId, paireId }]
+// PDF a remettre a jour ("code lie") quand la file aura fini ses envois
+const boutonsEnFinDeFile = new Set();
+const PAQUET_EFFACEMENT = 10;
+
+function planifieEffacement(msg, copieId, lien) {
+  const liste = originauxAEffacer.get(msg.chat.id) || [];
+  liste.push({ msg, copieId, ...lien });
+  originauxAEffacer.set(msg.chat.id, liste);
+  if (liste.length >= PAQUET_EFFACEMENT) effaceOriginaux(botInstance, msg.chat.id);
+}
+
+// Sans le droit "Supprimer les messages", Telegram refuse : on retire alors
+// nos copies pour ne pas doubler les fichiers, les colis restent sur les
+// originaux, et on le dit une fois.
+async function effaceOriginaux(bot, chatId) {
+  const paquet = originauxAEffacer.get(chatId) || [];
+  originauxAEffacer.delete(chatId);
+  if (!bot || paquet.length === 0) return;
+
   try {
-    await ecritureGroupe(() => bot.deleteMessage(msg.chat.id, msg.message_id));
-    return true;
+    await ecritureGroupe(() => bot.deleteMessages(chatId, paquet.map((o) => o.msg.message_id)));
   } catch (err) {
-    console.error("[bot] original non efface :", err.message);
-    await ecritureGroupe(() => bot.deleteMessage(AUTO_GROUP_CHAT_ID, copieId)).catch(() => {});
-    if (!deleteRightWarned.has(msg.chat.id)) {
-      deleteRightWarned.add(msg.chat.id);
+    console.error("[bot] originaux non effaces :", err.message);
+    await ecritureGroupe(() => bot.deleteMessages(AUTO_GROUP_CHAT_ID, paquet.map((o) => o.copieId))).catch(() => {});
+    for (const o of paquet) {
+      if (o.colisId) setColisMessage(o.colisId, chatId, o.msg.message_id);
+      if (o.paireId) setCodeMessage(o.paireId, chatId, o.msg.message_id);
+    }
+    if (!deleteRightWarned.has(chatId)) {
+      deleteRightWarned.add(chatId);
       replyEphemeral(
         bot,
-        msg,
+        paquet[0].msg,
         `Je n'arrive pas a effacer les fichiers postes ici pour les republier avec leurs boutons : ${err.message}\n` +
           `Ajoute-moi comme administrateur avec le droit "Supprimer les messages".`,
         {},
         20000
       );
     }
-    return false;
   }
 }
 
@@ -1042,7 +1089,8 @@ async function republieCode(bot, msg, attachment) {
       bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
         message_thread_id: msg.message_thread_id,
         reply_markup: boutonsCode(paire),
-      })
+      }),
+      { envoi: true }
     );
   } catch (err) {
     // l'original reste en place, sans numero : on ne garde pas une paire
@@ -1053,20 +1101,17 @@ async function republieCode(bot, msg, attachment) {
   }
 
   setCodeMessage(paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
-  if (!(await effaceOriginal(bot, msg, copie.message_id))) {
-    setCodeMessage(paire.id, msg.chat.id, msg.message_id);
-  }
-  if (completee && paire.colis_id) refreshFileButtons(bot, getColisById(paire.colis_id));
+  planifieEffacement(msg, copie.message_id, { paireId: paire.id });
+  if (completee && paire.colis_id) boutonsEnFinDeFile.add(paire.colis_id);
   return paire;
 }
 
+// Le bouton d'un code ne porte que son numero. Y afficher "lie / en attente"
+// obligeait a le reediter a chaque PDF arrive : quinze paires, quinze
+// editions de plus dans la file. L'etat se lit sous le PDF, sur le site et
+// dans le mode locker ; taper sur le code dit a quel colis il va.
 function boutonsCode(paire) {
-  const lie = Boolean(paire.colis_id);
-  return {
-    inline_keyboard: [
-      [{ text: `🔑 Code #${paire.numero} · ${lie ? "📄 lie" : "📄 en attente"}`, callback_data: `sp:${paire.id}` }],
-    ],
-  };
+  return { inline_keyboard: [[{ text: `🔑 Code #${paire.numero}`, callback_data: `sp:${paire.id}` }]] };
 }
 
 function majBoutonsCode(bot, paire) {
@@ -1276,7 +1321,8 @@ async function deplaceFichier(bot, colis, type, { code = false, apparier = true 
       bot.copyMessage(AUTO_GROUP_CHAT_ID, colis.chat_id, colis.message_id, {
         message_thread_id: topic,
         ...(boutons ? { reply_markup: boutons } : {}),
-      })
+      }),
+      { envoi: true }
     );
   } catch (err) {
     console.error("[bot] deplacement impossible :", err.message);
@@ -1288,8 +1334,6 @@ async function deplaceFichier(bot, colis, type, { code = false, apparier = true 
   if (code) {
     setCodeMessage(appairage.paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
     if (appairage.completee) refreshFileButtons(bot, getColisById(appairage.paire.colis_id));
-  } else if (appairage?.completee) {
-    majBoutonsCode(bot, appairage.paire);
   }
 
   await ecritureGroupe(() => bot.deleteMessage(colis.chat_id, colis.message_id)).catch((err) =>
@@ -2019,12 +2063,20 @@ async function editStatsPhoto(bot, messageId, image) {
   } catch (err) {
     // image identique : rien a faire, mais le message est toujours la
     if (/not modified/i.test(err.message)) return true;
+    // trop vite : la file d'ecriture attend et reessaie
+    if (delaiDemande(err) !== null) throw err;
     console.error("[bot] edition image stats impossible :", err.message);
     return false;
   } finally {
     fs.rm(tmpPath, { force: true }, () => {});
   }
 }
+
+// Ce que montre l'image actuellement postee. Une drop de prix, une note, un
+// bouton presse depuis le site redemandent l'image : si ni le compte, ni la
+// valeur, ni le dernier ajout n'ont bouge, on ne la refait pas -- c'etait un
+// rendu et un envoi de PNG pour rien, a chaque geste.
+let imageStatsAffichee = null;
 
 async function updateGroupStatsPhoto(bot, addedCount) {
   try {
@@ -2033,18 +2085,23 @@ async function updateGroupStatsPhoto(bot, addedCount) {
     // dernier lot recu plutot que d'afficher +0
     const added = addedCount === null ? Number(getSetting("last_added_count", 0)) : addedCount;
     if (addedCount !== null) setSetting("last_added_count", addedCount);
-    const image = await renderStatsImage({ pendingCount: count, pendingValue: value, addedCount: added });
 
     const prevId = getStatsMessageId("group");
-    if (prevId && (await editStatsPhoto(bot, prevId, image))) return;
+    const cle = `${prevId}|${count}|${Number(value).toFixed(2)}|${added}`;
+    if (prevId && cle === imageStatsAffichee) return;
 
-    const sent = await bot.sendPhoto(
-      AUTO_GROUP_CHAT_ID,
-      image,
-      {},
-      { filename: "stats.png", contentType: "image/png" }
+    const image = await renderStatsImage({ pendingCount: count, pendingValue: value, addedCount: added });
+    if (prevId && (await ecritureGroupe(() => editStatsPhoto(bot, prevId, image)))) {
+      imageStatsAffichee = cle;
+      return;
+    }
+
+    const sent = await ecritureGroupe(
+      () => bot.sendPhoto(AUTO_GROUP_CHAT_ID, image, {}, { filename: "stats.png", contentType: "image/png" }),
+      { envoi: true }
     );
     setStatsMessageId("group", sent.message_id);
+    imageStatsAffichee = `${sent.message_id}|${count}|${Number(value).toFixed(2)}|${added}`;
   } catch (err) {
     console.error("[bot] updateGroupStatsPhoto error", err.message);
   }
@@ -2086,15 +2143,22 @@ function resolveBatchCarriers(batch) {
 function flushBatch(bot, key, batches) {
   const batch = batches.get(key);
   if (!batch) return;
+  // une file qui travaille encore : le lot n'est pas fini, meme si une pause
+  // (429) a laisse passer le delai. Sans ca, trente fichiers faisaient treize
+  // recapitulatifs et treize images de stats.
+  if (filesEnCours()) {
+    batch.timer = setTimeout(() => flushBatch(bot, key, batches), DEBOUNCE_MS);
+    return;
+  }
   batches.delete(key);
 
   reactUnknownCarriers(bot, resolveBatchCarriers(batch));
-  pushBatchNotification(batch);
 
   if (batch.chatId === AUTO_GROUP_CHAT_ID) {
-    updateGroupStatsPhoto(bot, batch.count);
+    planifieRecap({ ajoutes: batch.count, notifier: true });
     return;
   }
+  pushBatchNotification(batch);
 
   const detail = [...batch.bySender.entries()]
     .map(([name, count]) => `  • ${name}: +${count}`)
@@ -2117,17 +2181,37 @@ function pushBatchNotification(batch) {
   notifyNewColis({ count: batch.count });
 }
 
-// Appele par le dashboard apres chaque modification de colis : l'image postee
-// dans le groupe suit ce qu'on fait sur le site. Regroupe les appels rapproches
-// (drop de plusieurs expediteurs a la suite) en une seule edition.
-let refreshTimer = null;
-function refreshGroupStats() {
+// Recapitulatif regroupe : image de stats et notification.
+// Un envoi qui touche normaux, LIT et BJ forme un lot par topic, et ces lots
+// se ferment ensemble : ils ne doivent faire qu'une image et qu'une
+// notification ("+4"), pas trois de chaque. Les gestes du site (drop, prix...)
+// passent par ici aussi, et se fondent dans le meme recapitulatif.
+let recapEnAttente = { ajoutes: 0, notifier: false };
+let minuteurRecap = null;
+let chaineStats = Promise.resolve();
+
+function planifieRecap({ ajoutes = 0, notifier = false } = {}) {
   if (!botInstance) return;
-  if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => {
-    refreshTimer = null;
-    updateGroupStatsPhoto(botInstance, null);
+  recapEnAttente.ajoutes += ajoutes;
+  if (notifier) recapEnAttente.notifier = true;
+  clearTimeout(minuteurRecap);
+  minuteurRecap = setTimeout(() => {
+    const { ajoutes: n, notifier: notif } = recapEnAttente;
+    recapEnAttente = { ajoutes: 0, notifier: false };
+    minuteurRecap = null;
+    if (notif && n > 0) notifyNewColis({ count: n });
+    // une mise a jour de l'image a la fois : deux en meme temps lisaient toutes
+    // deux "pas encore d'image" et en postaient chacune une
+    chaineStats = chaineStats
+      .then(() => updateGroupStatsPhoto(botInstance, n > 0 ? n : null))
+      .catch((err) => console.error("[bot] recapitulatif :", err.message));
   }, 800);
+}
+
+// Appele par le dashboard apres chaque modification de colis : l'image postee
+// dans le groupe suit ce qu'on fait sur le site.
+function refreshGroupStats() {
+  planifieRecap();
 }
 
 module.exports = {

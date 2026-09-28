@@ -35,7 +35,11 @@ function switchView(view) {
   if (view === "special" && currentView !== "special") loadSpecial();
   // le suivi lit une base a part : on ne la sollicite qu'en arrivant dessus
   if (view === "suivi" && currentView !== "suivi") loadSuivi().catch(() => {});
+  const arrivee = view !== currentView;
   currentView = view;
+  // un ecran qui n'etait pas rafraichi en fond se met a jour en arrivant (les
+  // Stats ont deja leur propre chargement anime)
+  if (arrivee && view !== "stats" && CHARGEMENTS_PAR_VUE[view]) refreshAll().catch(() => {});
 }
 
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -1158,28 +1162,55 @@ function escapeAttr(str) { return escapeHtml(str); }
 // "+N" des notifications compte les colis arrives depuis la derniere fois
 // qu'on l'a regarde. Fermer l'app (ou la mettre en fond) fait donc cumuler
 // +1, +2, +3... au lieu d'envoyer trois fois "+1".
-function markSeen() {
+// Une fois toutes les 30 s suffit pour le "+N" : le prevenir a chaque
+// rafraichissement (5 s) faisait une requete de plus pour rien.
+let dernierVu = 0;
+function markSeen(force = false) {
   if (document.visibilityState !== "visible") return;
+  // "revenir sur l'app" arrive souvent deux fois (visibilite + focus) : une
+  // seule requete suffit
+  if (Date.now() - dernierVu < (force ? 2000 : 30000)) return;
+  dernierVu = Date.now();
   fetch("/api/push/seen", { method: "POST" }).catch(() => {});
 }
 
-document.addEventListener("visibilitychange", markSeen);
-window.addEventListener("focus", markSeen);
+// Rafraichissement de fond (le tour de 5 s, le retour sur l'app) : deux
+// declencheurs qui tombent ensemble ne font qu'un seul rafraichissement. Les
+// rafraichissements qui suivent un geste appellent refreshAll directement et
+// ne sont jamais sautes.
+let dernierRafraichissement = 0;
+function rafraichitEnFond() {
+  if (Date.now() - dernierRafraichissement < 1500) return;
+  dernierRafraichissement = Date.now();
+  refreshAll().catch(() => {});
+}
+
+// Revenir sur l'app : on previent, et on rafraichit tout de suite plutot que
+// d'attendre le prochain tour de 5 s.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  markSeen(true);
+  rafraichitEnFond();
+});
+window.addEventListener("focus", () => markSeen(true));
+
+// Ce que chaque ecran relit. Le rafraichissement ne recharge que l'ecran
+// affiche : il relisait tout -- dettes, prix, fusions, series de revenus --
+// meme sur le dashboard, soit dix requetes toutes les 5 s au lieu de trois.
+// Les rafraichissements de fond n'animent jamais : la revelation des Stats ne
+// se joue qu'en arrivant sur l'onglet, voir playStatsReveal().
+const CHARGEMENTS_PAR_VUE = {
+  dashboard: () => [loadStats(false), loadStock(), loadSpecialCount()],
+  stats: () => [loadStats(false), loadRevenueStats(false)],
+  colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates()],
+};
 
 async function refreshAll() {
+  // app en arriere-plan : rien a afficher, rien a recharger
+  if (document.visibilityState !== "visible") return;
   markSeen();
-  // les rafraichissements de fond (toutes les 5s) n'animent jamais : la
-  // revelation (compteurs, courbes, barres, camembert) ne se joue que
-  // lorsqu'on arrive reellement sur l'onglet Stats, voir playStatsReveal()
-  await Promise.all([
-    loadStats(false),
-    loadDebts(),
-    loadSenders(),
-    loadMergeCandidates(),
-    loadRevenueStats(false),
-    loadStock(),
-    loadSpecialCount(),
-  ]);
+  const charge = CHARGEMENTS_PAR_VUE[currentView];
+  if (charge) await Promise.all(charge());
 }
 
 // Rejoue la revelation animee de la page Stats. Appelee a chaque fois qu'on
@@ -1481,7 +1512,7 @@ document.getElementById("push-disable").addEventListener("click", async () => {
 initPush();
 
 refreshAll();
-setInterval(refreshAll, 5000);
+setInterval(rafraichitEnFond, 5000);
 
 // --- Suivi des colis ---------------------------------------------------------
 // Lecture des verifications faites par le bot de suivi. Rien n'est recalcule

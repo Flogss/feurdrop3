@@ -958,15 +958,24 @@ function getWeeklySeries() {
   const capped = weekRanges.slice(-104); // 2 ans, garde-fou
 
   if (capped.length === 0) return { weeks: [] };
-  const weeks = capped.map((w) => {
-    const row = db
-      .prepare(
-        `SELECT SUM(price) AS value, COUNT(*) AS count FROM colis
-         WHERE status = 'dropped' AND ${BUSINESS_DAY_SQL} BETWEEN ? AND ?`
-      )
-      .get(w.start, w.end);
-    return { start: w.start, end: w.end, value: row.value || 0, count: row.count || 0 };
-  });
+  // Une seule lecture, jour par jour, repartie ensuite dans les semaines. Une
+  // requete par semaine relisait toute la table a chaque fois : 26 semaines,
+  // 26 lectures completes -- l'appel le plus lent du site.
+  const parJour = db
+    .prepare(
+      `SELECT ${BUSINESS_DAY_SQL} AS d, SUM(price) AS value, COUNT(*) AS count
+       FROM colis WHERE status = 'dropped' AND ${BUSINESS_DAY_SQL} BETWEEN ? AND ?
+       GROUP BY d`
+    )
+    .all(capped[0].start, capped[capped.length - 1].end);
+  const weeks = capped.map((w) => ({ start: w.start, end: w.end, value: 0, count: 0 }));
+  for (const jour of parJour) {
+    // les semaines sont triees et disjointes : on cherche celle du jour
+    const semaine = weeks.find((w) => jour.d >= w.start && jour.d <= w.end);
+    if (!semaine) continue;
+    semaine.value += jour.value || 0;
+    semaine.count += jour.count || 0;
+  }
   return { weeks };
 }
 
@@ -1008,12 +1017,18 @@ function getTotalRevenue() {
 // ou non ils peuvent etre fusionnes dans "Autre" sans risque.
 function getMergeCandidates() {
   const total = getTotalRevenue();
+  // une seule lecture groupee plutot que deux sous-requetes par expediteur
   const rows = db
     .prepare(
-      `SELECT s.id, s.name,
-              COALESCE((SELECT SUM(price) FROM colis WHERE sender_name = s.name AND status = 'dropped'), 0) AS ca,
-              COALESCE((SELECT COUNT(*) FROM colis WHERE sender_name = s.name), 0) AS colisCount
-       FROM senders s WHERE s.name != 'Autre' ORDER BY s.name ASC`
+      `SELECT s.id, s.name, COALESCE(t.ca, 0) AS ca, COALESCE(t.colisCount, 0) AS colisCount
+       FROM senders s
+       LEFT JOIN (
+         SELECT sender_name,
+                SUM(CASE WHEN status = 'dropped' THEN price ELSE 0 END) AS ca,
+                COUNT(*) AS colisCount
+         FROM colis GROUP BY sender_name
+       ) t ON t.sender_name = s.name
+       WHERE s.name != 'Autre' ORDER BY s.name ASC`
     )
     .all();
   return rows.map((r) => {

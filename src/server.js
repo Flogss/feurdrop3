@@ -2,6 +2,7 @@ require("dotenv").config();
 const os = require("os");
 const path = require("path");
 const express = require("express");
+const compression = require("compression");
 const apiRouter = require("./routes/api");
 const printRouter = require("./routes/print");
 const specialRouter = require("./routes/special");
@@ -11,6 +12,10 @@ const { startSuiviBot } = require("./suivi/runner");
 const { getPrintToken } = require("./db");
 
 const app = express();
+// Le site pese ~175 Ko de JS/CSS/HTML et les reponses de l'API sont du JSON
+// tres repetitif : compresses, c'est environ quatre fois moins a telecharger,
+// ce qui se sent surtout en 4G.
+app.use(compression());
 app.use(express.json());
 app.use("/api", apiRouter);
 app.use("/api/print", printRouter);
