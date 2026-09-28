@@ -35,7 +35,11 @@ function parseCarrier(input) {
   return null;
 }
 
+// "SPECIAL" n'est pas un transporteur : c'est la categorie des speciaux dans
+// la file d'impression, comme "LIT". Il n'est donc pas dans CARRIERS -- il n'a
+// rien a faire dans /transporteur -- mais il lui faut un nom lisible.
 function carrierLabel(code) {
+  if (code === "SPECIAL") return "Spéciaux";
   const found = CARRIERS.find((c) => c.code === code);
   return found ? found.label : code;
 }

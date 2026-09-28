@@ -2032,7 +2032,7 @@ function renderSuiviDonut(labels) {
 
 const CARRIER_ICONS = {
   MR: "🩷", LP: "🟡", CHRONO: "🟢", UPS: "🟤", DPD: "🔴",
-  GLS: "🔵", DHL: "🟠", FEDEX: "🟣", BJ: "🟨", LIT: "🧻", Inconnu: "⚠️",
+  GLS: "🔵", DHL: "🟠", FEDEX: "🟣", BJ: "🟨", LIT: "🧻", SPECIAL: "⭐", Inconnu: "⚠️",
 };
 
 async function loadImprime() {

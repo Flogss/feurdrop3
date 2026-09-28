@@ -283,6 +283,12 @@ function startBot() {
       return;
     }
 
+    // Une image dans "special" est une photo de contexte, pas un colis : elle
+    // est traitee comme apres un /clear -- le fichier reste, rien n'est suivi.
+    // Pas de colis, pas de reaction, pas de place dans le compte du lot : trois
+    // photos ne doivent pas s'annoncer "+3 colis".
+    if (forcedType === "special" && attachment.kind === "image") return;
+
     const senderName = extractSenderName(msg);
     const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
     const threadId = msg.message_thread_id;
@@ -1062,6 +1068,16 @@ function markButtonsPrinted(bot, ids) {
 // Deplace un seul colis. Renvoie vrai si le FICHIER a bouge ; le type, lui,
 // est toujours applique, meme quand le deplacement echoue.
 async function moveColis(bot, colis, type) {
+  const deplace = await deplaceFichier(bot, colis, type);
+  // Une image qui arrive dans "special" sort du suivi, comme apres un /clear :
+  // le fichier est bien deplace, le colis disparait des comptes. Que la copie
+  // ait reussi ou non -- une image dans special n'est jamais un colis.
+  const apres = getColisById(colis.id);
+  if (apres && apres.status === FREE_STATUS) deleteColis(colis.id);
+  return deplace;
+}
+
+async function deplaceFichier(bot, colis, type) {
   const maj = setColisType(colis.id, type);
   const topic = TOPIC_BY_TYPE[type];
   if (!topic || !colis.chat_id || !colis.message_id) return false;
@@ -1119,12 +1135,18 @@ async function handleMoveType(bot, msg, type) {
   const deplace = await moveColis(bot, colis, type);
   refreshGroupStats();
 
-  const apres = getColisById(colis.id) || colis;
+  const apres = getColisById(colis.id);
+  if (!apres) {
+    return replyEphemeral(
+      bot,
+      msg,
+      `Image passee en ${TYPE_LABELS[type]}${deplace ? ", fichier deplace" : ""} : retiree du suivi, comme un /clear.`
+    );
+  }
   replyEphemeral(
     bot,
     msg,
-    `Colis #${colis.id} passe en ${TYPE_LABELS[type]}` +
-      (apres.price === 0 ? " — image, 0 EUR, hors suivi" : ` — ${apres.price.toFixed(2)} EUR`) +
+    `Colis #${colis.id} passe en ${TYPE_LABELS[type]} — ${apres.price.toFixed(2)} EUR` +
       (deplace ? ", fichier deplace." : ".")
   );
 }
@@ -1156,6 +1178,8 @@ function handlePrintCommand(bot, msg, rawName) {
   if (rawName && rawName.trim()) {
     // "lit" n'est pas un transporteur mais une file d'impression a part
     if (/^lits?$/i.test(rawName.trim())) return sendMergedLabels(bot, msg, "LIT");
+    // les speciaux non plus : /imprime special sort leur liasse a part
+    if (/^sp[eé]ciaux?$|^sp[eé]cial$/i.test(rawName.trim())) return sendMergedLabels(bot, msg, "SPECIAL");
     const carrier = parseCarrier(rawName);
     if (!carrier) {
       return replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
@@ -1184,6 +1208,7 @@ const CARRIER_DOTS = {
   FEDEX: "🟣",
   BJ: "🟨",
   LIT: "🧻",
+  SPECIAL: "⭐",
   Inconnu: "⚠️",
 };
 

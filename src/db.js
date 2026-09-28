@@ -403,13 +403,17 @@ const PRINT_ORDER_SQL = "ORDER BY note IS NULL, id";
 
 function getPrintableColis(carrier, { scope = "new" } = {}) {
   const base = `SELECT id, sender_name, file_id, file_kind, file_name, note, price, carrier, type,
-                       ${CARRIER_GROUP_SQL} AS carrier_group
+                       ${PRINT_GROUP_SQL} AS carrier_group
                 FROM colis WHERE ${printableScope(scope)}`;
+  if (carrier === "SPECIAL") return db.prepare(`${base} AND type = 'special' ${PRINT_ORDER_SQL}`).all();
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ${PRINT_ORDER_SQL}`).all();
+  // un special ou une BJ a aussi un transporteur, mais il est deja range
+  // dans sa propre categorie : il ne doit pas sortir une deuxieme fois ici
+  const ailleurs = "type NOT IN ('bj', 'special')";
   if (carrier === "Inconnu") {
-    return db.prepare(`${base} AND type != 'bj' AND carrier IS NULL ${PRINT_ORDER_SQL}`).all();
+    return db.prepare(`${base} AND ${ailleurs} AND carrier IS NULL ${PRINT_ORDER_SQL}`).all();
   }
-  return db.prepare(`${base} AND type != 'bj' AND carrier = ? ${PRINT_ORDER_SQL}`).all(carrier);
+  return db.prepare(`${base} AND ${ailleurs} AND carrier = ? ${PRINT_ORDER_SQL}`).all(carrier);
 }
 
 // File d'impression des LIT, meme logique de scope que la file thermique.
@@ -451,10 +455,10 @@ function countAlreadyPrinted() {
 function getPrintableSummary({ scope = "new" } = {}) {
   return db
     .prepare(
-      `SELECT ${CARRIER_GROUP_SQL} AS carrier, COUNT(*) AS count,
+      `SELECT ${PRINT_GROUP_SQL} AS carrier, COUNT(*) AS count,
               SUM(note IS NOT NULL) AS noted
        FROM colis WHERE ${printableScope(scope)}
-       GROUP BY ${CARRIER_GROUP_SQL} ORDER BY noted DESC, count DESC`
+       GROUP BY ${PRINT_GROUP_SQL} ORDER BY noted DESC, count DESC`
     )
     .all();
 }
@@ -467,6 +471,11 @@ function getPrintableSummary({ scope = "new" } = {}) {
 // "Inconnu" ne devrait quasiment jamais apparaitre : le bot previent sur
 // Telegram des qu'un fichier n'est pas reconnu, pour affiner les regles.
 const CARRIER_GROUP_SQL = "CASE WHEN type = 'bj' THEN 'BJ' ELSE COALESCE(carrier, 'Inconnu') END";
+
+// La file d'impression range en plus les speciaux a part, comme les LIT : on
+// veut pouvoir les sortir seuls. Seulement ici -- sur le dashboard, un special
+// reste range sous son transporteur, puisque c'est la qu'on le poste.
+const PRINT_GROUP_SQL = `CASE WHEN type = 'special' THEN 'SPECIAL' ELSE ${CARRIER_GROUP_SQL} END`;
 
 // --- Tournee ----------------------------------------------------------------
 // Quand on part poster, on fige l'instant du depart : tout ce qui arrive
@@ -764,7 +773,7 @@ function getPrintJobs(limit = 8) {
               COALESCE(printed_by, 'Inconnu') AS printed_by,
               COUNT(*) AS count,
               MAX(CASE WHEN type = 'lit' THEN 1 ELSE 0 END) AS lit,
-              GROUP_CONCAT(DISTINCT CASE WHEN type = 'lit' THEN 'LIT' ELSE ${CARRIER_GROUP_SQL} END) AS carriers
+              GROUP_CONCAT(DISTINCT CASE WHEN type = 'lit' THEN 'LIT' ELSE ${PRINT_GROUP_SQL} END) AS carriers
        FROM colis
        WHERE ${HAS_FILE_SQL} AND print_job IS NOT NULL
        GROUP BY print_job
@@ -778,7 +787,7 @@ function getPrintJobColis(job) {
   return db
     .prepare(
       `SELECT id, sender_name, file_id, file_kind, file_name, type,
-              CASE WHEN type = 'lit' THEN 'LIT' ELSE ${CARRIER_GROUP_SQL} END AS carrier_group
+              CASE WHEN type = 'lit' THEN 'LIT' ELSE ${PRINT_GROUP_SQL} END AS carrier_group
        FROM colis WHERE ${HAS_FILE_SQL} AND print_job = ? ORDER BY id`
     )
     .all(job);
