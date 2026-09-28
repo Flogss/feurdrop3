@@ -136,6 +136,21 @@ if (!colisColumns.includes("source_message_id")) {
 }
 db.exec("CREATE INDEX IF NOT EXISTS idx_colis_source ON colis(source_chat_id, source_message_id)");
 
+// Paires code-barre + PDF du topic special : voir specials.js.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS paires_special (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero INTEGER NOT NULL,
+    sender_name TEXT,
+    colis_id INTEGER,
+    code_file_id TEXT,
+    code_chat_id INTEGER,
+    code_message_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_paires_colis ON paires_special(colis_id);
+`);
+
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
 if (!senderColumns.includes("lit_price")) {
   db.exec(`ALTER TABLE senders ADD COLUMN lit_price REAL NOT NULL DEFAULT ${DEFAULT_LIT_PRICE}`);
@@ -405,7 +420,19 @@ function getPrintableColis(carrier, { scope = "new" } = {}) {
   const base = `SELECT id, sender_name, file_id, file_kind, file_name, note, price, carrier, type,
                        ${PRINT_GROUP_SQL} AS carrier_group
                 FROM colis WHERE ${printableScope(scope)}`;
-  if (carrier === "SPECIAL") return db.prepare(`${base} AND type = 'special' ${PRINT_ORDER_SQL}`).all();
+  if (carrier === "SPECIAL") {
+    // dans l'ordre de leur numero de paire : la liasse imprimee suit l'ordre
+    // des codes-barres, 1, 2, 3... (les annotes restent devant)
+    return db
+      .prepare(
+        `${base} AND type = 'special'
+         ORDER BY note IS NULL,
+                  COALESCE((SELECT p.numero FROM paires_special p WHERE p.colis_id = colis.id
+                            ORDER BY p.id DESC LIMIT 1), 1000000),
+                  id`
+      )
+      .all();
+  }
   if (carrier === "BJ") return db.prepare(`${base} AND type = 'bj' ${PRINT_ORDER_SQL}`).all();
   // un special ou une BJ a aussi un transporteur, mais il est deja range
   // dans sa propre categorie : il ne doit pas sortir une deuxieme fois ici
@@ -657,15 +684,16 @@ function findAnyColisByMessage(chatId, messageId) {
 // dans le groupe et son lot y est rattache : depuis le prive, le dernier lot
 // est donc celui du dernier fichier qu'on y a envoye, pas un lot "du prive"
 // qui n'existe plus. Sans ca, /litall ou /prix sans reponse tapes en prive
-// ne trouvaient rien.
+// ne trouvaient rien. C'est bien le lot du DERNIER fichier : un envoi mixte
+// ouvre un lot par topic, et le plus grand numero de lot n'est pas forcement
+// celui qu'on vient de toucher.
 function getLatestBatchId(chatId) {
   const row = db
     .prepare(
-      `SELECT MAX(id) AS id FROM (
-         SELECT id FROM batches WHERE chat_id = ?
-         UNION ALL
-         SELECT batch_id AS id FROM colis WHERE source_chat_id = ? AND batch_id IS NOT NULL
-       )`
+      `SELECT COALESCE(
+         (SELECT batch_id FROM colis WHERE source_chat_id = ? AND batch_id IS NOT NULL ORDER BY id DESC LIMIT 1),
+         (SELECT id FROM batches WHERE chat_id = ? ORDER BY id DESC LIMIT 1)
+       ) AS id`
     )
     .get(chatId, chatId);
   return row && row.id ? row.id : null;

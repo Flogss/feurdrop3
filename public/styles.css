@@ -1027,6 +1027,20 @@ main { margin-top: 16px; }
 .imp-row-sub { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 .imp-row .btn { flex-shrink: 0; padding: 3px 8px; font-size: 12px; }
 
+/* numero de paire d'un special : le meme que sous son code-barre */
+.imp-num {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: #ffd76a;
+  border: 1px solid rgba(255,215,106,0.45);
+  background: rgba(255,215,106,0.1);
+}
+/* code pas encore arrive : a verifier avant de partir au locker */
+.imp-num.sans-code { color: var(--rouge); border-color: rgba(255,77,94,0.45); background: rgba(255,77,94,0.08); }
+
 /* --- Edition d'un colis (bouton ✎) ---------------------------------------- */
 /* Memes champs que la fusion d'expediteurs : un seul langage de formulaire. */
 .imp-edit {

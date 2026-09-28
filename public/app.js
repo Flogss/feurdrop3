@@ -2195,7 +2195,13 @@ async function fillCategory(cat) {
     .map(
       (c) => `<div class="imp-row${c.note ? " noted" : ""}" data-row="${c.id}">
         <div class="imp-row-main">
-          <div class="imp-row-name">${escapeHtml(c.fileName || `colis #${c.id}`)}</div>
+          <div class="imp-row-name">${
+            c.special
+              ? `<span class="imp-num${c.special.code ? "" : " sans-code"}" title="${
+                  c.special.code ? "code-barre lié" : "code-barre pas encore arrivé"
+                }">#${c.special.numero}${c.special.code ? " 🔑" : " 🔑?"}</span> `
+              : ""
+          }${escapeHtml(c.fileName || `colis #${c.id}`)}</div>
           <div class="imp-row-sub">${escapeHtml(c.sender)} · ${euro(c.price)}${c.kind === "image" ? " · photo" : ""}</div>
           ${c.note ? `<div class="imp-row-note">📝 ${escapeHtml(c.note)}</div>` : ""}
         </div>

@@ -47,6 +47,7 @@ const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = req
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
 const { createWriteQueue } = require("./throttle");
+const { apparieColis, apparieCode, paireDuColis, getPaire, setCodeMessage, oublieCode } = require("./specials");
 const { notifyNewColis } = require("./push");
 const { classifyFile } = require("./classify");
 
@@ -275,90 +276,14 @@ function startBot() {
     const forcedType = resolveForcedType(msg);
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
-    // Envoye en tete-a-tete : le bot classe le fichier et le republie lui-meme
-    // dans le bon topic, a l'identique. C'est ce qui evite d'avoir a trier
-    // entre normaux, special, LIT et boite jaune avant d'envoyer.
-    if (msg.chat.type === "private") {
-      enfileFichier(bot, msg, attachment, batches);
-      return;
-    }
-
-    // Une image dans "special" est une photo de contexte, pas un colis : elle
-    // est traitee comme apres un /clear -- le fichier reste, rien n'est suivi.
-    // Pas de colis, pas de reaction, pas de place dans le compte du lot : trois
-    // photos ne doivent pas s'annoncer "+3 colis".
-    if (forcedType === "special" && attachment.kind === "image") return;
-
-    const senderName = extractSenderName(msg);
-    const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
-    const threadId = msg.message_thread_id;
-    const key = batchKey(msg.chat.id, threadId);
-
-    let batch = batches.get(key);
-    if (!batch) {
-      batch = {
-        chatId: msg.chat.id,
-        threadId,
-        batchId: createBatch(msg.chat.id),
-        count: 0,
-        total: 0,
-        bySender: new Map(),
-        groupCaptions: new Map(),
-        groupFirstMessage: new Map(),
-        unresolved: [],
-        timer: null,
-      };
-      batches.set(key, batch);
-    }
-
-    // dans un album, Telegram n'attache la legende qu'a un seul des messages :
-    // on la memorise pour la rattacher aux autres photos du meme envoi
-    if (msg.media_group_id && msg.caption) {
-      batch.groupCaptions.set(msg.media_group_id, msg.caption);
-    }
-
-    // Telegram n'autorise la reaction que sur le premier message d'un album :
-    // on retient lequel c'est, et on ne reagit qu'une fois par album.
-    const isNewGroup = msg.media_group_id && !batch.groupFirstMessage.has(msg.media_group_id);
-    if (isNewGroup) batch.groupFirstMessage.set(msg.media_group_id, msg.message_id);
-    const reactionMessageId = msg.media_group_id
-      ? batch.groupFirstMessage.get(msg.media_group_id)
-      : msg.message_id;
-    if (!msg.media_group_id || isNewGroup) {
-      queueReaction(bot, msg.chat.id, reactionMessageId, REACTION_RECEIVED);
-    }
-
-    const colis = addColis(senderName, {
-      chatId: msg.chat.id,
-      messageId: msg.message_id,
-      batchId: batch.batchId,
-      type: forcedType || "normal",
-      carrier,
-      fileName: attachment.fileName,
-      caption: msg.caption || null,
-      fileId: attachment.fileId,
-      fileKind: attachment.kind,
-    });
-
-    // transporteur non reconnu : nouvelle tentative a la fin du lot (la
-    // legende de l'album a pu arriver apres), puis signalement sur Telegram
-    if (!carrier && forcedType !== "bj") {
-      batch.unresolved.push({
-        colisId: colis.id,
-        fileName: attachment.fileName,
-        caption: msg.caption,
-        mediaGroupId: msg.media_group_id,
-        chatId: msg.chat.id,
-        messageId: reactionMessageId,
-      });
-    }
-
-    batch.count += 1;
-    batch.total += colis.price;
-    batch.bySender.set(senderName, (batch.bySender.get(senderName) || 0) + 1);
-
-    if (batch.timer) clearTimeout(batch.timer);
-    batch.timer = setTimeout(() => flushBatch(bot, key, batches), DEBOUNCE_MS);
+    // Deux entrees, une seule file (voir routeToTopic) :
+    //   - en tete-a-tete, le bot classe le fichier et le republie dans le bon
+    //     topic : plus besoin de trier avant d'envoyer ;
+    //   - poste a la main dans un topic, le fichier y reste, mais c'est le bot
+    //     qui le republie, pour qu'il ait ses boutons comme les autres.
+    // Un par un, dans l'ordre d'arrivee : c'est aussi l'ordre qui appaire un
+    // code-barre de special avec son PDF.
+    enfileFichier(bot, msg, attachment, batches);
   };
 
   bot.on("message", handleIncoming);
@@ -382,7 +307,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un colis : dans special, une image vaut 0 EUR\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, une image est le code-barre du locker : hors suivi comme apres /clear, mais numerotee avec son PDF (meme numero sous les deux, dans l'ordre d'envoi, par client).\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un colis : dans special, une image vaut 0 EUR\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -443,6 +368,7 @@ function startBot() {
 
   bot.on("callback_query", (query) => {
     if (/^c:/.test(query.data || "")) return handleFileButton(bot, query);
+    if (/^sp:/.test(query.data || "")) return handleCodeButton(bot, query);
     if (/^pra?:|^prmenu:|^prjob:/.test(query.data || "")) return handlePrintCallback(bot, query);
     return handleCarrierCallback(bot, query);
   });
@@ -734,8 +660,18 @@ function handleRemoveColis(bot, msg, alsoDeleteFile) {
 //                on doit pouvoir solder les colis un par un a mesure qu'on
 //                les poste
 //   dropee     : une simple mention, plus rien a faire
-function fileButtons(colisId, { printed = false, dropped = false, note = null } = {}) {
+function fileButtons(colisId, { printed = false, dropped = false, note = null, special = null } = {}) {
   const lignes = [];
+  // un PDF de special porte le numero de sa paire : c'est ce qui le relie a
+  // son code-barre devant le locker
+  if (special) {
+    lignes.push([
+      {
+        text: `⭐ #${special.numero} · ${special.code ? "🔑 code lie" : "🔑 code en attente"}`,
+        callback_data: `c:s:${colisId}`,
+      },
+    ]);
+  }
   // La note se lit sous le fichier sans y toucher : la legende reste celle de
   // l'expediteur. Le texte entier s'affiche en tapant dessus.
   if (note) {
@@ -758,10 +694,12 @@ function fileButtons(colisId, { printed = false, dropped = false, note = null } 
 // Les boutons d'un colis se deduisent de son etat en base : un seul endroit
 // pour les calculer, quel que soit le geste qui vient de le modifier.
 function boutonsDe(colis) {
+  const paire = colis.type === "special" ? paireDuColis(colis.id) : null;
   return fileButtons(colis.id, {
     printed: Boolean(colis.printed_at),
     dropped: colis.status === "dropped",
     note: colis.note,
+    special: paire ? { numero: paire.numero, code: Boolean(paire.code_file_id) } : null,
   });
 }
 
@@ -795,13 +733,24 @@ function refreshFileButtons(bot, colis) {
 // en refusait une partie (429) et ces fichiers-la etaient perdus. Ils passent
 // maintenant un par un, dans l'ordre d'arrivee, avec une barre qui dit ou on en
 // est -- le total monte au fur et a mesure que les fichiers continuent d'entrer.
-const filesPrivees = new Map(); // chatId -> { attente, total, faits, echecs, ... }
+const filesPrivees = new Map(); // chatId -> { attente, total, faits, echecs, ... } : une file par chat
 
 function enfileFichier(bot, msg, attachment, batches) {
   const chatId = msg.chat.id;
   let file = filesPrivees.get(chatId);
   if (!file) {
-    file = { attente: [], total: 0, faits: 0, echecs: 0, message: null, derniereEdition: 0 };
+    file = {
+      attente: [],
+      total: 0,
+      faits: 0,
+      echecs: 0,
+      message: null,
+      derniereEdition: 0,
+      // La barre ne s'affiche qu'en prive. Dans le groupe elle tomberait dans
+      // le topic General, et les fichiers qui reapparaissent un par un avec
+      // leurs boutons montrent deja ou on en est.
+      barre: msg.chat.type === "private",
+    };
     filesPrivees.set(chatId, file);
   }
 
@@ -840,7 +789,7 @@ async function videFilePrivee(bot, chatId, file, batches) {
 async function majProgression(bot, chatId, file) {
   const restants = file.attente.length;
   const total = file.faits + file.echecs + restants;
-  if (total < 2) return;
+  if (!file.barre || total < 2) return;
 
   const texte =
     `📤 Classement des fichiers\n${progressBar(file.faits + file.echecs, total)}\n` +
@@ -880,19 +829,47 @@ async function termineProgression(bot, chatId, file) {
   setTimeout(() => bot.deleteMessage(chatId, file.message.message_id).catch(() => {}), 6000);
 }
 
+// Legendes d'album : Telegram n'attache la legende qu'a un seul fichier d'un
+// envoi groupe. On la garde pour reconnaitre le transporteur des autres
+// fichiers du meme album -- sans rien changer a leur legende a eux.
+const legendesAlbum = new Map(); // media_group_id -> { legende, a }
+
+function legendeDe(msg) {
+  if (!msg.media_group_id) return msg.caption || null;
+  const maintenant = Date.now();
+  for (const [id, entree] of legendesAlbum) if (maintenant - entree.a > 10 * 60 * 1000) legendesAlbum.delete(id);
+  if (msg.caption) legendesAlbum.set(msg.media_group_id, { legende: msg.caption, a: maintenant });
+  return msg.caption || legendesAlbum.get(msg.media_group_id)?.legende || null;
+}
+
+// Deux entrees, un seul chemin :
+//   - envoye au bot en prive : le fichier est classe (normaux, LIT, BJ) puis
+//     republie dans le bon topic ;
+//   - poste directement dans un topic du groupe : il reste dans CE topic, mais
+//     il est republie par le bot -- pour porter les boutons -- et l'original
+//     est efface.
+// Dans les deux cas le fichier est copie a l'identique : ni le nom, ni la
+// legende, ni le contenu ne changent.
 async function routeToTopic(bot, msg, attachment, batches) {
-  // normaux, LIT ou boite jaune : les trois topics existent toujours. Le
-  // classement n'envoie jamais rien dans "special" -- on y va a la main.
-  const type = classifyFile({ fileName: attachment.fileName, caption: msg.caption });
+  const direct = msg.chat.type !== "private";
+  const type = direct
+    ? resolveForcedType(msg)
+    : classifyFile({ fileName: attachment.fileName, caption: msg.caption });
+
+  // un code-barre de locker, pas un colis : voir republieCode
+  if (direct && type === "special" && attachment.kind === "image") return republieCode(bot, msg, attachment);
+
   const topic = TOPIC_BY_TYPE[type];
   const senderName = extractSenderName(msg);
-  const carrier = detectCarrier(attachment.fileName, msg.caption, getCarrierRules());
+  const legende = legendeDe(msg);
+  const carrier = detectCarrier(attachment.fileName, legende, getCarrierRules());
 
   // Le colis est cree AVANT la republication pour que ses boutons partent avec
   // le fichier : une seule ecriture au lieu de deux, soit deux fois moins de
   // travail dans la file, ce qui compte quand dix PDF arrivent ensemble. Son
   // numero de message n'est connu qu'une fois la copie faite.
   const { batch, key } = lotCourant(batches, AUTO_GROUP_CHAT_ID, type);
+  if (msg.media_group_id && msg.caption) batch.groupCaptions.set(msg.media_group_id, msg.caption);
   const colis = addColis(senderName, {
     chatId: AUTO_GROUP_CHAT_ID,
     messageId: null,
@@ -904,23 +881,34 @@ async function routeToTopic(bot, msg, attachment, batches) {
     fileId: attachment.fileId,
     fileKind: attachment.kind,
     // le fichier d'origine en prive : y repondre /lit ou /normal doit marcher
-    sourceChatId: msg.chat.id,
-    sourceMessageId: msg.message_id,
+    sourceChatId: direct ? null : msg.chat.id,
+    sourceMessageId: direct ? null : msg.message_id,
   });
+
+  // un PDF de special rejoint son code-barre (ou l'attend) avant d'etre
+  // republie : son numero part avec lui, sous le fichier
+  const appairage = type === "special" ? apparieColis(colis.id, senderName) : null;
 
   let copie;
   try {
     copie = await ecritureGroupe(() =>
       bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
         message_thread_id: topic,
-        ...(aDesBoutons(colis) ? { reply_markup: fileButtons(colis.id) } : {}),
+        ...(aDesBoutons(colis) ? { reply_markup: boutonsDe(getColisById(colis.id)) } : {}),
       })
     );
   } catch (err) {
+    console.error("[bot] republication impossible :", err.message);
+    if (direct) {
+      // l'original est toujours la : on le compte tel quel, sans boutons,
+      // plutot que de perdre le colis
+      setColisMessage(colis.id, msg.chat.id, msg.message_id);
+      ajouteAuLot(batches, key, batch, colis, senderName);
+      return colis;
+    }
     // le fichier n'est jamais arrive : le colis ne doit pas rester dans les
     // comptes, sinon le recapitulatif annonce des colis qu'on n'a pas
     deleteColis(colis.id);
-    console.error("[bot] republication impossible :", err.message);
     await bot
       .sendMessage(msg.chat.id, `Republication impossible (${attachment.fileName || "fichier"}) : ${err.message}`)
       .catch(() => {});
@@ -928,10 +916,120 @@ async function routeToTopic(bot, msg, attachment, batches) {
   }
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
-  ajouteAuLot(batches, key, batch, colis, senderName);
 
-  queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
+  if (direct && !(await effaceOriginal(bot, msg, copie.message_id))) {
+    // pas le droit d'effacer : on retire notre copie et on garde l'original,
+    // pour ne pas laisser le meme fichier deux fois dans le topic
+    setColisMessage(colis.id, msg.chat.id, msg.message_id);
+  }
+
+  ajouteAuLot(batches, key, batch, colis, senderName);
+  // transporteur inconnu : point d'interrogation sur le fichier republie, apres
+  // une derniere tentative a la fin du lot (la legende de l'album peut arriver
+  // apres)
+  if (!carrier && type !== "bj") {
+    batch.unresolved.push({
+      colisId: colis.id,
+      fileName: attachment.fileName,
+      caption: msg.caption,
+      mediaGroupId: msg.media_group_id,
+      chatId: AUTO_GROUP_CHAT_ID,
+      messageId: getColisById(colis.id)?.message_id,
+    });
+  }
+  if (appairage?.completee) majBoutonsCode(bot, appairage.paire);
+
+  if (!direct) queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
   return colis;
+}
+
+// Efface le fichier poste a la main une fois sa copie en place. Sans le droit
+// "Supprimer les messages", Telegram refuse : on retire alors la copie pour ne
+// pas doubler le fichier, et on le dit une fois.
+async function effaceOriginal(bot, msg, copieId) {
+  try {
+    await ecritureGroupe(() => bot.deleteMessage(msg.chat.id, msg.message_id));
+    return true;
+  } catch (err) {
+    console.error("[bot] original non efface :", err.message);
+    await ecritureGroupe(() => bot.deleteMessage(AUTO_GROUP_CHAT_ID, copieId)).catch(() => {});
+    if (!deleteRightWarned.has(msg.chat.id)) {
+      deleteRightWarned.add(msg.chat.id);
+      replyEphemeral(
+        bot,
+        msg,
+        `Je n'arrive pas a effacer les fichiers postes ici pour les republier avec leurs boutons : ${err.message}\n` +
+          `Ajoute-moi comme administrateur avec le droit "Supprimer les messages".`,
+        {},
+        20000
+      );
+    }
+    return false;
+  }
+}
+
+// --- Codes-barres du topic special ---------------------------------------------
+// Une image postee dans special est le code-barre qui ouvre le locker d'un
+// colis. Ce n'est pas un colis -- comme apres un /clear : pas de prix, pas de
+// drop, pas d'impression -- mais elle est numerotee avec son PDF (voir
+// specials.js), et le numero s'affiche sous les deux.
+async function republieCode(bot, msg, attachment) {
+  const { paire, completee } = apparieCode(attachment.fileId, extractSenderName(msg));
+
+  let copie;
+  try {
+    copie = await ecritureGroupe(() =>
+      bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
+        message_thread_id: msg.message_thread_id,
+        reply_markup: boutonsCode(paire),
+      })
+    );
+  } catch (err) {
+    // l'original reste en place, sans numero : on ne garde pas une paire
+    // fantome qui bloquerait ce numero
+    console.error("[bot] code non republie :", err.message);
+    oublieCode(paire.id);
+    return null;
+  }
+
+  setCodeMessage(paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+  if (!(await effaceOriginal(bot, msg, copie.message_id))) {
+    setCodeMessage(paire.id, msg.chat.id, msg.message_id);
+  }
+  if (completee && paire.colis_id) refreshFileButtons(bot, getColisById(paire.colis_id));
+  return paire;
+}
+
+function boutonsCode(paire) {
+  const lie = Boolean(paire.colis_id);
+  return {
+    inline_keyboard: [
+      [{ text: `🔑 Code #${paire.numero} · ${lie ? "📄 lie" : "📄 en attente"}`, callback_data: `sp:${paire.id}` }],
+    ],
+  };
+}
+
+function majBoutonsCode(bot, paire) {
+  const a_jour = getPaire(paire.id);
+  if (!a_jour || !a_jour.code_message_id) return;
+  ecritureGroupe(() =>
+    bot.editMessageReplyMarkup(boutonsCode(a_jour), {
+      chat_id: a_jour.code_chat_id,
+      message_id: a_jour.code_message_id,
+    })
+  ).catch(() => {});
+}
+
+// Taper sur le bouton d'un code : a quel colis il va.
+function handleCodeButton(bot, query) {
+  const paire = getPaire(Number((query.data || "").split(":")[1]));
+  const colis = paire?.colis_id ? getColisById(paire.colis_id) : null;
+  const texte = !paire
+    ? "Code inconnu."
+    : colis
+      ? `Code #${paire.numero} : ${colis.file_name || `colis #${colis.id}`} (${colis.sender_name})`
+      : `Code #${paire.numero} : en attente de son PDF.`;
+  return bot.answerCallbackQuery(query.id, { text: texte, show_alert: true }).catch(() => {});
 }
 
 function lotCourant(batches, chatId, type) {
@@ -1002,6 +1100,17 @@ async function handleFileButton(bot, query) {
   }
 
   if (action === "k") return repondre("Ce colis est deja drope.");
+
+  if (action === "s") {
+    const paire = paireDuColis(id);
+    if (!paire) return repondre("Plus de numero : ce colis n'est plus en attente dans special.", true);
+    return repondre(
+      paire.code_file_id
+        ? `Special #${paire.numero} : son code-barre est le code #${paire.numero}.`
+        : `Special #${paire.numero} : son code-barre n'est pas encore arrive.`,
+      true
+    );
+  }
 
   if (action === "p") {
     markPrinted([id], query.from?.username ? `@${query.from.username}` : query.from?.first_name);
@@ -1085,8 +1194,18 @@ async function deplaceFichier(bot, colis, type) {
   if (colis.chat_id === AUTO_GROUP_CHAT_ID && colis.type === type) return false;
 
   // L'etat APRES le changement de type decide des boutons : une image qui
-  // entre dans "special" les perd, la meme qui en ressort les retrouve.
+  // entre dans "special" devient un code-barre numerote, un PDF qui y entre
+  // rejoint (ou attend) son code.
   const apres = getColisById(colis.id) || colis;
+  let appairage = null;
+  let boutons = aDesBoutons(apres) ? boutonsDe(apres) : null;
+  if (type === "special" && apres.status === FREE_STATUS) {
+    appairage = apparieCode(colis.file_id, colis.sender_name);
+    boutons = boutonsCode(appairage.paire);
+  } else if (type === "special") {
+    appairage = apparieColis(colis.id, colis.sender_name);
+    boutons = boutonsDe(getColisById(colis.id));
+  }
 
   let copie;
   try {
@@ -1096,15 +1215,22 @@ async function deplaceFichier(bot, colis, type) {
     copie = await ecritureGroupe(() =>
       bot.copyMessage(AUTO_GROUP_CHAT_ID, colis.chat_id, colis.message_id, {
         message_thread_id: topic,
-        ...(aDesBoutons(apres) ? { reply_markup: boutonsDe(apres) } : {}),
+        ...(boutons ? { reply_markup: boutons } : {}),
       })
     );
   } catch (err) {
     console.error("[bot] deplacement impossible :", err.message);
+    if (appairage && apres.status === FREE_STATUS) oublieCode(appairage.paire.id);
     return false;
   }
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+  if (appairage && apres.status === FREE_STATUS) {
+    setCodeMessage(appairage.paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+    if (appairage.completee) refreshFileButtons(bot, getColisById(appairage.paire.colis_id));
+  } else if (appairage?.completee) {
+    majBoutonsCode(bot, appairage.paire);
+  }
 
   await ecritureGroupe(() => bot.deleteMessage(colis.chat_id, colis.message_id)).catch((err) =>
     console.error("[bot] ancien message non efface :", err.message)
@@ -1140,7 +1266,8 @@ async function handleMoveType(bot, msg, type) {
     return replyEphemeral(
       bot,
       msg,
-      `Image passee en ${TYPE_LABELS[type]}${deplace ? ", fichier deplace" : ""} : retiree du suivi, comme un /clear.`
+      `Image passee en ${TYPE_LABELS[type]}${deplace ? ", fichier deplace" : ""} : code-barre numerote, ` +
+        `hors suivi comme apres un /clear.`
     );
   }
   replyEphemeral(

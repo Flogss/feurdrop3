@@ -14,6 +14,7 @@ const {
   setColisNote,
 } = require("../db");
 const { carrierLabel, CARRIERS } = require("../carrier");
+const { numerosDesColis } = require("../specials");
 const {
   buildLabelsPdf,
   markButtonsPrinted,
@@ -84,9 +85,13 @@ router.get("/colis", (req, res) => {
   const scope = req.query.scope === "printed" ? "printed" : "new";
   const code = req.query.categorie;
   const rows = code === "LIT" ? getLitPrintable({ scope }) : getPrintableColis(code, { scope });
+  // un special porte le numero de sa paire : c'est lui qui le relie a son
+  // code-barre devant le locker
+  const numeros = numerosDesColis(rows.filter((r) => r.type === "special").map((r) => r.id));
 
   res.json({
     colis: rows.map((row) => ({
+      special: numeros.get(row.id) || null,
       id: row.id,
       sender: row.sender_name,
       fileName: row.file_name,
