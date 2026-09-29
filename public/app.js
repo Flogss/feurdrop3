@@ -2475,6 +2475,10 @@ function ouvreLocker(index) {
   lockerIndex = Math.max(0, Math.min(index, lockerPaires.length - 1));
   document.getElementById("locker").hidden = false;
   document.body.classList.add("locker-ouvert");
+  // Plein ecran quand le navigateur le permet (Android) : la barre d'adresse
+  // et celle du systeme laissent leur place au code. Sur iPhone, l'app
+  // ajoutee a l'ecran d'accueil est deja en plein ecran.
+  document.documentElement.requestFullscreen?.({ navigationUI: "hide" })?.catch(() => {});
   afficheLocker();
   garderEcranAllume();
 }
@@ -2482,10 +2486,46 @@ function ouvreLocker(index) {
 function fermeLocker() {
   document.getElementById("locker").hidden = true;
   document.body.classList.remove("locker-ouvert");
+  if (document.fullscreenElement) document.exitFullscreen?.()?.catch(() => {});
   if (lockerVerrou) lockerVerrou.release().catch(() => {});
   lockerVerrou = null;
   loadSpecial();
 }
+
+// Le code occupe toute la zone libre. Un code-barre, plus large que haut, est
+// tourne d'un quart de tour quand le telephone est tenu droit : il court alors
+// sur toute la hauteur de l'ecran au lieu d'une bande de la largeur -- a peu
+// pres deux fois plus grand, et c'est la taille des barres qui compte pour le
+// lecteur. Un QR code, carre, reste droit.
+function ajusteCode() {
+  const img = document.getElementById("locker-img");
+  const zone = document.getElementById("locker-code");
+  if (img.hidden || !img.naturalWidth) return;
+
+  const largeur = zone.clientWidth;
+  const hauteur = zone.clientHeight;
+  const ratio = img.naturalWidth / img.naturalHeight;
+  const tourner = ratio > 1.15 && hauteur > largeur;
+
+  // dimensions de l'image AVANT rotation : tournee, sa largeur court le long
+  // de la hauteur de la zone
+  const longueurDispo = tourner ? hauteur : largeur;
+  const epaisseurDispo = tourner ? largeur : hauteur;
+  let w = longueurDispo;
+  let h = w / ratio;
+  if (h > epaisseurDispo) {
+    h = epaisseurDispo;
+    w = h * ratio;
+  }
+  img.style.width = `${Math.floor(w)}px`;
+  img.style.height = `${Math.floor(h)}px`;
+  img.classList.toggle("tourne", tourner);
+}
+
+document.getElementById("locker-img").addEventListener("load", ajusteCode);
+window.addEventListener("resize", () => {
+  if (!document.getElementById("locker").hidden) ajusteCode();
+});
 
 function afficheLocker() {
   const p = lockerPaires[lockerIndex];
@@ -2495,7 +2535,11 @@ function afficheLocker() {
   const img = document.getElementById("locker-img");
   img.hidden = !p.code;
   document.getElementById("locker-missing").hidden = Boolean(p.code);
-  if (p.code) img.src = `/api/special/code/${p.id}`;
+  if (p.code) {
+    img.src = `/api/special/code/${p.id}`;
+    // deja en cache : "load" ne repassera pas, on ajuste tout de suite
+    if (img.complete) ajusteCode();
+  }
 
   document.getElementById("locker-file").textContent = p.colis?.fileName || "PDF pas encore arrivé";
   document.getElementById("locker-sub").textContent = [p.sender, p.colis?.note ? `📝 ${p.colis.note}` : ""]
@@ -2605,3 +2649,9 @@ document.addEventListener("keydown", (e) => {
 }
 
 loadSpecialCount();
+
+// Pas de zoom par pincement non plus. Safari sur iPhone ignore
+// "user-scalable=no" : ses gestes de zoom se bloquent a la main.
+for (const geste of ["gesturestart", "gesturechange"]) {
+  document.addEventListener(geste, (e) => e.preventDefault(), { passive: false });
+}
