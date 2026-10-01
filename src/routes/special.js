@@ -1,6 +1,6 @@
 const express = require("express");
 const { listePaires, getPaire } = require("../specials");
-const { getBot } = require("../bot");
+const { getBot, finiCodeSeul } = require("../bot");
 const { renduPng } = require("../rasterInk");
 
 // Mode locker : les codes-barres du topic special, dans l'ordre des numeros
@@ -16,11 +16,21 @@ router.get("/paires", (req, res) => {
       numero: p.numero,
       sender: p.sender_name,
       code: p.code,
+      // un code qui ne va avec aucun PDF : il n'est pas "incomplet"
+      seul: p.seul,
       colis: p.colis_id
         ? { id: p.colis_id, fileName: p.file_name, note: p.note, printed: Boolean(p.printed_at) }
         : null,
     })),
   });
+});
+
+// "Fait" sur un code seul : il n'y a pas de colis a droper, la paire s'en va
+// une fois le locker ouvert.
+router.post("/paires/:id/fini", (req, res) => {
+  const paire = finiCodeSeul(Number(req.params.id));
+  if (!paire) return res.status(404).json({ error: "code seul introuvable" });
+  res.json({ ok: true });
 });
 
 // L'image du code, recuperee chez Telegram. Le lien Telegram contient le

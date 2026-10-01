@@ -60,6 +60,8 @@ const {
   paireParNumero,
   relie,
   retireCode,
+  rendSeul,
+  finiSeul,
 } = require("./specials");
 const { notifyNewColis } = require("./push");
 const { classifyFile } = require("./classify");
@@ -334,7 +336,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
         {},
         30000
       );
@@ -384,6 +386,8 @@ function startBot() {
     /^\/special(@\w+)?\s+(image|img|code|pdf|colis)\s*#?\s*(\d+)\s*$/i,
     command((msg, m) => handleLienSpecial(bot, msg, /^(image|img|code)$/i.test(m[2]) ? "code" : "colis", Number(m[3])))
   );
+  // /special seul : ce fichier ouvre un locker mais ne va avec aucun PDF
+  bot.onText(/^\/special(@\w+)?\s+seule?\s*$/i, command((msg) => handleSeul(bot, msg)));
   bot.onText(
     /^\/special(@\w+)?\s+(image|img|code|pdf|colis)\s*$/i,
     command((msg) =>
@@ -445,7 +449,7 @@ async function registerCommands(bot) {
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
-    { command: "special", description: "Dans Special (en reponse). /special image 3 ou /special pdf 3 : relier au #3" },
+    { command: "special", description: "Dans Special (en reponse). /special image 3, /special pdf 3, /special seul" },
     { command: "normal", description: "Remettre le colis dans Normaux (en reponse)" },
     { command: "normalall", description: "Remettre tout le dernier lot dans Normaux" },
     { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
@@ -1189,7 +1193,8 @@ async function republieCode(bot, msg, attachment) {
 // editions de plus dans la file. L'etat se lit sous le PDF, sur le site et
 // dans le mode locker ; taper sur le code dit a quel colis il va.
 function boutonsCode(paire) {
-  return { inline_keyboard: [[{ text: `🔑 Code #${paire.numero}`, callback_data: `sp:${paire.id}` }]] };
+  const texte = paire.seul ? `🔑 Code #${paire.numero} · seul` : `🔑 Code #${paire.numero}`;
+  return { inline_keyboard: [[{ text: texte, callback_data: `sp:${paire.id}` }]] };
 }
 
 function majBoutonsCode(bot, paire) {
@@ -1209,7 +1214,9 @@ function handleCodeButton(bot, query) {
     ? "Code inconnu."
     : colis
       ? `Code #${paire.numero} : ${colis.file_name || `colis #${colis.id}`} (${colis.sender_name})`
-      : `Code #${paire.numero} : en attente de son PDF.`;
+      : paire.seul
+        ? `Code #${paire.numero} : seul, il ne va avec aucun PDF.`
+        : `Code #${paire.numero} : en attente de son PDF.`;
   return bot.answerCallbackQuery(query.id, { text: texte, show_alert: true }).catch(() => {});
 }
 
@@ -1414,7 +1421,11 @@ async function handleMoveType(bot, msg, type) {
   }
 
   const colis = findColisByMessage(msg.chat.id, reply.message_id);
-  if (!colis) return replyEphemeral(bot, msg, "Ce message n'est pas un colis suivi.", {}, 8000);
+  if (!colis) {
+    // un code deja dans special : /special tout court veut dire "il est seul"
+    if (type === "special" && paireDuCode(msg.chat.id, reply.message_id)) return handleSeul(bot, msg);
+    return replyEphemeral(bot, msg, "Ce message n'est pas un colis suivi.", {}, 8000);
+  }
 
   if (!TOPIC_BY_TYPE[type]) {
     return replyEphemeral(
@@ -1446,26 +1457,18 @@ async function handleMoveType(bot, msg, type) {
   );
 }
 
-// --- Relier a la main dans special ------------------------------------------------
-// L'appairage automatique suit l'ordre d'arrivee et la legende ; quand il se
-// trompe -- un client qui envoie deux codes pour un colis, une legende muette --
-// on dit soi-meme ou va un fichier. Le fichier peut etre un colis, un code, ou
-// un fichier que le bot ne suivait pas.
-async function handleLienSpecial(bot, msg, role, numero) {
-  const reply = msg.reply_to_message;
-  const commande = `/special ${role === "code" ? "image" : "pdf"} ${numero}`;
-  if (!reply) return replyEphemeral(bot, msg, `Reponds au fichier avec ${commande}.`, {}, 8000);
-
-  let element;
+// Ce que designe une reponse dans special : un colis, un code, ou un fichier
+// que le bot ne suivait pas (poste avant, retire par /clear...). Un colis d'un
+// autre topic rejoint special d'abord -- sans appairage automatique : c'est la
+// commande qui dit ou il va. Renvoie null si le message n'est pas un fichier.
+async function elementVise(bot, msg, reply) {
   const colis = findColisByMessage(msg.chat.id, reply.message_id);
   const paireCode = colis ? null : paireDuCode(msg.chat.id, reply.message_id);
 
   if (colis) {
-    // un colis d'un autre topic rejoint special d'abord -- sans appairage
-    // automatique : c'est la commande qui dit ou il va
     if (colis.type !== "special") await moveColis(bot, colis, "special", { apparier: false });
     const frais = getColisById(colis.id);
-    element = {
+    return {
       role: "colis",
       paireId: paireDuColis(colis.id)?.id || null,
       colisId: frais.id,
@@ -1477,8 +1480,9 @@ async function handleLienSpecial(bot, msg, role, numero) {
       messageId: frais.message_id,
       sender: frais.sender_name,
     };
-  } else if (paireCode) {
-    element = {
+  }
+  if (paireCode) {
+    return {
       role: "code",
       paireId: paireCode.id,
       fileId: paireCode.code_file_id,
@@ -1489,21 +1493,66 @@ async function handleLienSpecial(bot, msg, role, numero) {
       messageId: paireCode.code_message_id,
       sender: paireCode.sender_name,
     };
-  } else {
-    // un fichier que le bot ne suivait pas (poste avant, retire par /clear...)
-    const piece = colisAttachment(reply);
-    if (!piece) return replyEphemeral(bot, msg, "Reponds a un fichier : une image ou un PDF.", {}, 8000);
-    element = {
-      role: null,
-      fileId: piece.fileId,
-      fileKind: piece.kind,
-      fileName: piece.fileName,
-      caption: reply.caption || null,
-      chatId: reply.chat?.id || msg.chat.id,
-      messageId: reply.message_id,
-      sender: extractSenderName(reply),
-    };
   }
+  const piece = colisAttachment(reply);
+  if (!piece) return null;
+  return {
+    role: null,
+    fileId: piece.fileId,
+    fileKind: piece.kind,
+    fileName: piece.fileName,
+    caption: reply.caption || null,
+    chatId: reply.chat?.id || msg.chat.id,
+    messageId: reply.message_id,
+    sender: extractSenderName(reply),
+  };
+}
+
+// /special seul (ou /special tout court sur un code deja dans special) : ce
+// fichier ouvre un locker mais ne va avec aucun PDF. Il prend un numero a lui,
+// et les paires de son client, qu'il avait decalees, se remettent en ordre.
+async function handleSeul(bot, msg) {
+  const reply = msg.reply_to_message;
+  if (!reply) return replyEphemeral(bot, msg, "Reponds au fichier avec /special seul.", {}, 8000);
+  const element = await elementVise(bot, msg, reply);
+  if (!element) return replyEphemeral(bot, msg, "Reponds a un fichier : une image ou un PDF.", {}, 8000);
+
+  const r = rendSeul(element);
+  if (r.deja) return replyEphemeral(bot, msg, `C'est deja un code seul (#${r.paire.numero}).`, {}, 8000);
+
+  majBoutonsCode(bot, r.paire);
+  for (const id of r.touchees) {
+    const p = getPaire(id);
+    if (!p) continue;
+    if (p.code_message_id) majBoutonsCode(bot, p);
+    if (p.colis_id) refreshFileButtons(bot, getColisById(p.colis_id));
+  }
+  // un colis devenu code sort des comptes
+  if (element.role === "colis") refreshGroupStats();
+
+  const remis = r.touchees.length;
+  replyEphemeral(
+    bot,
+    msg,
+    `Code #${r.paire.numero} : seul, sans PDF.` +
+      (remis ? ` ${remis} paire${remis > 1 ? "s" : ""} remise${remis > 1 ? "s" : ""} dans l'ordre.` : ""),
+    {},
+    12000
+  );
+}
+
+// --- Relier a la main dans special ------------------------------------------------
+// L'appairage automatique suit l'ordre d'arrivee et la legende ; quand il se
+// trompe -- un client qui envoie deux codes pour un colis, une legende muette --
+// on dit soi-meme ou va un fichier. Le fichier peut etre un colis, un code, ou
+// un fichier que le bot ne suivait pas.
+async function handleLienSpecial(bot, msg, role, numero) {
+  const reply = msg.reply_to_message;
+  const commande = `/special ${role === "code" ? "image" : "pdf"} ${numero}`;
+  if (!reply) return replyEphemeral(bot, msg, `Reponds au fichier avec ${commande}.`, {}, 8000);
+
+  const element = await elementVise(bot, msg, reply);
+  if (!element) return replyEphemeral(bot, msg, "Reponds a un fichier : une image ou un PDF.", {}, 8000);
 
   let resultat;
   try {
@@ -2285,6 +2334,14 @@ module.exports = {
   markButtonsPrinted,
   corrigeTransporteur,
   // le site modifie un colis (note, drop) : ses boutons suivent
+  // le site a termine un code seul : la paire s'en va, son bouton aussi
+  finiCodeSeul: (paireId) => {
+    const paire = finiSeul(paireId);
+    if (paire && botInstance && paire.code_message_id) {
+      poseBoutons(botInstance, paire.code_chat_id, paire.code_message_id, { inline_keyboard: [] }).catch(() => {});
+    }
+    return paire;
+  },
   refreshColisButtons: (id) => {
     if (botInstance) refreshFileButtons(botInstance, getColisById(id));
   },

@@ -83,7 +83,7 @@ function apparieColis(colisId, senderName) {
   const attente = db
     .prepare(
       `SELECT * FROM paires_special p
-       WHERE p.colis_id IS NULL AND p.sender_name IS ? AND ${EN_COURS_SQL}
+       WHERE p.colis_id IS NULL AND p.seul = 0 AND p.sender_name IS ? AND ${EN_COURS_SQL}
        ORDER BY id LIMIT 1`
     )
     .get(senderName || null);
@@ -288,7 +288,12 @@ function relie(numero, role, element) {
   if (!cible) throw new Error(`Aucune paire #${numero} en cours.`);
 
   const source = element.paireId ? getPaire(element.paireId) : null;
-  if (source && source.id === cible.id && element.role === role) return { cible, deja: true };
+  if (source && source.id === cible.id && element.role === role) {
+    // deja relie ainsi -- mais confirme a la main : le re-appairage n'y
+    // touchera plus
+    db.prepare("UPDATE paires_special SET manuel = 1 WHERE id = ?").run(cible.id);
+    return { cible: getPaire(cible.id), deja: true };
+  }
 
   const occupant = role === "code" ? codeDe(cible) : colisDe(cible);
   if (source && element.role) videPlace(source.id, element.role);
@@ -314,8 +319,132 @@ function relie(numero, role, element) {
     }
   }
 
+  // relie a la main : le re-appairage automatique n'y touchera plus. Une paire
+  // qui recoit un colis n'est plus un code seul.
+  db.prepare(
+    `UPDATE paires_special SET manuel = 1, seul = CASE WHEN colis_id IS NULL THEN seul ELSE 0 END WHERE id = ?`
+  ).run(cible.id);
+  if (deloge && source && deloge.numero === source.numero && source.id !== cible.id) {
+    db.prepare("UPDATE paires_special SET manuel = 1 WHERE id = ?").run(source.id);
+  }
+
   if (source && source.id !== cible.id) supprimeSiVide(source.id);
   return { cible: getPaire(cible.id), deloge };
+}
+
+// --- Codes seuls et re-appairage ---------------------------------------------------
+// Il arrive qu'une image de special n'aille avec aucun PDF. L'appairage, qui
+// suit l'ordre d'arrivee, lui donne pourtant le PDF suivant -- et decale d'un
+// cran toutes les paires d'apres : codes A, X, B, C puis PDF a, b, c donnent
+// A-a, X-b, B-c, et C reste seul.
+
+/**
+ * Remet dans l'ordre d'arrivee les paires d'un client. Ce sont les CODES qui
+ * changent de paire : chaque PDF garde la sienne, donc son numero -- il est
+ * peut-etre deja imprime sur l'etiquette. Les paires reliees a la main et les
+ * codes seuls ne bougent pas.
+ * @returns {number[]} les paires dont le code a change
+ */
+function reapparie(sender) {
+  const paires = db
+    .prepare(
+      `SELECT p.*, c.message_id AS colis_message FROM paires_special p
+       LEFT JOIN colis c ON c.id = p.colis_id
+       WHERE p.sender_name IS ? AND p.seul = 0 AND p.manuel = 0 AND ${EN_COURS_SQL}`
+    )
+    .all(sender || null);
+  if (paires.length === 0) return [];
+
+  // l'ordre d'arrivee, c'est l'ordre des messages dans le groupe
+  const parArrivee = (msgA, msgB, idA, idB) => (msgA ?? 0) - (msgB ?? 0) || idA - idB;
+  const avecColis = paires
+    .filter((p) => p.colis_id)
+    .sort((a, b) => parArrivee(a.colis_message, b.colis_message, a.id, b.id));
+  const sansColis = paires.filter((p) => !p.colis_id).sort((a, b) => a.id - b.id);
+  const codes = paires
+    .filter((p) => p.code_file_id)
+    .sort((a, b) => parArrivee(a.code_message_id, b.code_message_id, a.id, b.id))
+    .map((p) => ({
+      code_file_id: p.code_file_id,
+      code_file_kind: p.code_file_kind,
+      code_chat_id: p.code_chat_id,
+      code_message_id: p.code_message_id,
+    }));
+
+  const avant = new Map(paires.map((p) => [p.id, p.code_message_id || null]));
+  for (const p of paires) videPlace(p.id, "code");
+
+  // le i-eme code va au i-eme PDF ; ceux qui restent reprennent, dans l'ordre,
+  // les paires qui n'avaient que leur code
+  const libres = [...sansColis];
+  const nouvelles = [];
+  codes.forEach((code, i) => {
+    let cible = i < avecColis.length ? avecColis[i].id : libres.shift()?.id;
+    if (!cible) {
+      cible = db
+        .prepare("INSERT INTO paires_special (numero, sender_name) VALUES (?, ?)")
+        .run(numeroLibre(), sender || null).lastInsertRowid;
+      nouvelles.push(cible);
+    }
+    remplitPlace(cible, code);
+  });
+
+  const touchees = [...nouvelles];
+  for (const p of paires) {
+    supprimeSiVide(p.id);
+    const apres = getPaire(p.id);
+    if (apres && (apres.code_message_id || null) !== avant.get(p.id)) touchees.push(p.id);
+  }
+  return touchees;
+}
+
+/**
+ * /special seul : ce fichier est un code qui n'attend aucun PDF. Il quitte sa
+ * paire, les paires de son client se remettent dans l'ordre (c'est lui qui
+ * les avait decalees), puis il prend un numero a lui.
+ * @param {object} element meme forme que pour relie()
+ * @returns {{ paire, touchees: number[], deja?: boolean }}
+ */
+function rendSeul(element) {
+  const source = element.paireId ? getPaire(element.paireId) : null;
+  if (source && element.role === "code") {
+    if (source.seul) return { paire: source, touchees: [], deja: true };
+    // un code qui n'avait pas encore de PDF n'a rien decale : il garde son
+    // numero, il ne recevra simplement jamais de PDF
+    if (!source.colis_id) {
+      db.prepare("UPDATE paires_special SET seul = 1 WHERE id = ?").run(source.id);
+      return { paire: getPaire(source.id), touchees: [] };
+    }
+  }
+
+  const sender = element.sender ?? source?.sender_name ?? null;
+  const touchees = new Set();
+  if (source && element.role) {
+    videPlace(source.id, element.role);
+    touchees.add(source.id);
+  }
+  // un colis (une image prise pour un colis) devient un code
+  const code = enRole(element, "code");
+  if (source) supprimeSiVide(source.id);
+
+  for (const id of reapparie(sender)) touchees.add(id);
+
+  // le numero apres le re-appairage : celui qu'il a libere est repris
+  const info = db
+    .prepare("INSERT INTO paires_special (numero, sender_name, seul) VALUES (?, ?, 1)")
+    .run(numeroLibre(), sender);
+  remplitPlace(info.lastInsertRowid, code);
+
+  return { paire: getPaire(info.lastInsertRowid), touchees: [...touchees].filter((id) => getPaire(id)) };
+}
+
+// "Fait" dans le mode locker, pour un code seul : il n'y a pas de colis a
+// droper, la paire s'en va simplement.
+function finiSeul(paireId) {
+  const paire = getPaire(paireId);
+  if (!paire || !paire.seul) return null;
+  db.prepare("DELETE FROM paires_special WHERE id = ?").run(paireId);
+  return paire;
 }
 
 // /del ou /clear sur un code : il sort de sa paire. Le colis, s'il y en a un,
@@ -332,7 +461,7 @@ function retireCode(paireId) {
 function listePaires() {
   return db
     .prepare(
-      `SELECT p.id, p.numero, p.sender_name, p.code_file_id IS NOT NULL AS code, p.code_file_kind,
+      `SELECT p.id, p.numero, p.sender_name, p.code_file_id IS NOT NULL AS code, p.code_file_kind, p.seul,
               c.id AS colis_id, c.file_name, c.note, c.printed_at, c.price
        FROM paires_special p
        LEFT JOIN colis c ON c.id = p.colis_id
@@ -340,11 +469,14 @@ function listePaires() {
        ORDER BY p.numero`
     )
     .all()
-    .map((l) => ({ ...l, code: Boolean(l.code) }));
+    .map((l) => ({ ...l, code: Boolean(l.code), seul: Boolean(l.seul) }));
 }
 
 module.exports = {
   roleSpecial,
+  rendSeul,
+  reapparie,
+  finiSeul,
   paireParNumero,
   paireDuCode,
   relie,

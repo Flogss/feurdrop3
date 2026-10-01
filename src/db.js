@@ -155,6 +155,10 @@ db.exec(`
   const colonnes = db.prepare("PRAGMA table_info(paires_special)").all().map((c) => c.name);
   // le code qui ouvre le locker n'est pas toujours une image : parfois un PDF
   if (!colonnes.includes("code_file_kind")) db.exec("ALTER TABLE paires_special ADD COLUMN code_file_kind TEXT");
+  // "seul" : un code qui n'attend aucun PDF (/special seul) ; "manuel" : une
+  // paire reliee a la main, que le re-appairage automatique ne touche jamais
+  if (!colonnes.includes("seul")) db.exec("ALTER TABLE paires_special ADD COLUMN seul INTEGER NOT NULL DEFAULT 0");
+  if (!colonnes.includes("manuel")) db.exec("ALTER TABLE paires_special ADD COLUMN manuel INTEGER NOT NULL DEFAULT 0");
 }
 
 const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);

@@ -2453,7 +2453,8 @@ async function loadSpecial() {
   // faut s'en rendre compte, pas devant le locker
   liste.innerHTML = paires
     .map((p, i) => {
-      const manque = !p.code ? "code pas arrivé" : !p.colis ? "PDF pas arrivé" : "";
+      // un code seul n'attend aucun PDF : il n'est pas incomplet
+      const manque = !p.code ? "code pas arrivé" : !p.colis && !p.seul ? "PDF pas arrivé" : "";
       return `<button class="sp-card${manque ? " incomplete" : ""}" data-locker="${i}" type="button">
         <span class="sp-num">#${p.numero}</span>
         ${
@@ -2461,9 +2462,9 @@ async function loadSpecial() {
             ? `<img class="sp-thumb" loading="lazy" src="/api/special/code/${p.id}" alt="" />`
             : `<span class="sp-thumb sp-thumb-vide">🔑?</span>`
         }
-        <span class="sp-name">${escapeHtml(p.colis?.fileName || "—")}</span>
+        <span class="sp-name">${escapeHtml(p.colis?.fileName || (p.seul ? "Code seul" : "—"))}</span>
         <span class="sp-sub">${escapeHtml(p.sender || "")}${
-          manque ? ` · <b>${manque}</b>` : p.colis?.printed ? " · imprimé" : " · pas imprimé"
+          manque ? ` · <b>${manque}</b>` : p.seul ? " · sans colis" : p.colis?.printed ? " · imprimé" : " · pas imprimé"
         }</span>
       </button>`;
     })
@@ -2541,13 +2542,15 @@ function afficheLocker() {
     if (img.complete) ajusteCode();
   }
 
-  document.getElementById("locker-file").textContent = p.colis?.fileName || "PDF pas encore arrivé";
+  document.getElementById("locker-file").textContent =
+    p.colis?.fileName || (p.seul ? "Code seul — aucun colis" : "PDF pas encore arrivé");
   document.getElementById("locker-sub").textContent = [p.sender, p.colis?.note ? `📝 ${p.colis.note}` : ""]
     .filter(Boolean)
     .join(" · ");
 
   const drop = document.getElementById("locker-drop");
-  drop.disabled = !p.colis;
+  // un code seul n'a pas de colis a droper : "Fait" le retire une fois utilise
+  drop.disabled = !p.colis && !p.seul;
   desarmeDrop();
   document.getElementById("locker-prev").disabled = lockerIndex === 0;
   document.getElementById("locker-next").disabled = lockerIndex === lockerPaires.length - 1;
@@ -2586,13 +2589,13 @@ function desarmeDrop() {
   dropArme = null;
   const drop = document.getElementById("locker-drop");
   drop.classList.remove("arme");
-  drop.textContent = "📮 Déposé";
+  drop.textContent = lockerPaires[lockerIndex]?.seul && !lockerPaires[lockerIndex]?.colis ? "✓ Fait" : "📮 Déposé";
 }
 
 document.getElementById("locker-drop").addEventListener("click", async (e) => {
   const bouton = e.currentTarget;
   const p = lockerPaires[lockerIndex];
-  if (!p?.colis) return;
+  if (!p?.colis && !p?.seul) return;
 
   if (!dropArme) {
     bouton.classList.add("arme");
@@ -2604,7 +2607,9 @@ document.getElementById("locker-drop").addEventListener("click", async (e) => {
   desarmeDrop();
   bouton.disabled = true;
   try {
-    await fetchJSON(`/api/print/colis/${p.colis.id}/drop`, { method: "POST" });
+    await fetchJSON(p.colis ? `/api/print/colis/${p.colis.id}/drop` : `/api/special/paires/${p.id}/fini`, {
+      method: "POST",
+    });
     // le colis quitte la liste : on reste a la meme place, qui montre le suivant
     lockerPaires.splice(lockerIndex, 1);
     if (lockerPaires.length === 0) return fermeLocker();
