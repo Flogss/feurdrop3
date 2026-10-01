@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const { DatabaseSync } = require("node:sqlite");
+const { EventEmitter } = require("events");
 
 // Un DB_PATH relatif pointe vers le systeme de fichiers du conteneur, qui est
 // recree a chaque deploiement : si un volume est monte, il gagne toujours.
@@ -609,6 +610,12 @@ function getCarrierSummary() {
     .all(...params);
 }
 
+// Signale les colis qui viennent de passer en drope, d'ou que vienne le drop
+// (site, fin de tournee, bouton Telegram) : le bot ecoute pour remettre
+// "Drope" sous leurs fichiers. Un seul point d'emission, ici, plutot qu'un
+// rappel a ne pas oublier dans chaque route.
+const evenements = new EventEmitter();
+
 // Toutes les operations de drop renvoient { count, bj } : le stock normal et
 // le stock BJ se decrementent separement.
 function dropWhere(extraSql, extraParams = []) {
@@ -616,12 +623,16 @@ function dropWhere(extraSql, extraParams = []) {
   const where = `status = 'pending'${extraSql}${clause}`;
   const args = [...extraParams, ...params];
 
+  // les identifiants avant la mise a jour : apres, plus rien ne les distingue
+  // des colis dropes avant. Les deux lectures se suivent sans rien entre elles.
+  const ids = db.prepare(`SELECT id FROM colis WHERE ${where}`).all(...args).map((r) => r.id);
   const bj = db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${where} AND type = 'bj'`).get(...args).c;
   const info = db
     .prepare(`UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE ${where}`)
     .run(...args);
 
   endTourIfEmpty();
+  if (ids.length) evenements.emit("dropes", ids);
   return { count: info.changes, bj };
 }
 
@@ -652,6 +663,7 @@ function dropColis(id) {
   if (!colis) return null;
   db.prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE id = ?").run(id);
   endTourIfEmpty();
+  evenements.emit("dropes", [colis.id]);
   return { count: 1, bj: colis.type === "bj" ? 1 : 0 };
 }
 
@@ -1140,6 +1152,7 @@ function setBatchType(batchId, type) {
 
 module.exports = {
   db,
+  evenements,
   getOrCreateSender,
   updateSenderPrices,
   addColis,

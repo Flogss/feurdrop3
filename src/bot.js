@@ -28,6 +28,7 @@ const {
   getPrintJobs,
   getPrintJobColis,
   getColisById,
+  evenements,
   dropColis,
   consumeStock,
   FREE_STATUS,
@@ -700,8 +701,7 @@ function retireCodeSpecial(bot, msg, paire, alsoDeleteFile) {
       console.error("[bot] suppression du code impossible :", err.message)
     );
   } else {
-    ecritureGroupe(() => bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }))
-      .catch(() => {});
+    poseBoutons(bot, chatId, messageId, { inline_keyboard: [] }).catch(() => {});
   }
   if (reste?.colis_id) refreshFileButtons(bot, getColisById(reste.colis_id));
 
@@ -785,19 +785,94 @@ function tronque(texte, max) {
   return propre.length > max ? `${propre.slice(0, max - 1)}…` : propre;
 }
 
+// --- Pose des boutons ---------------------------------------------------------
+// Le dernier clavier pose sur chaque message, pour ne jamais renvoyer a
+// Telegram ce qu'il affiche deja. Un drop fait depuis le bouton Telegram, puis
+// signale par la base, ne fait ainsi qu'une edition, pas deux -- et chaque
+// edition evitee est une place de plus pour les envois.
+const boutonsAffiches = new Map(); // "chat:message" -> clavier en JSON
+const BOUTONS_MEMOIRE = 5000;
+
+function retiensBoutons(chatId, messageId, clavier) {
+  const cle = `${chatId}:${messageId}`;
+  boutonsAffiches.delete(cle); // le plus recent passe en fin de liste
+  boutonsAffiches.set(cle, JSON.stringify(clavier || { inline_keyboard: [] }));
+  if (boutonsAffiches.size > BOUTONS_MEMOIRE) boutonsAffiches.delete(boutonsAffiches.keys().next().value);
+}
+
+function dejaAffiches(chatId, messageId, clavier) {
+  return boutonsAffiches.get(`${chatId}:${messageId}`) === JSON.stringify(clavier);
+}
+
+// Pose un clavier par la file d'ecriture. `clavier` peut etre une fonction :
+// il est alors calcule au moment de l'envoi, l'etat du colis ayant pu changer
+// pendant l'attente.
+function poseBoutons(bot, chatId, messageId, clavier, { priorite = "normale" } = {}) {
+  const calcule = () => (typeof clavier === "function" ? clavier() : clavier);
+  const avant = calcule();
+  if (!avant || dejaAffiches(chatId, messageId, avant)) return Promise.resolve();
+
+  return ecritureGroupe(() => edite(bot, chatId, messageId, calcule()), { priorite });
+}
+
+// Pour un bouton presse : l'edition part tout de suite, hors file -- c'est
+// la reponse au doigt, elle ne doit pas attendre derriere des envois.
+function poseBoutonsMaintenant(bot, chatId, messageId, clavier) {
+  return edite(bot, chatId, messageId, clavier).catch(() => {});
+}
+
+// Le clavier est note comme affiche AU DEPART de l'edition, pas a son retour :
+// deux editions identiques lancees ensemble (le bouton presse, et le signal de
+// drop qui suit) n'en font qu'une. Si Telegram refuse, on l'oublie -- un 429
+// reessaye par la file doit repartir pour de bon.
+async function edite(bot, chatId, messageId, clavier) {
+  if (!clavier || dejaAffiches(chatId, messageId, clavier)) return;
+  const cle = `${chatId}:${messageId}`;
+  const precedent = boutonsAffiches.get(cle);
+  retiensBoutons(chatId, messageId, clavier);
+  try {
+    await bot.editMessageReplyMarkup(clavier, { chat_id: chatId, message_id: messageId });
+  } catch (err) {
+    // deja ce clavier-la : Telegram le dit, ce n'est pas un echec
+    if (/not modified/i.test(err.message)) return;
+    if (precedent === undefined) boutonsAffiches.delete(cle);
+    else boutonsAffiches.set(cle, precedent);
+    throw err;
+  }
+}
+
 // Repose les boutons d'un colis en relisant son etat : appele apres /note, un
 // drop, une correction depuis le site.
-function refreshFileButtons(bot, colis) {
-  if (!colis || !colis.chat_id || !colis.message_id || !aDesBoutons(colis)) return;
-  ecritureGroupe(() =>
-    bot.editMessageReplyMarkup(boutonsDe(colis), {
-      chat_id: colis.chat_id,
-      message_id: colis.message_id,
-    })
+function refreshFileButtons(bot, colis, { priorite = "normale" } = {}) {
+  if (!colis || !colis.chat_id || !colis.message_id) return;
+  const id = colis.id;
+  poseBoutons(
+    bot,
+    colis.chat_id,
+    colis.message_id,
+    () => {
+      const frais = getColisById(id);
+      return frais && aDesBoutons(frais) ? boutonsDe(frais) : null;
+    },
+    { priorite }
   )
     // le message n'a pas forcement de boutons (colis d'avant cette version)
     .catch(() => {});
 }
+
+// Un drop fait sur le site -- ou en fin de tournee, ou depuis le bouton --
+// remet "Drope" sous les fichiers concernes. En voie basse : un "tout drope"
+// sur cinquante colis ne doit pas retarder un fichier qui arrive au meme
+// moment.
+evenements.on("dropes", (ids) => {
+  if (!botInstance) return;
+  for (const id of ids) {
+    const colis = getColisById(id);
+    // seuls les fichiers republies par le bot ont des boutons a modifier
+    if (!colis || colis.chat_id !== AUTO_GROUP_CHAT_ID || !colis.message_id) continue;
+    refreshFileButtons(botInstance, colis, { priorite: "basse" });
+  }
+});
 
 // --- File des envois en tete-a-tete ------------------------------------------
 // Dix PDF laches d'un coup arrivaient en dix aiguillages simultanes : Telegram
@@ -976,12 +1051,13 @@ async function routeToTopic(bot, msg, attachment, batches) {
   // republie : son numero part avec lui, sous le fichier
   const appairage = type === "special" ? apparieColis(colis.id, senderName) : null;
 
+  const clavier = aDesBoutons(colis) ? boutonsDe(getColisById(colis.id)) : null;
   let copie;
   try {
     copie = await ecritureGroupe(() =>
       bot.copyMessage(AUTO_GROUP_CHAT_ID, msg.chat.id, msg.message_id, {
         message_thread_id: topic,
-        ...(aDesBoutons(colis) ? { reply_markup: boutonsDe(getColisById(colis.id)) } : {}),
+        ...(clavier ? { reply_markup: clavier } : {}),
       }),
       { envoi: true }
     );
@@ -1004,6 +1080,7 @@ async function routeToTopic(bot, msg, attachment, batches) {
   }
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+  if (clavier) retiensBoutons(AUTO_GROUP_CHAT_ID, copie.message_id, clavier);
 
   if (direct) planifieEffacement(msg, copie.message_id, { colisId: colis.id });
 
@@ -1101,6 +1178,7 @@ async function republieCode(bot, msg, attachment) {
   }
 
   setCodeMessage(paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+  retiensBoutons(AUTO_GROUP_CHAT_ID, copie.message_id, boutonsCode(paire));
   planifieEffacement(msg, copie.message_id, { paireId: paire.id });
   if (completee && paire.colis_id) boutonsEnFinDeFile.add(paire.colis_id);
   return paire;
@@ -1115,14 +1193,12 @@ function boutonsCode(paire) {
 }
 
 function majBoutonsCode(bot, paire) {
-  const a_jour = getPaire(paire.id);
-  if (!a_jour || !a_jour.code_message_id) return;
-  ecritureGroupe(() =>
-    bot.editMessageReplyMarkup(boutonsCode(a_jour), {
-      chat_id: a_jour.code_chat_id,
-      message_id: a_jour.code_message_id,
-    })
-  ).catch(() => {});
+  const actuelle = getPaire(paire.id);
+  if (!actuelle || !actuelle.code_message_id) return;
+  poseBoutons(bot, actuelle.code_chat_id, actuelle.code_message_id, () => {
+    const p = getPaire(paire.id);
+    return p ? boutonsCode(p) : null;
+  }).catch(() => {});
 }
 
 // Taper sur le bouton d'un code : a quel colis il va.
@@ -1190,8 +1266,7 @@ async function handleFileButton(bot, query) {
 
   const chatId = query.message.chat.id;
   const messageId = query.message.message_id;
-  const poseBoutons = (etat) =>
-    bot.editMessageReplyMarkup(boutonsDe(etat), { chat_id: chatId, message_id: messageId }).catch(() => {});
+  const poseBoutons = (etat) => poseBoutonsMaintenant(bot, chatId, messageId, boutonsDe(etat));
 
   // le bouton de la note n'agit pas : il affiche le texte en entier, que le
   // bouton tronque a 40 caracteres
@@ -1246,7 +1321,7 @@ async function handleFileButton(bot, query) {
       );
       return repondre("Colis retire et fichier efface.");
     }
-    await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => {});
+    await poseBoutonsMaintenant(bot, chatId, messageId, { inline_keyboard: [] });
     return repondre("Colis retire du suivi. Le fichier reste ici.");
   }
 
@@ -1259,19 +1334,7 @@ async function handleFileButton(bot, query) {
 // par la file cadencee, sinon Telegram en refuse la moitie (429) et les
 // boutons Drop n'apparaissent que sous une partie des fichiers.
 function markButtonsPrinted(bot, ids) {
-  for (const id of ids) {
-    const colis = getColisById(id);
-    if (!colis || !colis.chat_id || !colis.message_id || !aDesBoutons(colis)) continue;
-    ecritureGroupe(() =>
-      bot.editMessageReplyMarkup(boutonsDe(colis), {
-        chat_id: colis.chat_id,
-        message_id: colis.message_id,
-      })
-    )
-      // le message n'a pas forcement de boutons (colis poste avant cette
-      // version, ou deja marque) : ce n'est pas une erreur
-      .catch(() => {});
-  }
+  for (const id of ids) refreshFileButtons(bot, getColisById(id));
 }
 
 // --- Deplacer un colis d'un topic a un autre ---------------------------------
@@ -1331,6 +1394,7 @@ async function deplaceFichier(bot, colis, type, { code = false, apparier = true 
   }
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
+  if (boutons) retiensBoutons(AUTO_GROUP_CHAT_ID, copie.message_id, boutons);
   if (code) {
     setCodeMessage(appairage.paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
     if (appairage.completee) refreshFileButtons(bot, getColisById(appairage.paire.colis_id));

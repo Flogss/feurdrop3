@@ -41,7 +41,6 @@ function createWriteQueue({
   onWait = null,
 } = {}) {
   let derniere = 0;
-  let chaine = Promise.resolve();
 
   // horodatage des derniers envois, sur une minute glissante
   const envois = [];
@@ -60,32 +59,55 @@ function createWriteQueue({
     }
   }
 
-  function enqueue(action, { envoi = false } = {}) {
-    const resultat = chaine.then(async () => {
-      for (let essai = 0; ; essai++) {
-        if (envoi) await attendsCreneau();
-        const attente = derniere + intervalMs - Date.now();
-        if (attente > 0) await sleep(attente);
-        try {
-          const sortie = await action();
-          derniere = Date.now();
-          return sortie;
-        } catch (err) {
-          const secondes = delaiDemande(err);
-          derniere = Date.now();
-          // une erreur qui n'est pas un 429 ne se resout pas en attendant
-          if (secondes === null || essai >= retries) throw err;
-          if (onWait) onWait(secondes);
-          await sleep(secondes * 1000 + Math.min(250, intervalMs));
-        }
+  // Deux voies. La voie normale passe dans l'ordre d'arrivee ; la voie basse
+  // (remettre "Drope" sous cinquante fichiers apres un drop groupe sur le
+  // site) n'avance que quand la normale est vide. Un fichier envoye pendant
+  // ce temps passe donc devant, au lieu d'attendre derriere cinquante
+  // editions de boutons.
+  const normales = [];
+  const basses = [];
+  let enCours = false;
+
+  async function execute({ action, envoi }) {
+    for (let essai = 0; ; essai++) {
+      if (envoi) await attendsCreneau();
+      const attente = derniere + intervalMs - Date.now();
+      if (attente > 0) await sleep(attente);
+      try {
+        const sortie = await action();
+        derniere = Date.now();
+        return sortie;
+      } catch (err) {
+        const secondes = delaiDemande(err);
+        derniere = Date.now();
+        // une erreur qui n'est pas un 429 ne se resout pas en attendant
+        if (secondes === null || essai >= retries) throw err;
+        if (onWait) onWait(secondes);
+        await sleep(secondes * 1000 + Math.min(250, intervalMs));
       }
+    }
+  }
+
+  async function pompe() {
+    if (enCours) return;
+    enCours = true;
+    while (normales.length || basses.length) {
+      const tache = normales.shift() || basses.shift();
+      try {
+        tache.resolve(await execute(tache));
+      } catch (err) {
+        // une ecriture ratee ne bloque pas les suivantes
+        tache.reject(err);
+      }
+    }
+    enCours = false;
+  }
+
+  function enqueue(action, { envoi = false, priorite = "normale" } = {}) {
+    return new Promise((resolve, reject) => {
+      (priorite === "basse" ? basses : normales).push({ action, envoi, resolve, reject });
+      pompe();
     });
-    // une ecriture ratee ne doit pas bloquer les suivantes
-    chaine = resultat.then(
-      () => {},
-      () => {}
-    );
-    return resultat;
   }
 
   return enqueue;
