@@ -45,6 +45,7 @@ const {
   setAutoPrintEnabled,
   getUnprintedLabels,
   countUnprintedLabels,
+  countLitPrintable,
   markPrinted,
   getPrintToken,
 } = require("../db");
@@ -130,6 +131,8 @@ router.get("/stats", (req, res) => {
     bySender,
     byCarrier: getCarrierSummary(),
     autoPrint: { enabled: isAutoPrintEnabled(), pending: countUnprintedLabels() },
+    // etiquettes jamais imprimees, LIT compris : la pastille de l'onglet Imprime
+    aImprimer: countUnprintedLabels() + countLitPrintable({ scope: "new" }),
     tour: {
       startedAt: getTourStart(),
       arrivedCount: arrived.count,

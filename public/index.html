@@ -3,10 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<title>DROP // Control Center</title>
+<title>DROP.ctrl</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#05060a" />
+<meta name="theme-color" content="#0b0c0e" />
+<meta name="color-scheme" content="dark" />
 <!-- iOS n'utilise pas le manifest pour l'ajout a l'ecran d'accueil : il lui
      faut ces balises pour ouvrir le site en plein ecran (et donc autoriser
      les notifications push). -->
@@ -17,28 +18,53 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<div class="bg-grid"></div>
-<div class="bg-glow"></div>
-<div class="bg-particles">
-  <span style="left:4%; bottom:-20px; width:5px; height:5px; background:#38f7ff; --p-dx:20px; --p-dy:-70vh; --p-op:0.45; animation-duration:20s; animation-delay:0s;"></span>
-  <span style="left:11%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:-25px; --p-dy:-55vh; --p-op:0.35; animation-duration:15s; animation-delay:2s;"></span>
-  <span style="left:18%; bottom:-20px; width:6px; height:6px; background:#b6ff3e; --p-dx:15px; --p-dy:-80vh; --p-op:0.3; animation-duration:24s; animation-delay:1s;"></span>
-  <span style="left:26%; bottom:-20px; width:4px; height:4px; background:#38f7ff; --p-dx:-20px; --p-dy:-65vh; --p-op:0.4; animation-duration:18s; animation-delay:5s;"></span>
-  <span style="left:34%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:25px; --p-dy:-75vh; --p-op:0.3; animation-duration:22s; animation-delay:3s;"></span>
-  <span style="left:41%; bottom:-20px; width:5px; height:5px; background:#b6ff3e; --p-dx:-15px; --p-dy:-60vh; --p-op:0.35; animation-duration:16s; animation-delay:8s;"></span>
-  <span style="left:49%; bottom:-20px; width:4px; height:4px; background:#38f7ff; --p-dx:20px; --p-dy:-85vh; --p-op:0.4; animation-duration:26s; animation-delay:4s;"></span>
-  <span style="left:56%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:-25px; --p-dy:-65vh; --p-op:0.3; animation-duration:19s; animation-delay:10s;"></span>
-  <span style="left:63%; bottom:-20px; width:6px; height:6px; background:#38f7ff; --p-dx:15px; --p-dy:-70vh; --p-op:0.35; animation-duration:21s; animation-delay:6s;"></span>
-  <span style="left:70%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:20px; --p-dy:-75vh; --p-op:0.4; animation-duration:17s; animation-delay:11s;"></span>
-  <span style="left:77%; bottom:-20px; width:4px; height:4px; background:#b6ff3e; --p-dx:-15px; --p-dy:-60vh; --p-op:0.3; animation-duration:23s; animation-delay:7s;"></span>
-  <span style="left:84%; bottom:-20px; width:5px; height:5px; background:#38f7ff; --p-dx:-20px; --p-dy:-70vh; --p-op:0.4; animation-duration:20s; animation-delay:13s;"></span>
-  <span style="left:90%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:10px; --p-dy:-55vh; --p-op:0.3; animation-duration:15s; animation-delay:9s;"></span>
-  <span style="left:96%; bottom:-20px; width:4px; height:4px; background:#b6ff3e; --p-dx:-10px; --p-dy:-80vh; --p-op:0.25; animation-duration:25s; animation-delay:14s;"></span>
-  <span style="left:8%; bottom:-20px; width:3px; height:3px; background:#ff3ecb; --p-dx:-15px; --p-dy:-90vh; --p-op:0.25; animation-duration:27s; animation-delay:16s;"></span>
-  <span style="left:45%; bottom:-20px; width:3px; height:3px; background:#38f7ff; --p-dx:15px; --p-dy:-95vh; --p-op:0.3; animation-duration:29s; animation-delay:2s;"></span>
-  <span style="left:60%; bottom:-20px; width:5px; height:5px; background:#b6ff3e; --p-dx:-20px; --p-dy:-68vh; --p-op:0.35; animation-duration:18s; animation-delay:12s;"></span>
-  <span style="left:73%; bottom:-20px; width:3px; height:3px; background:#38f7ff; --p-dx:20px; --p-dy:-72vh; --p-op:0.3; animation-duration:21s; animation-delay:0.5s;"></span>
-</div>
+<!-- Icones : un seul jeu, trait de 1,75, appele par <use href="#i-…">. -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3.5v10.5M7.5 9.5 12 14l4.5-4.5"/><path d="M4.5 14.5v3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v10.5a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1V9"/></symbol>
+  <symbol id="i-printer" viewBox="0 0 24 24"><path d="M7 8.5V3.5h10v5"/><rect x="3" y="8.5" width="18" height="8.5" rx="2"/><path d="M7 14h10v6.5H7z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 16.5v-5"/><path d="M12 16.5V5"/><path d="M17.5 16.5v-8"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M3.5 6.5h9M17.5 6.5h3"/><circle cx="15" cy="6.5" r="2.25"/><path d="M3.5 12h2M10.5 12h10"/><circle cx="8" cy="12" r="2.25"/><path d="M3.5 17.5h11M19.5 17.5h1"/><circle cx="17" cy="17.5" r="2.25"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 16.5V6H2.5v10.5H4"/><path d="M14 16.5H9.5"/><path d="M14 9.5h4.2l3.3 3.6v3.4H20"/><circle cx="6.75" cy="17" r="2.25"/><circle cx="17.25" cy="17" r="2.25"/></symbol>
+  <symbol id="i-home-in" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M20.5 7.5 12 3 3.5 7.5v9L12 21l8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5"/><path d="M12 12v9"/><path d="m7.75 5.25 8.5 4.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15.5" r="4.5"/><path d="m11.2 12.3 8.3-8.3"/><path d="m16 7.5 2.5 2.5"/><path d="m18.5 5 2 2"/></symbol>
+  <symbol id="i-barcode" viewBox="0 0 24 24"><path d="M3.5 5.5v13M7 5.5v13M10 5.5v13M14 5.5v13M17 5.5v13M20.5 5.5v13"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.75-4.75"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6.5 2.5 8.5 2.5 8.5h-17S6 15.5 6 9"/><path d="M10.25 20.5a2 2 0 0 0 3.5 0"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6.5 9.5 17 4 11.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.83 2.83 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v5.5M14 11v5.5"/><path d="M6 7l.9 12.1a1.5 1.5 0 0 0 1.5 1.4h7.2a1.5 1.5 0 0 0 1.5-1.4L18 7"/><path d="M9 7V4.5h6V7"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21l-4-7.5L3 9.5z"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11.5" height="11.5" rx="2.5"/><path d="M15 9V5.5A2 2 0 0 0 13 3.5H5.5a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5V8H16"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6.5a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3.5M7 8.5l5-5 5 5"/><path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M15 20.5H5.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2V15z"/><path d="M15 20.5V15h5.5"/><path d="M8 8.5h8M8 12h5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.25 4.1 1 5.85L12 16.9l-5.25 2.75 1-5.85L3.5 9.7l5.9-.9z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9.5v4M12 17h.01"/><path d="M10.3 4 2.4 17.6A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-2.9L13.7 4a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7.5v9"/><path d="M6 7.5c0 3 2.5 4.5 6 4.5h4"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></symbol>
+  <symbol id="i-euro" viewBox="0 0 24 24"><path d="M18 6.5a7 7 0 1 0 0 11"/><path d="M4 10h9M4 14h9"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.3 8.3-8.7 8.7z"/><circle cx="8" cy="8" r="1.5"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3.5h6.5V10M20.5 3.5 11.5 12.5"/><path d="M18.5 14v4.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2H10"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4h12l-2 4 2 4H5"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5a1.5 1.5 0 0 1 1.4-1h9.2a1.5 1.5 0 0 1 1.4 1l2.5 8"/><path d="M3.5 13.5v5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-5h-5l-1.5 2.5h-4L8.5 13.5z"/></symbol>
+  <symbol id="i-party" viewBox="0 0 24 24"><path d="M4 20 8.5 7.5l8 8z"/><path d="M14 4.5c.8 1 .8 2.2 0 3.2M19.5 10c-1-.8-2.2-.8-3.2 0M17.5 3.5v1M20.5 6.5h-1M11 3.5l.5 1"/></symbol>
+</svg>
+
+<div class="ambient" aria-hidden="true"></div>
 
 <!-- Mode locker : le code-barre en plein ecran, sur fond blanc pour le
      lecteur, le numero en tres gros pour le rapprocher du colis. -->
@@ -46,7 +72,9 @@
   <div class="locker-top">
     <span class="locker-num" id="locker-num">#1</span>
     <span class="locker-pos" id="locker-pos">1 / 1</span>
-    <button class="locker-close" id="locker-close" type="button" aria-label="Fermer">✕</button>
+    <button class="locker-close" id="locker-close" type="button" aria-label="Fermer">
+      <svg class="icon"><use href="#i-x"/></svg>
+    </button>
   </div>
   <div class="locker-code" id="locker-code">
     <img id="locker-img" alt="" />
@@ -57,412 +85,553 @@
     <div class="locker-sub" id="locker-sub">—</div>
   </div>
   <div class="locker-actions">
-    <button class="locker-btn" id="locker-prev" type="button" aria-label="Précédent">←</button>
-    <button class="locker-btn locker-drop" id="locker-drop" type="button">📮 Déposé</button>
-    <button class="locker-btn" id="locker-next" type="button" aria-label="Suivant">→</button>
+    <button class="locker-btn" id="locker-prev" type="button" aria-label="Précédent">
+      <svg class="icon"><use href="#i-arrow-left"/></svg>
+    </button>
+    <button class="locker-btn locker-drop" id="locker-drop" type="button">Déposé</button>
+    <button class="locker-btn" id="locker-next" type="button" aria-label="Suivant">
+      <svg class="icon"><use href="#i-arrow-right"/></svg>
+    </button>
   </div>
 </div>
 
 <div class="app">
   <header class="topbar">
-    <button class="brand" id="brand-home" type="button">
-      <span class="brand-dot"></span>
-      <span class="brand-text">DROP<span class="brand-accent">.ctrl</span></span>
+    <button class="brand" id="brand-home" type="button" aria-label="Retour au dashboard">
+      <span class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></span>
+      <span class="brand-word">DROP<span class="brand-ext">.ctrl</span></span>
     </button>
-    <div class="status">
-      <span class="pulse"></span>
-      <span>bot en ligne</span>
+
+    <nav class="tabbar" id="tabbar" aria-label="Navigation">
+      <span class="tab-indicator" aria-hidden="true"></span>
+      <button class="tab active" data-view="dashboard" type="button">
+        <svg class="icon"><use href="#i-home"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="tab" data-view="imprime" type="button">
+        <svg class="icon"><use href="#i-printer"/></svg>
+        <span>Imprimé</span>
+        <span class="tab-badge" id="tab-badge-imprime"></span>
+      </button>
+      <button class="tab" data-view="stats" type="button">
+        <svg class="icon"><use href="#i-chart"/></svg>
+        <span>Stats</span>
+      </button>
+    </nav>
+
+    <div class="topbar-end">
+      <span class="live" id="live-status" title="Synchronisation avec le serveur">
+        <span class="live-dot"></span>
+        <span class="live-text" id="live-text">En direct</span>
+      </span>
+      <button class="icon-btn" id="topbar-settings" type="button" aria-label="Réglages">
+        <svg class="icon"><use href="#i-settings"/></svg>
+      </button>
     </div>
   </header>
 
   <main>
-    <section id="view-dashboard" class="view active">
-      <div class="stat-grid">
-        <div class="stat-card glow-cyan">
-          <div class="stat-label">Gagné total</div>
-          <div class="stat-value" id="stat-earned">0.00 €</div>
-          <div class="stat-sub" id="stat-earned-count">0 colis dropés</div>
-        </div>
-        <div class="stat-card glow-magenta">
-          <div class="stat-label">À dropper</div>
-          <div class="stat-value" id="stat-pending">0</div>
-          <div class="stat-sub" id="stat-pending-value">≈ 0.00 €</div>
-        </div>
-        <div class="stat-card glow-lime">
-          <div class="stat-label">Aujourd'hui</div>
-          <div class="stat-value" id="stat-today">0.00 €</div>
-          <div class="stat-sub" id="stat-today-count">0 colis dropés</div>
-        </div>
-      </div>
-
-      <div class="strip-row">
-        <div class="stat-card stat-strip glow-yellow">
-          <div class="stat-label">BJ à dropper</div>
-          <div class="strip-values">
-            <span class="stat-value" id="stat-bj">0</span>
-            <span class="stat-sub" id="stat-bj-value">≈ 0.00 €</span>
-          </div>
-        </div>
-        <button class="tour-btn" id="tour-btn" type="button">
-          <span class="tour-btn-icon">🚚</span>
-          <span class="tour-btn-text" id="tour-btn-text">Je pars poster</span>
-        </button>
-      </div>
-
-      <div class="tour-banner" id="tour-banner" hidden>
-        <div class="tour-banner-head">
-          <span class="tour-chrono" id="tour-chrono">00:00</span>
-          <button class="tour-cancel" id="tour-cancel" type="button">Annuler</button>
-        </div>
-        <span class="tour-banner-sub" id="tour-banner-sub">—</span>
-      </div>
-
-      <div class="tour-banner tour-summary" id="tour-summary" hidden>
-        <div class="tour-banner-head">
-          <span class="tour-summary-title" id="tour-summary-title">Tournée terminée</span>
-          <button class="tour-cancel" id="tour-summary-close" type="button">Fermer</button>
-        </div>
-        <span class="tour-banner-sub" id="tour-summary-sub">—</span>
-        <div class="tour-rate" id="tour-rate"></div>
-        <span class="tour-banner-sub" id="tour-day" hidden>—</span>
-      </div>
-
-      <div class="stock-grid">
-        <div class="panel stock-panel">
-          <div class="panel-head">
-            <h2>Stock restant</h2>
-          </div>
-          <div class="stock-row">
-            <button class="btn btn-round btn-ghost" data-stock="normal" data-delta="-1" title="-1">−</button>
-            <div class="stock-value" id="stock-value">0</div>
-            <button class="btn btn-round btn-primary" data-stock="normal" data-delta="1" title="+1">+</button>
-          </div>
-          <form class="stock-custom-form" data-stock-form="normal">
-            <input type="number" placeholder="± qté" step="1" required />
-            <button type="submit" class="btn btn-primary btn-small">Ajouter</button>
-          </form>
-        </div>
-
-        <div class="panel stock-panel stock-panel-bj">
-          <div class="panel-head">
-            <h2>Stock BJ</h2>
-          </div>
-          <div class="stock-row">
-            <button class="btn btn-round btn-ghost" data-stock="bj" data-delta="-1" title="-1">−</button>
-            <div class="stock-value" id="stock-bj-value">0</div>
-            <button class="btn btn-round btn-primary" data-stock="bj" data-delta="1" title="+1">+</button>
-          </div>
-          <form class="stock-custom-form" data-stock-form="bj">
-            <input type="number" placeholder="± qté" step="1" required />
-            <button type="submit" class="btn btn-primary btn-small">Ajouter</button>
-          </form>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Compagnies à poster</h2>
-        </div>
-        <div id="carrier-rows" class="rows rows-dense"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Répartition par expéditeur</h2>
-          <div class="drop-all-group">
-            <button class="btn btn-ghost btn-small drop-except-lit-btn">Tout sauf LIT</button>
-            <button class="btn btn-ghost btn-small drop-all-btn">Tout dropé</button>
-          </div>
-        </div>
-        <div id="sender-rows" class="rows rows-dense"></div>
-      </div>
-
-      <button class="settings-link suivi-link" id="suivi-link" type="button">
-        <svg viewBox="0 0 24 24"><path d="M3 7h13v10H3zM16 10h3.5l1.5 3v4h-5M6.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM17.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/></svg>
-        <span>Suivi des colis</span>
-        <span class="suivi-link-count" id="suivi-link-count"></span>
-      </button>
-
-      <button class="settings-link suivi-link" id="special-link" type="button">
-        <svg viewBox="0 0 24 24"><path d="M4 5v14M7 5v14M10 5v14M13 5v14M15 5v14M18 5v14M20 5v14"/></svg>
-        <span>Mode locker</span>
-        <span class="suivi-link-count" id="special-link-count"></span>
-      </button>
-
-      <button class="settings-link" id="settings-link" type="button">
-        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5v.2a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H2.9a2 2 0 010-4H3a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.2a2 2 0 010 4H21a1.7 1.7 0 00-1.5 1z"/></svg>
-        <span>Réglages</span>
-      </button>
-    </section>
-
-    <section id="view-colis" class="view">
-      <div class="view-head">
-        <button class="btn btn-ghost btn-small" id="settings-back" type="button">← Dashboard</button>
-        <h1>Réglages</h1>
-      </div>
-
-      <div class="panel" id="push-panel" hidden>
-        <div class="panel-head">
-          <h2>Notifications</h2>
-          <span class="push-state" id="push-state">—</span>
-        </div>
-        <p class="hint" id="push-hint" hidden></p>
-        <div class="push-actions">
-          <button class="btn btn-primary" id="push-enable">Activer les notifications</button>
-          <button class="btn btn-ghost" id="push-test" hidden>Tester</button>
-          <button class="btn btn-ghost" id="push-disable" hidden>Désactiver</button>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Impression auto</h2>
-          <span class="push-state" id="autoprint-state">—</span>
-        </div>
-        <p class="hint" id="autoprint-hint" hidden></p>
-        <div class="push-actions">
-          <button class="btn btn-primary" id="autoprint-toggle">Activer</button>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Ce qu'on nous doit</h2>
-        </div>
-        <div id="debts-rows" class="rows"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Prix par expéditeur</h2>
-          <span class="price-legend"><span class="legend-normal">normal</span> / <span class="legend-lit">LIT</span> / <span class="legend-bj">BJ</span></span>
-        </div>
-        <div id="settings-rows" class="rows"></div>
-        <form id="add-sender-form" class="add-form">
-          <input type="text" id="new-sender-name" placeholder="Nom exact de l'expéditeur" required />
-          <input type="number" id="new-sender-price" placeholder="Normal €" step="0.5" min="0" required />
-          <input type="number" id="new-sender-lit-price" placeholder="LIT €" step="0.5" min="0" required />
-          <input type="number" id="new-sender-bj-price" placeholder="BJ €" step="0.5" min="0" required />
-          <button type="submit" class="btn btn-primary">Ajouter</button>
-        </form>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Fusionner deux expéditeurs</h2>
-        </div>
-        <form id="merge-pair-form" class="merge-pair-form">
-          <label class="merge-pair-field">
-            <span class="price-tag">Ancien (supprimé)</span>
-            <select id="merge-source"></select>
-          </label>
-          <span class="merge-pair-arrow">→</span>
-          <label class="merge-pair-field">
-            <span class="price-tag">À conserver</span>
-            <select id="merge-target"></select>
-          </label>
-          <button type="submit" class="btn btn-primary">Fusionner</button>
-        </form>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Regrouper en "Autre"</h2>
-        </div>
-        <div id="merge-rows" class="rows"></div>
-        <button class="btn btn-ghost" id="merge-to-other-btn" disabled>Fusionner la sélection en "Autre"</button>
-      </div>
-    </section>
-
-    <section id="view-special" class="view">
-      <div class="view-head">
-        <button class="btn btn-ghost btn-small" id="special-back" type="button">← Dashboard</button>
-        <h1>Mode locker</h1>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Codes spéciaux</h2>
-          <span class="chart-range" id="special-count">—</span>
-        </div>
-        <button class="btn btn-primary imp-go" id="special-start" type="button">🔑 Ouvrir au #1</button>
-        <div id="special-list" class="special-list"></div>
-      </div>
-    </section>
-
-    <section id="view-suivi" class="view">
-      <div class="view-head">
-        <button class="btn btn-ghost btn-small" id="suivi-back" type="button">← Dashboard</button>
-        <h1>Suivi des colis</h1>
-      </div>
-
-      <div class="panel" id="suivi-check-panel">
-        <div class="panel-head">
-          <h2>Vérifications</h2>
-          <span class="chart-range" id="suivi-total">—</span>
-        </div>
-
-        <!-- écran de passage : visible seulement pendant une vérification -->
-        <div class="suivi-live" id="suivi-live" hidden>
-          <div class="suivi-live-head">
-            <span class="suivi-live-source" id="suivi-live-source">—</span>
-            <button class="btn btn-ghost btn-small" id="suivi-cancel" type="button">Arrêter</button>
+    <!-- ===================================================== DASHBOARD -->
+    <section id="view-dashboard" class="view active" aria-label="Dashboard">
+      <div class="dash">
+        <article class="card hero" id="hero">
+          <div class="hero-head">
+            <span class="eyebrow" id="hero-eyebrow">À dropper</span>
+            <span class="tour-pill" id="tour-banner" hidden>
+              <span class="live-dot"></span>
+              <span>En tournée</span>
+              <span class="tour-chrono" id="tour-chrono">00:00</span>
+            </span>
           </div>
 
-          <div class="suivi-counter">
-            <span class="suivi-counter-value" id="suivi-counter">0</span>
-            <span class="suivi-counter-total" id="suivi-counter-total">/ 0</span>
+          <div class="hero-figure">
+            <span class="hero-value" id="stat-pending" data-skeleton>0</span>
+            <span class="hero-unit" id="stat-pending-unit">colis</span>
+          </div>
+          <div class="hero-sub" id="stat-pending-value">≈ 0,00 €</div>
+
+          <div class="hero-chips">
+            <span class="chip chip-bj" id="chip-bj"><b id="stat-bj">0</b> BJ · <span id="stat-bj-value">0,00 €</span></span>
+            <span class="chip chip-lit" id="chip-lit" hidden><b id="stat-lit">0</b> LIT</span>
           </div>
 
-          <div class="suivi-gauge">
-            <div class="suivi-track">
-              <div class="suivi-ticks"></div>
-              <div class="suivi-fill" id="suivi-fill">
-                <span class="suivi-fill-glow"></span>
-                <span class="suivi-fill-grid"></span>
-              </div>
-              <div class="suivi-head" id="suivi-head"></div>
+          <!-- de quoi est fait le sac : une barre par transporteur -->
+          <div class="hero-mix" id="hero-mix" hidden>
+            <div class="mix-bar" id="mix-bar"></div>
+            <div class="mix-legend" id="mix-legend"></div>
+          </div>
+
+          <p class="hero-note" id="tour-banner-sub" hidden></p>
+
+          <div class="hero-actions">
+            <button class="btn btn-primary btn-lg" id="tour-btn" type="button">
+              <svg class="icon" id="tour-btn-icon"><use href="#i-truck"/></svg>
+              <span id="tour-btn-text">Je pars poster</span>
+            </button>
+            <button class="btn btn-secondary btn-lg" id="tour-cancel" type="button" hidden>Annuler</button>
+          </div>
+        </article>
+
+        <article class="card summary" id="tour-summary" hidden>
+          <header class="summary-head">
+            <span class="summary-icon"><svg class="icon"><use href="#i-flag"/></svg></span>
+            <div class="summary-titles">
+              <h2 class="summary-title" id="tour-summary-title">Tournée terminée</h2>
+              <p class="summary-sub" id="tour-summary-sub">—</p>
             </div>
-            <div class="suivi-reflect"><div class="suivi-reflect-fill" id="suivi-reflect"></div></div>
-            <span class="suivi-pct" id="suivi-pct">0 %</span>
+            <button class="icon-btn icon-btn-sm" id="tour-summary-close" type="button" aria-label="Fermer le résumé">
+              <svg class="icon"><use href="#i-x"/></svg>
+            </button>
+          </header>
+          <div class="tour-rate" id="tour-rate"></div>
+          <p class="summary-day" id="tour-day" hidden>—</p>
+        </article>
+
+        <div class="metrics">
+          <button class="card metric" data-goto="stats" type="button">
+            <span class="eyebrow">Aujourd'hui</span>
+            <span class="metric-value" id="stat-today" data-skeleton>0,00 €</span>
+            <span class="metric-sub" id="stat-today-count">0 colis dropés</span>
+          </button>
+          <button class="card metric" data-goto="stats" type="button">
+            <span class="eyebrow">Gagné au total</span>
+            <span class="metric-value" id="stat-earned" data-skeleton>0,00 €</span>
+            <span class="metric-sub" id="stat-earned-count">0 colis dropés</span>
+          </button>
+        </div>
+
+        <article class="card stock-card">
+          <header class="card-head">
+            <h2>Stock de pochettes</h2>
+          </header>
+          <div class="stocks">
+            <div class="stock" id="stock-normal">
+              <div class="stock-top">
+                <span class="stock-label">Normal</span>
+                <span class="stock-flag">Bas</span>
+              </div>
+              <div class="stepper">
+                <button class="step" data-stock="normal" data-delta="-1" type="button" aria-label="Retirer une pochette">
+                  <svg class="icon"><use href="#i-minus"/></svg>
+                </button>
+                <output class="stock-value" id="stock-value">0</output>
+                <button class="step" data-stock="normal" data-delta="1" type="button" aria-label="Ajouter une pochette">
+                  <svg class="icon"><use href="#i-plus"/></svg>
+                </button>
+              </div>
+              <form class="stock-custom-form" data-stock-form="normal">
+                <input class="field field-sm" type="number" inputmode="numeric" placeholder="± qté" step="1" required aria-label="Quantité à ajouter au stock normal" />
+                <button type="submit" class="btn btn-sm btn-secondary">OK</button>
+              </form>
+            </div>
+
+            <div class="stock stock-bj" id="stock-bj">
+              <div class="stock-top">
+                <span class="stock-label">BJ</span>
+                <span class="stock-flag">Bas</span>
+              </div>
+              <div class="stepper">
+                <button class="step" data-stock="bj" data-delta="-1" type="button" aria-label="Retirer une pochette BJ">
+                  <svg class="icon"><use href="#i-minus"/></svg>
+                </button>
+                <output class="stock-value" id="stock-bj-value">0</output>
+                <button class="step" data-stock="bj" data-delta="1" type="button" aria-label="Ajouter une pochette BJ">
+                  <svg class="icon"><use href="#i-plus"/></svg>
+                </button>
+              </div>
+              <form class="stock-custom-form" data-stock-form="bj">
+                <input class="field field-sm" type="number" inputmode="numeric" placeholder="± qté" step="1" required aria-label="Quantité à ajouter au stock BJ" />
+                <button type="submit" class="btn btn-sm btn-secondary">OK</button>
+              </form>
+            </div>
+          </div>
+        </article>
+
+        <article class="card carriers-card">
+          <header class="card-head">
+            <h2>À poster</h2>
+            <span class="card-meta" id="carrier-meta"></span>
+          </header>
+          <div id="carrier-rows" class="list"></div>
+        </article>
+
+        <article class="card senders-card">
+          <header class="card-head">
+            <h2>Expéditeurs</h2>
+            <div class="card-actions">
+              <button class="btn btn-sm btn-ghost drop-except-lit-btn" type="button">Tout sauf LIT</button>
+              <button class="btn btn-sm btn-secondary drop-all-btn" type="button">Tout dropé</button>
+            </div>
+          </header>
+          <div id="sender-rows" class="list"></div>
+        </article>
+
+        <nav class="tools" aria-label="Outils">
+          <button class="tool" id="suivi-link" type="button">
+            <span class="tool-icon tool-icon-blue"><svg class="icon"><use href="#i-search"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Suivi des colis</span>
+              <span class="tool-sub" id="suivi-link-count">Vérifier des numéros</span>
+            </span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
+          <button class="tool" id="special-link" type="button">
+            <span class="tool-icon tool-icon-gold"><svg class="icon"><use href="#i-lock"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Mode locker</span>
+              <span class="tool-sub">Codes des spéciaux</span>
+            </span>
+            <span class="tool-badge" id="special-link-count"></span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
+          <button class="tool" id="settings-link" type="button">
+            <span class="tool-icon"><svg class="icon"><use href="#i-settings"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Réglages</span>
+              <span class="tool-sub">Prix, dettes, notifications</span>
+            </span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
+        </nav>
+      </div>
+    </section>
+
+    <!-- ===================================================== IMPRIME -->
+    <section id="view-imprime" class="view" aria-label="Imprimé">
+      <header class="page-head">
+        <div class="page-titles">
+          <h1>Imprimé</h1>
+          <p class="page-sub" id="imp-total">—</p>
+        </div>
+        <button class="btn btn-primary btn-lg page-cta" id="imp-all" type="button">
+          <svg class="icon"><use href="#i-printer"/></svg>
+          <span>Tout imprimer</span>
+          <span class="btn-count" id="imp-all-count"></span>
+        </button>
+      </header>
+
+      <a class="banner banner-link" id="imp-last" href="#" target="_blank" rel="noopener" hidden></a>
+      <div class="banner banner-success" id="imp-notice" role="status" hidden></div>
+
+      <div class="imp-columns">
+        <article class="card">
+          <header class="card-head">
+            <h2>À imprimer</h2>
+          </header>
+          <div id="imp-categories" class="imp-categories"></div>
+        </article>
+
+        <article class="card">
+          <header class="card-head">
+            <h2>Déjà imprimées</h2>
+            <span class="card-meta" id="imp-printed-count">—</span>
+          </header>
+          <div id="imp-printed" class="imp-categories"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ===================================================== STATS -->
+    <section id="view-stats" class="view" aria-label="Stats">
+      <header class="page-head">
+        <div class="page-titles">
+          <h1>Stats</h1>
+          <p class="page-sub">Revenus des colis dropés</p>
+        </div>
+      </header>
+
+      <div class="stats-top">
+        <article class="card metric metric-feature" id="best-day-card">
+          <span class="eyebrow">Meilleure journée</span>
+          <span class="metric-value" id="stat-bestday-value">—</span>
+          <span class="metric-sub" id="stat-bestday-sub">Pas encore de données</span>
+        </article>
+        <article class="card metric">
+          <span class="eyebrow">Moyenne par jour</span>
+          <span class="metric-value" id="day-average">—</span>
+          <span class="metric-sub" id="day-average-sub">—</span>
+        </article>
+      </div>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Revenus par jour</h2>
+          <span class="card-meta" id="week-range">—</span>
+        </header>
+        <div class="chart-scroll" id="chart-week"><div class="chart-track"></div></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Revenus par semaine</h2>
+          <span class="card-meta" id="month-range">—</span>
+        </header>
+        <div class="chart-scroll" id="chart-month"><div class="chart-track"></div></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Gains par expéditeur</h2>
+        </header>
+        <div class="donut-wrap" id="donut-sender"></div>
+      </article>
+    </section>
+
+    <!-- ===================================================== REGLAGES -->
+    <section id="view-colis" class="view sub-view" aria-label="Réglages">
+      <header class="page-head">
+        <button class="back" id="settings-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Réglages</h1>
+        </div>
+      </header>
+
+      <div class="settings-grid">
+        <div class="settings-col">
+          <article class="card setting-card" id="push-panel" hidden>
+            <div class="setting-row">
+              <span class="setting-icon"><svg class="icon"><use href="#i-bell"/></svg></span>
+              <div class="setting-main">
+                <div class="setting-title">Notifications</div>
+                <div class="setting-sub" id="push-state">—</div>
+              </div>
+              <button class="switch" id="push-switch" type="button" role="switch" aria-checked="false" aria-label="Notifications">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <p class="hint" id="push-hint" hidden></p>
+            <div class="setting-extra" id="push-extra" hidden>
+              <button class="btn btn-sm btn-secondary" id="push-test" type="button">
+                <svg class="icon"><use href="#i-send"/></svg><span>Envoyer un test</span>
+              </button>
+            </div>
+          </article>
+
+          <article class="card setting-card">
+            <div class="setting-row">
+              <span class="setting-icon"><svg class="icon"><use href="#i-printer"/></svg></span>
+              <div class="setting-main">
+                <div class="setting-title">Impression auto</div>
+                <div class="setting-sub" id="autoprint-state">—</div>
+              </div>
+              <button class="switch" id="autoprint-toggle" type="button" role="switch" aria-checked="false" aria-label="Impression automatique">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <p class="hint" id="autoprint-hint" hidden></p>
+          </article>
+
+          <article class="card">
+            <header class="card-head">
+              <h2>Ce qu'on nous doit</h2>
+              <span class="card-meta" id="debts-total"></span>
+            </header>
+            <div id="debts-rows" class="list"></div>
+          </article>
+
+          <article class="card">
+            <header class="card-head">
+              <h2>Fusionner deux expéditeurs</h2>
+            </header>
+            <form id="merge-pair-form" class="merge-pair-form">
+              <label class="field-label">
+                <span>Ancien (supprimé)</span>
+                <select class="field" id="merge-source"></select>
+              </label>
+              <span class="merge-pair-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"/></svg></span>
+              <label class="field-label">
+                <span>À conserver</span>
+                <select class="field" id="merge-target"></select>
+              </label>
+              <button type="submit" class="btn btn-secondary merge-pair-submit">
+                <svg class="icon"><use href="#i-merge"/></svg><span>Fusionner</span>
+              </button>
+            </form>
+          </article>
+        </div>
+
+        <div class="settings-col">
+          <article class="card">
+            <header class="card-head">
+              <h2>Prix par expéditeur</h2>
+              <span class="price-legend"><i class="dot dot-normal"></i>Normal <i class="dot dot-lit"></i>LIT <i class="dot dot-bj"></i>BJ</span>
+            </header>
+            <div id="settings-rows" class="list"></div>
+            <form id="add-sender-form" class="add-form">
+              <input class="field add-name" type="text" id="new-sender-name" placeholder="Nom exact de l'expéditeur" required />
+              <div class="add-prices">
+                <input class="field" type="number" inputmode="decimal" id="new-sender-price" placeholder="Normal €" step="0.5" min="0" required />
+                <input class="field" type="number" inputmode="decimal" id="new-sender-lit-price" placeholder="LIT €" step="0.5" min="0" required />
+                <input class="field" type="number" inputmode="decimal" id="new-sender-bj-price" placeholder="BJ €" step="0.5" min="0" required />
+              </div>
+              <button type="submit" class="btn btn-primary">
+                <svg class="icon"><use href="#i-plus"/></svg><span>Ajouter l'expéditeur</span>
+              </button>
+            </form>
+          </article>
+
+          <article class="card">
+            <header class="card-head">
+              <h2>Regrouper en « Autre »</h2>
+            </header>
+            <div id="merge-rows" class="list"></div>
+            <button class="btn btn-secondary btn-block" id="merge-to-other-btn" type="button" disabled>Fusionner la sélection en « Autre »</button>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================== LOCKER -->
+    <section id="view-special" class="view sub-view" aria-label="Mode locker">
+      <header class="page-head">
+        <button class="back" id="special-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Mode locker</h1>
+          <p class="page-sub" id="special-count">—</p>
+        </div>
+        <button class="btn btn-primary btn-lg page-cta" id="special-start" type="button">
+          <svg class="icon"><use href="#i-key"/></svg><span>Commencer au #1</span>
+        </button>
+      </header>
+
+      <div id="special-list" class="special-list"></div>
+    </section>
+
+    <!-- ===================================================== SUIVI -->
+    <section id="view-suivi" class="view sub-view" aria-label="Suivi des colis">
+      <header class="page-head">
+        <button class="back" id="suivi-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Suivi des colis</h1>
+          <p class="page-sub" id="suivi-total">—</p>
+        </div>
+      </header>
+
+      <div class="suivi-grid">
+        <article class="card" id="suivi-check-panel">
+          <header class="card-head">
+            <h2>Vérification</h2>
+          </header>
+
+          <!-- ecran de passage : visible seulement pendant une verification -->
+          <div class="suivi-live" id="suivi-live" hidden>
+            <div class="suivi-live-head">
+              <span class="suivi-live-source"><span class="live-dot"></span><span id="suivi-live-source">—</span></span>
+              <button class="btn btn-sm btn-secondary" id="suivi-cancel" type="button">Arrêter</button>
+            </div>
+
+            <div class="suivi-counter">
+              <span class="suivi-counter-value" id="suivi-counter">0</span>
+              <span class="suivi-counter-total" id="suivi-counter-total">/ 0</span>
+              <span class="suivi-pct" id="suivi-pct">0 %</span>
+            </div>
+
+            <div class="suivi-gauge">
+              <div class="suivi-track">
+                <div class="suivi-ticks"></div>
+                <div class="suivi-fill" id="suivi-fill"><span class="suivi-fill-glow"></span></div>
+                <div class="suivi-head" id="suivi-head"></div>
+              </div>
+            </div>
+
+            <div class="suivi-live-sub" id="suivi-live-sub">—</div>
+            <div class="suivi-live-counts" id="suivi-live-counts"></div>
+            <div class="suivi-toasts" id="suivi-toasts"></div>
           </div>
 
-          <div class="suivi-live-sub" id="suivi-live-sub">—</div>
-          <div class="suivi-toasts" id="suivi-toasts"></div>
-          <div class="suivi-live-counts" id="suivi-live-counts"></div>
-        </div>
+          <!-- au repos : deposer une liste. La relance se fait par categorie,
+               directement dans le panneau d'a cote. -->
+          <div id="suivi-idle">
+            <form class="suivi-add" id="suivi-add-form">
+              <label class="suivi-drop" id="suivi-drop">
+                <input type="file" id="suivi-add-file" accept=".txt,.csv,text/plain" hidden />
+                <span class="suivi-drop-icon"><svg class="icon"><use href="#i-upload"/></svg></span>
+                <span class="suivi-drop-main">
+                  <span class="suivi-drop-title" id="suivi-drop-title">Déposer un fichier .txt</span>
+                  <span class="suivi-drop-sub" id="suivi-drop-sub">ou choisis-le dans tes fichiers</span>
+                </span>
+              </label>
+              <textarea class="field" id="suivi-add-text" rows="3" placeholder="…ou colle des numéros de suivi ici"></textarea>
+              <button type="submit" class="btn btn-primary btn-block">
+                <svg class="icon"><use href="#i-search"/></svg><span>Vérifier ces numéros</span>
+              </button>
+            </form>
+          </div>
+        </article>
 
-        <!-- au repos : déposer une liste. La relance se fait par catégorie,
-             directement dans le panneau du dessous. -->
-        <div id="suivi-idle">
-          <form class="suivi-add" id="suivi-add-form">
-            <label class="suivi-drop" id="suivi-drop">
-              <input type="file" id="suivi-add-file" accept=".txt,.csv,text/plain" hidden />
-              <span class="suivi-drop-icon">📄</span>
-              <span class="suivi-drop-main">
-                <span class="suivi-drop-title" id="suivi-drop-title">Déposer un fichier .txt</span>
-                <span class="suivi-drop-sub" id="suivi-drop-sub">ou clique pour le choisir</span>
-              </span>
-            </label>
-            <textarea id="suivi-add-text" rows="3" placeholder="…ou colle des numéros de suivi ici"></textarea>
-            <button type="submit" class="btn btn-primary">Vérifier ces numéros</button>
-          </form>
-        </div>
-      </div>
+        <article class="card">
+          <header class="card-head">
+            <h2>Par statut</h2>
+          </header>
+          <div id="suivi-summary" class="list"></div>
+        </article>
 
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Par catégorie</h2>
-        </div>
-        <div id="suivi-summary" class="rows rows-dense"></div>
-      </div>
+        <article class="card suivi-wide">
+          <header class="card-head">
+            <h2>Dernières actualisations</h2>
+            <span class="card-meta" id="suivi-labels-count">—</span>
+          </header>
+          <div id="suivi-labels" class="list"></div>
+        </article>
 
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Dernières actualisations</h2>
-          <span class="chart-range" id="suivi-labels-count">—</span>
-        </div>
-        <div id="suivi-labels" class="rows rows-dense"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Répartition des actualisations</h2>
-        </div>
-        <div class="donut-wrap" id="suivi-donut"></div>
+        <article class="card suivi-wide">
+          <header class="card-head">
+            <h2>Répartition des actualisations</h2>
+          </header>
+          <div class="donut-wrap" id="suivi-donut"></div>
+        </article>
       </div>
     </section>
 
-    <section id="view-suivi-detail" class="view">
-      <div class="view-head">
-        <button class="btn btn-ghost btn-small" id="suivi-detail-back" type="button">← Suivi</button>
-        <h1 id="suivi-detail-title">Détail</h1>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2 id="suivi-detail-label">—</h2>
-          <span class="chart-range" id="suivi-detail-count">—</span>
+    <section id="view-suivi-detail" class="view sub-view" aria-label="Détail du suivi">
+      <header class="page-head">
+        <button class="back" id="suivi-detail-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Suivi</span>
+        </button>
+        <div class="page-titles">
+          <h1 id="suivi-detail-title">Détail</h1>
+          <p class="page-sub" id="suivi-detail-count">—</p>
         </div>
+      </header>
+
+      <article class="card">
+        <p class="detail-label" id="suivi-detail-label">—</p>
         <div class="actions-row">
-          <button class="btn btn-primary" id="suivi-copy-all" type="button">📋 Tout copier</button>
-          <button class="btn btn-ghost" id="suivi-copy-numbers" type="button">📋 Numéros seuls</button>
+          <button class="btn btn-primary" id="suivi-copy-all" type="button">
+            <svg class="icon"><use href="#i-copy"/></svg><span>Tout copier</span>
+          </button>
+          <button class="btn btn-secondary" id="suivi-copy-numbers" type="button">
+            <svg class="icon"><use href="#i-copy"/></svg><span>Numéros seuls</span>
+          </button>
         </div>
-        <div id="suivi-rows" class="suivi-rows"></div>
-        <button class="btn btn-ghost" id="suivi-more" type="button" hidden>Afficher la suite</button>
-      </div>
-    </section>
-
-    <section id="view-imprime" class="view">
-      <div class="panel">
-        <div class="panel-head">
-          <h2>À imprimer</h2>
-          <span class="chart-range" id="imp-total">—</span>
-        </div>
-        <button class="btn btn-primary imp-go" id="imp-all" type="button">🖨 Tout imprimer</button>
-        <a class="imp-last" id="imp-last" href="#" target="_blank" rel="noopener" hidden></a>
-        <div class="imp-notice" id="imp-notice" hidden></div>
-        <div id="imp-categories" class="imp-categories"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Déjà imprimées</h2>
-          <span class="chart-range" id="imp-printed-count">—</span>
-        </div>
-        <div id="imp-printed" class="imp-categories"></div>
-      </div>
-    </section>
-
-    <section id="view-stats" class="view">
-      <div class="stat-grid stat-grid-single">
-        <div class="stat-card glow-magenta" id="best-day-card">
-          <div class="stat-label">Jour le plus rentable</div>
-          <div class="stat-value" id="stat-bestday-value">—</div>
-          <div class="stat-sub" id="stat-bestday-sub">Pas encore de données</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Revenus par jour</h2>
-          <span class="chart-range" id="week-range">—</span>
-        </div>
-        <div class="chart-average" id="day-average">—</div>
-        <div class="chart-scroll" id="chart-week"><div class="chart-track"></div></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Revenus par semaine</h2>
-          <span class="chart-range" id="month-range">—</span>
-        </div>
-        <div class="chart-scroll" id="chart-month"><div class="chart-track"></div></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Gains par expéditeur</h2>
-        </div>
-        <div class="donut-wrap" id="donut-sender"></div>
-      </div>
+        <div id="suivi-rows" class="list suivi-rows"></div>
+        <button class="btn btn-secondary btn-block" id="suivi-more" type="button" hidden>Afficher la suite</button>
+      </article>
     </section>
   </main>
+</div>
 
-  <nav class="tabbar">
-    <button class="tab active" data-view="dashboard">
-      <svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10"/></svg>
-      <span>Dashboard</span>
-    </button>
-    <button class="tab" data-view="imprime">
-      <svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4v-6h16v6h-2M8 14h8v7H8z"/></svg>
-      <span>Imprimé</span>
-    </button>
-    <button class="tab" data-view="stats">
-      <svg viewBox="0 0 24 24"><path d="M4 19V10M12 19V5M20 19v-7"/></svg>
-      <span>Stats</span>
-    </button>
-  </nav>
+<!-- Retours d'action : messages ephemeres, et la feuille de confirmation qui
+     remplace les boites natives du navigateur. -->
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<div class="sheet-layer" id="sheet" hidden>
+  <div class="sheet-backdrop" data-sheet-cancel></div>
+  <div class="sheet" role="alertdialog" aria-modal="true" aria-labelledby="sheet-title" aria-describedby="sheet-message">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <h2 class="sheet-title" id="sheet-title">Confirmer</h2>
+    <p class="sheet-message" id="sheet-message"></p>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-lg" type="button" data-sheet-cancel>Annuler</button>
+      <button class="btn btn-primary btn-lg" type="button" id="sheet-confirm">Confirmer</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>
