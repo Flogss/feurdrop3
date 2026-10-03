@@ -482,6 +482,29 @@ body.boot .tabbar { animation: boot-barre 900ms var(--ease-spring) 220ms both; }
   opacity: 0.7;
 }
 .tab-indicator.is-pressed { scale: 0.93; }
+/* tenue sous le doigt : la goutte devient une loupe de verre clair, qui
+   eclaircit et sature ce qu'elle survole */
+.tab-indicator.is-lens {
+  background:
+    radial-gradient(120% 120% at 50% 8%, rgb(255 255 255 / 0.26), rgb(var(--violet-300) / 0.14) 48%, rgb(var(--violet-500) / 0.2));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.8),
+    inset 0 -2px 6px rgb(255 255 255 / 0.22),
+    inset 0 0 0 1px rgb(255 255 255 / 0.32),
+    inset 0 -10px 18px -10px rgb(var(--violet-200) / 0.55),
+    0 12px 30px -6px rgb(var(--accent-rgb) / 0.85),
+    0 0 44px -4px rgb(var(--violet-300) / 0.7);
+  -webkit-backdrop-filter: saturate(230%) brightness(1.3);
+  backdrop-filter: saturate(230%) brightness(1.3);
+}
+.tab-indicator.is-lens .tab-indicator-shine { opacity: 1; }
+/* la barre se laisse glisser : pas de defilement ni de retour arriere au doigt */
+.tabbar { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.tabbar.is-dragging { scale: 1.02; transition: scale var(--t-3) var(--ease-spring); }
+.tabbar.is-dragging .tab.active:not(.is-cible) { color: rgb(255 255 255 / 0.55); }
+.tabbar.is-dragging .tab.active:not(.is-cible) .icon { filter: none; }
+.tabbar.is-dragging .tab.is-cible { color: #fff; transform: scale(1.08); }
+.tabbar.is-dragging .tab.is-cible .icon { filter: drop-shadow(0 0 10px rgb(var(--violet-200) / 0.95)); transform: translateY(-1px) scale(1.06); }
 .tab-hover { display: none; }
 
 .tab {
@@ -1848,6 +1871,8 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
 }
 .imp-list > :first-child { margin-top: 2px; }
 .imp-list > :last-child { margin-bottom: 8px; }
+.imp-cat.is-new { animation: ligne-arrive 480ms var(--ease-out) both; animation-delay: calc(var(--n, 0) * 35ms); }
+.imp-cat.is-leaving { pointer-events: none; }
 .imp-list > .imp-row.arrive { animation: ligne-arrive 520ms var(--ease-out) both; animation-delay: calc(var(--n, 0) * 40ms); }
 
 .imp-row {
@@ -2515,6 +2540,7 @@ body.locker-ouvert { overflow: hidden; }
   pointer-events: auto;
   animation: toast-in 520ms var(--ease-spring) both;
 }
+a.toast-lien { color: inherit; text-decoration: none; cursor: pointer; }
 .toast.out { animation: toast-out 240ms var(--ease-in) forwards; }
 /* le temps qui reste avant que le message parte */
 .toast-temps {

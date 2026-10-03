@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "drop",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["src/server.js"],
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["TELEGRAM_BOT_TOKEN=000000:test-local", "SUIVI_BOT_TOKEN=", "node", "src/server.js"],
       "port": 3000
     }
   ]

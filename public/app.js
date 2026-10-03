@@ -111,9 +111,16 @@ function haptique() {
 
 const TOAST_ICONES = { success: "check", error: "alert", info: "info" };
 
-function toast(message, type = "success", duree = type === "error" ? 5200 : 3400) {
+// `lien` : le message devient un lien (un PDF a ouvrir d'un appui)
+function toast(message, type = "success", duree = type === "error" ? 5200 : 3400, { lien } = {}) {
   const pile = $("toasts");
-  const el = document.createElement("div");
+  const el = document.createElement(lien ? "a" : "div");
+  if (lien) {
+    el.href = lien;
+    el.target = "_blank";
+    el.rel = "noopener";
+    el.classList.add("toast-lien");
+  }
   el.className = `toast toast-${type}`;
   el.setAttribute("role", type === "error" ? "alert" : "status");
   el.innerHTML = `<span class="toast-icon">${ico(TOAST_ICONES[type] || "info")}</span><span></span><span class="toast-temps"></span>`;
@@ -473,14 +480,15 @@ function enLigne(ok) {
 // cible et se pose. Pendant le trajet il s'etire dans le sens du mouvement et
 // s'aplatit un peu, comme une goutte. Le reflet de la barre le suit.
 
-const barre = { x: 0, w: 0, vx: 0, vw: 0, cx: 0, cw: 0, raf: null, pret: false, t: 0 };
+const barre = { x: 0, w: 0, vx: 0, vw: 0, cx: 0, cw: 0, raf: null, pret: false, t: 0, loupe: 0, loupeCible: 0 };
 const tabbar = $("tabbar");
 const indicateur = $("tab-indicator");
 
 function dessineIndicateur() {
   const etire = Math.min(Math.abs(barre.vx) / 1700, 0.3);
-  const sx = 1 + etire;
-  const sy = 1 - etire * 0.5;
+  // tenue sous le doigt, la goutte gonfle comme une loupe de verre
+  const sx = 1 + etire + 0.12 * barre.loupe;
+  const sy = 1 - etire * 0.5 + 0.18 * barre.loupe;
   indicateur.style.width = `${barre.w}px`;
   indicateur.style.transform = `translate3d(${barre.x}px, 0, 0) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})`;
   if (!tabbar.classList.contains("has-hover")) {
@@ -500,14 +508,17 @@ function pasRessort(maintenant) {
     const aw = -520 * (barre.w - barre.cw) - 34 * barre.vw;
     barre.vw += aw * dt;
     barre.w += barre.vw * dt;
+    barre.loupe += (barre.loupeCible - barre.loupe) * Math.min(1, dt * 16);
   }
   dessineIndicateur();
   const pose =
-    Math.abs(barre.x - barre.cx) < 0.25 && Math.abs(barre.vx) < 3 && Math.abs(barre.w - barre.cw) < 0.25 && Math.abs(barre.vw) < 3;
+    Math.abs(barre.x - barre.cx) < 0.25 && Math.abs(barre.vx) < 3 && Math.abs(barre.w - barre.cw) < 0.25 && Math.abs(barre.vw) < 3 &&
+    Math.abs(barre.loupe - barre.loupeCible) < 0.005;
   if (pose) {
     barre.x = barre.cx;
     barre.w = barre.cw;
     barre.vx = barre.vw = 0;
+    barre.loupe = barre.loupeCible;
     dessineIndicateur();
     barre.raf = null;
     return;
@@ -528,16 +539,103 @@ function placeIndicateur(onglet, { instantane = false } = {}) {
     dessineIndicateur();
     return;
   }
-  if (!barre.raf) {
-    barre.t = performance.now();
-    barre.raf = requestAnimationFrame(pasRessort);
-  }
+  lanceRessort();
 }
+
+function lanceRessort() {
+  if (barre.raf) return;
+  barre.t = performance.now();
+  barre.raf = requestAnimationFrame(pasRessort);
+}
+
+// Glisser d'un onglet a l'autre, comme la barre Liquid Glass d'iOS : on pose
+// le doigt sur la barre et on glisse. La goutte quitte son onglet et suit le
+// doigt en se deformant (elle gonfle en loupe, s'etire avec la vitesse),
+// l'onglet survole s'allume, et au lacher on arrive sur celui sous le doigt.
+// Un simple appui reste un appui.
+const glisse = { id: null, actif: false, x0: 0, cible: null, finA: 0 };
+
+function ongletSous(x) {
+  const tabs = [...tabbar.querySelectorAll(".tab")];
+  const r = tabbar.getBoundingClientRect();
+  const local = x - r.left;
+  return tabs.reduce((proche, t) =>
+    Math.abs(t.offsetLeft + t.offsetWidth / 2 - local) < Math.abs(proche.offsetLeft + proche.offsetWidth / 2 - local) ? t : proche
+  );
+}
+
+function suisDoigt(x) {
+  const r = tabbar.getBoundingClientRect();
+  const premier = tabbar.querySelector(".tab");
+  const marge = premier.offsetLeft;
+  const largeur = premier.offsetWidth;
+  barre.cw = largeur;
+  // au bord, la goutte resiste un peu au lieu de s'arreter net
+  let cx = x - r.left - largeur / 2;
+  const min = marge;
+  const max = tabbar.clientWidth - marge - largeur;
+  if (cx < min) cx = min - (min - cx) * 0.25;
+  if (cx > max) cx = max + (cx - max) * 0.25;
+  barre.cx = cx;
+  lanceRessort();
+}
+
+function marqueCible(tab) {
+  tabbar.querySelectorAll(".tab").forEach((t) => t.classList.toggle("is-cible", t === tab));
+}
+
+tabbar.addEventListener("pointermove", (e) => {
+  if (glisse.id !== e.pointerId || prefersReducedMotion) return;
+  if (!glisse.actif) {
+    if (Math.abs(e.clientX - glisse.x0) < 8) return;
+    glisse.actif = true;
+    try {
+      tabbar.setPointerCapture(e.pointerId);
+    } catch {
+      /* pointeur deja relache */
+    }
+    relache();
+    tabbar.classList.add("is-dragging");
+    indicateur.classList.add("is-lens");
+    barre.loupeCible = 1;
+  }
+  suisDoigt(e.clientX);
+  const sous = ongletSous(e.clientX);
+  if (sous !== glisse.cible) {
+    glisse.cible = sous;
+    marqueCible(sous);
+    haptique();
+  }
+});
+
+function finGlisse(e) {
+  if (glisse.id !== e.pointerId) return;
+  const glissait = glisse.actif;
+  glisse.id = null;
+  glisse.actif = false;
+  if (!glissait) return;
+  glisse.finA = performance.now();
+  tabbar.classList.remove("is-dragging");
+  indicateur.classList.remove("is-lens");
+  marqueCible(null);
+  barre.loupeCible = 0;
+  const vue = glisse.cible?.dataset.view;
+  if (vue && vue !== (VUE_PARENT[currentView] || currentView)) switchView(vue);
+  else placeIndicateur(VUE_PARENT[currentView] || currentView);
+}
+tabbar.addEventListener("pointerup", finGlisse);
+tabbar.addEventListener("pointercancel", finGlisse);
 
 // au toucher : l'onglet se comprime, une onde passe dans le verre
 tabbar.addEventListener("pointerdown", (e) => {
   const tab = e.target.closest(".tab");
   if (!tab) return;
+  if (e.button === 0) {
+    glisse.id = e.pointerId;
+    glisse.actif = false;
+    glisse.x0 = e.clientX;
+    glisse.cible = tab;
+  }
   tab.classList.add("is-pressed");
   if (tab.classList.contains("active")) indicateur.classList.add("is-pressed");
   if (!prefersReducedMotion) {
@@ -723,6 +821,8 @@ function switchView(view) {
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
+    // le clic qui suit un glisser est deja traite au lacher
+    if (performance.now() - glisse.finA < 400) return;
     // retoucher l'onglet ou l'on est deja remonte en haut, comme partout
     if (tab.dataset.view === currentView && window.scrollY > 0) {
       window.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
@@ -1010,11 +1110,11 @@ async function loadStats(animate, force, riche) {
   renderTour(s.tour || {});
   renderAutoPrint(s.autoPrint || {});
 
-  if (force || hasChanged("carriers", s.byCarrier)) {
+  if (hasChanged("carriers", s.byCarrier) || force) {
     renderCarriers(s.byCarrier || []);
     renderMix(s.byCarrier || [], premier);
   }
-  if (!force && !hasChanged("senders", s.bySender)) return;
+  if (!hasChanged("senders", s.bySender) && !force) return;
   renderSenders(s.bySender);
   renderDonut(s.bySender, animate, riche);
 }
@@ -1500,23 +1600,30 @@ function renderDonutInto(el, items, { animate, label, format, riche = true }) {
   if (animate && !prefersReducedMotion) revealOnVisible(el.closest(".card"), () => balayeDonut(el, riche ? 1500 : 800));
 }
 
+// Les parts se tracent une fois, dans le sens des aiguilles d'une montre,
+// depuis midi. L'anneau ne tourne plus sur lui-meme : avec le trace, ca
+// donnait l'impression d'une petite boucle.
 function balayeDonut(el, duree) {
   const { total, format } = el._donut;
   const segs = [...el.querySelectorAll(".donut-seg")];
   const legendes = [...el.querySelectorAll(".donut-legend-item")];
   const anneau = el.querySelector(".donut-anneau");
   const circonference = 2 * Math.PI * DONUT.rayon;
+  // un seul balayage a la fois : le precedent s'arrete net
+  const jeton = (el._balayage = (el._balayage || 0) + 1);
+  anneau.getAnimations().forEach((a) => a.cancel());
   anneau.animate(
     [
-      { transform: "rotate(-70deg) scale(0.86)", opacity: 0.2 },
-      { transform: "rotate(0deg) scale(1)", opacity: 1 },
+      { transform: "scale(0.9)", opacity: 0.35 },
+      { transform: "scale(1)", opacity: 1 },
     ],
-    { duration: duree + 300, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
+    { duration: duree, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
   );
   animateNumberText(el.querySelector("[data-donut-total]"), total, format, duree + 200);
   const montrees = new Set();
   const t0 = performance.now();
   const pas = (now) => {
+    if (el._balayage !== jeton) return;
     const p = easeInOutCubic(Math.min((now - t0) / duree, 1));
     segs.forEach((seg, i) => {
       const debut = Number(seg.dataset.debut);
@@ -1536,7 +1643,7 @@ function balayeDonut(el, duree) {
         animateNumberText(ligne.querySelector("[data-legend-pct]"), Number(ligne.querySelector("[data-legend-pct]").dataset.legendPct), (v) => `${Math.round(v)} %`, 900);
       }
     });
-    if (p < 1) requestAnimationFrame(pas);
+    if (p < 1 && el._balayage === jeton) requestAnimationFrame(pas);
   };
   requestAnimationFrame(pas);
 }
@@ -2127,22 +2234,29 @@ function runBarReveal(track, geo, { duree = 1100, ecart = 75 } = {}) {
 
 // Ne declenche `run` que lorsque `el` entre reellement a l'ecran : les
 // graphiques plus bas dans la page ne montent qu'une fois qu'on les voit.
+// Une seule revelation en attente par element : revenir plusieurs fois sur
+// l'onglet sans descendre jusqu'au graphique empilait les attentes, et elles
+// partaient toutes ensemble a l'arrivee (l'anneau faisait plusieurs tours).
 function revealOnVisible(el, run) {
+  if (el?._revelation) {
+    el._revelation.disconnect();
+    clearTimeout(el._revelationMinuteur);
+    el._revelation = null;
+  }
   if (!el || prefersReducedMotion || !("IntersectionObserver" in window)) {
     run();
     return;
   }
   const io = new IntersectionObserver(
     (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          io.disconnect();
-          setTimeout(run, 120);
-        }
-      }
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      el._revelation = null;
+      el._revelationMinuteur = setTimeout(run, 120);
     },
     { threshold: 0.3 }
   );
+  el._revelation = io;
   io.observe(el);
 }
 
@@ -2275,7 +2389,7 @@ function attachHorizontalDrag(container, onDragStart) {
 
 async function loadDayScrollChart(animate, force, riche) {
   const r = await fetchJSON("/api/stats/revenue/daily-series");
-  if (!force && !hasChanged("dailySeries", r.days)) return;
+  if (!hasChanged("dailySeries", r.days) && !force) return;
 
   const container = $("chart-week");
   const rangeEl = $("week-range");
@@ -2319,7 +2433,7 @@ async function loadDayScrollChart(animate, force, riche) {
 
 async function loadWeekScrollChart(animate, force, riche) {
   const r = await fetchJSON("/api/stats/revenue/weekly-series");
-  if (!force && !hasChanged("weeklySeries", r.weeks)) return;
+  if (!hasChanged("weeklySeries", r.weeks) && !force) return;
 
   const container = $("chart-month");
   const rangeEl = $("month-range");
@@ -3347,9 +3461,13 @@ async function loadImprime() {
   try {
     [aFaire, deja] = await Promise.all([fetchJSON("/api/print/resume?scope=new"), fetchJSON("/api/print/resume?scope=printed")]);
   } catch (err) {
-    // un onglet muet ne dit pas s'il est vide ou casse : on le dit
-    $("imp-total").textContent = "Erreur de chargement";
-    $("imp-categories").innerHTML = vide("alert", "Liste indisponible", escapeHtml(err.message));
+    // un onglet muet ne dit pas s'il est vide ou casse : on le dit (sans
+    // effacer une liste deja affichee pour une coupure passagere)
+    if ($("imp-categories").dataset.etat !== "liste") {
+      $("imp-total").textContent = "Erreur de chargement";
+      $("imp-categories").dataset.etat = "erreur";
+      $("imp-categories").innerHTML = vide("alert", "Liste indisponible", escapeHtml(err.message));
+    }
     return;
   }
 
@@ -3373,46 +3491,108 @@ async function loadImprime() {
   renderCategories("imp-categories", aFaire.categories, "new");
   $("imp-printed-count").textContent = deja.total > 0 ? pluriel(deja.total, "étiquette", "étiquettes") : "Aucune";
   renderCategories("imp-printed", deja.categories, "printed");
+  prechargeCategories([aFaire, deja]).catch(() => {});
 }
+
+// Les categories deja affichees sont mises a jour en place (compte, notes) :
+// rien n'est reconstruit, donc une categorie depliee reste depliee, un appui
+// en cours n'est jamais perdu, et seules les vraies nouveautes bougent.
+const impOuvertes = new Set(); // "scope:code" des categories depliees
 
 function renderCategories(cible, categories, scope) {
   const box = $(cible);
-  // une categorie depliee le reste apres un rafraichissement : sinon la liste
-  // se referme sous le doigt a chaque impression
-  const ouvertes = [...box.querySelectorAll(".imp-cat.open")].map((el) => el.dataset.cat);
 
   if (!categories || categories.length === 0) {
-    box.innerHTML =
-      scope === "new"
-        ? vide("check", "Tout est imprimé", "Les nouvelles étiquettes apparaîtront ici.", true)
-        : vide("printer", "Aucune étiquette imprimée en attente");
+    if (box.dataset.etat !== "vide") {
+      box.dataset.etat = "vide";
+      box.innerHTML =
+        scope === "new"
+          ? vide("check", "Tout est imprimé", "Les nouvelles étiquettes apparaîtront ici.", true)
+          : vide("printer", "Aucune étiquette imprimée en attente");
+    }
     return;
   }
-  box.innerHTML = categories
-    .map(
-      (c) => `<div class="imp-cat carrier${c.noted ? " noted" : ""}${ouvertes.includes(c.code) ? " open" : ""}" data-carrier="${escapeAttr(c.code)}" data-cat="${escapeAttr(c.code)}" data-scope="${scope}">
-        <div class="imp-cat-head" role="button" tabindex="0" aria-expanded="${ouvertes.includes(c.code)}">
-          <span class="carrier-dot"></span>
-          <span class="imp-cat-name">${escapeHtml(c.label)}</span>
-          ${c.noted ? `<span class="imp-cat-noted" title="${pluriel(c.noted, "colis annoté", "colis annotés")}">${ico("note")}${c.noted}</span>` : ""}
-          <span class="imp-cat-count">${entier(c.count)}</span>
-          <button class="btn btn-icon btn-sm btn-ghost" data-print-cat="${escapeAttr(c.code)}" data-scope="${scope}" type="button" aria-label="Imprimer ${escapeAttr(c.label)}" title="Imprimer">${ico("printer")}</button>
-          ${ico("chevron-down", "imp-chevron")}
-        </div>
-        <div class="imp-body"><div class="imp-list">${impMemoire.get(`${scope}:${c.code}`)?.html || ""}</div></div>
-      </div>`
-    )
-    .join("");
+  if (box.dataset.etat !== "liste") {
+    box.dataset.etat = "liste";
+    box.innerHTML = "";
+  }
 
-  for (const code of ouvertes) {
-    const cat = box.querySelector(`.imp-cat[data-cat="${CSS.escape(code)}"]`);
-    if (cat) fillCategory(cat);
+  const existantes = new Map(
+    [...box.querySelectorAll(":scope > .imp-cat:not(.is-leaving)")].map((el) => [el.dataset.cat, el])
+  );
+  const ordre = categories.map((c, i) => {
+    let el = existantes.get(c.code);
+    if (el) existantes.delete(c.code);
+    else el = creeCategorie(c, scope, i);
+    majCategorie(el, c);
+    return el;
+  });
+  // une categorie videe s'en va en se repliant
+  for (const el of existantes.values()) sortCategorie(el);
+  let precedent = null;
+  for (const el of ordre) {
+    const attendu = precedent ? precedent.nextElementSibling : box.firstElementChild;
+    if (el !== attendu) box.insertBefore(el, attendu);
+    precedent = el;
+    // une categorie deja depliee se remet a jour derriere, sans se refermer
+    if (el.classList.contains("open") && !el.classList.contains("is-new")) fillCategory(el);
   }
 }
 
+function creeCategorie(c, scope, rang) {
+  const cle = `${scope}:${c.code}`;
+  const ouverte = impOuvertes.has(cle);
+  const modele = document.createElement("template");
+  modele.innerHTML = `<div class="imp-cat carrier is-new${ouverte ? " open" : ""}" style="--n:${Math.min(rang, 8)}" data-carrier="${escapeAttr(c.code)}" data-cat="${escapeAttr(c.code)}" data-scope="${scope}">
+      <div class="imp-cat-head" role="button" tabindex="0" aria-expanded="${ouverte}">
+        <span class="carrier-dot"></span>
+        <span class="imp-cat-name"></span>
+        <span class="imp-cat-noted" hidden>${ico("note")}<b></b></span>
+        <span class="imp-cat-count"></span>
+        <button class="btn btn-icon btn-sm btn-ghost" data-print-cat="${escapeAttr(c.code)}" data-scope="${scope}" type="button" title="Imprimer">${ico("printer")}</button>
+        ${ico("chevron-down", "imp-chevron")}
+      </div>
+      <div class="imp-body"><div class="imp-list">${impMemoire.get(cle)?.html || ""}</div></div>
+    </div>`;
+  const el = modele.content.firstElementChild;
+  el.addEventListener("animationend", () => el.classList.remove("is-new"), { once: true });
+  if (ouverte) fillCategory(el);
+  return el;
+}
+
+function majCategorie(el, c) {
+  const nom = el.querySelector(".imp-cat-name");
+  if (nom.textContent !== c.label) nom.textContent = c.label;
+  el.querySelector("[data-print-cat]").setAttribute("aria-label", `Imprimer ${c.label}`);
+  el.classList.toggle("noted", c.noted > 0);
+  const note = el.querySelector(".imp-cat-noted");
+  note.hidden = !c.noted;
+  note.title = pluriel(c.noted, "colis annoté", "colis annotés");
+  note.querySelector("b").textContent = c.noted || "";
+  const compte = el.querySelector(".imp-cat-count");
+  const texte = entier(c.count);
+  if (compte.textContent !== texte) {
+    const avant = compte.textContent;
+    compte.textContent = texte;
+    if (avant) rejoue(compte, "is-bump", 560);
+  }
+  // le nombre a change : la liste memorisee n'est plus a jour
+  const memoire = impMemoire.get(`${el.dataset.scope}:${c.code}`);
+  if (memoire && memoire.ids.length !== c.count) memoire.perime = true;
+}
+
+function sortCategorie(el) {
+  el.classList.add("is-leaving");
+  impOuvertes.delete(`${el.dataset.scope}:${el.dataset.cat}`);
+  sortLigne(el).then(() => el.remove());
+}
+
 function basculeCategorie(cat) {
+  const cle = `${cat.dataset.scope}:${cat.dataset.cat}`;
   const ouverte = cat.classList.toggle("open");
   cat.querySelector(".imp-cat-head").setAttribute("aria-expanded", String(ouverte));
+  if (ouverte) impOuvertes.add(cle);
+  else impOuvertes.delete(cle);
   haptique();
   if (ouverte) fillCategory(cat);
 }
@@ -3501,32 +3681,69 @@ document.addEventListener("keydown", (e) => {
   basculeCategorie(head.parentElement);
 });
 
+// Charge les colis d'une categorie et prepare leur HTML, sans toucher a la
+// page. Une seule requete a la fois par categorie.
+const impEnCours = new Map();
+function chargeColis(code, scope) {
+  const cle = `${scope}:${code}`;
+  if (impEnCours.has(cle)) return impEnCours.get(cle);
+  const promesse = fetchJSON(`/api/print/colis?categorie=${encodeURIComponent(code)}&scope=${scope}`)
+    .then(({ colis }) => {
+      for (const c of colis) impColis.set(c.id, c);
+      const precedente = impMemoire.get(cle);
+      const memoire = { html: colis.length ? lignesColis(colis, scope) : "", ids: colis.map((c) => c.id), connues: precedente?.ids || [] };
+      impMemoire.set(cle, memoire);
+      return memoire;
+    })
+    .finally(() => impEnCours.delete(cle));
+  impEnCours.set(cle, promesse);
+  return promesse;
+}
+
+// Deplier une categorie montre aussitot sa liste memorisee (prechargee a
+// l'ouverture de l'onglet) : le depliage part avec la vraie hauteur, sans
+// squelette ni saut. La liste se met a jour derriere si elle a change.
 async function fillCategory(cat) {
   const liste = cat.querySelector(".imp-list");
   const { cat: code, scope } = cat.dataset;
-  const memoireCle = `${scope}:${code}`;
-  if (!liste.children.length) liste.innerHTML = squelettes(2);
-
-  let colis;
+  const cle = `${scope}:${code}`;
+  const deja = impMemoire.get(cle);
+  if (deja && liste.dataset.html !== deja.html && !liste.querySelector(".imp-edit")) poseListe(liste, deja, false);
+  if (!deja && !liste.children.length) liste.innerHTML = squelettes(2);
+  if (deja && !deja.perime && liste.dataset.html === deja.html) {
+    // a jour : on verifie quand meme en fond, sans rien bloquer
+    chargeColis(code, scope).then((m) => cat.isConnected && poseListe(liste, m, true)).catch(() => {});
+    return;
+  }
   try {
-    ({ colis } = await fetchJSON(`/api/print/colis?categorie=${encodeURIComponent(code)}&scope=${scope}`));
+    poseListe(liste, await chargeColis(code, scope), true);
   } catch (err) {
-    liste.innerHTML = vide("alert", "Liste indisponible", escapeHtml(err.message));
-    return;
+    if (!deja) liste.innerHTML = vide("alert", "Liste indisponible", escapeHtml(err.message));
   }
+}
 
-  if (colis.length === 0) {
-    liste.innerHTML = vide("inbox", "Vide");
-    impMemoire.delete(memoireCle);
-    return;
+function poseListe(liste, memoire, anime) {
+  // rien de neuf : pas une ecriture dans la page
+  if (liste.dataset.html === memoire.html) return;
+  // un formulaire d'edition ouvert ne doit pas sauter
+  if (liste.querySelector(".imp-edit")) return;
+  liste.dataset.html = memoire.html;
+  liste.innerHTML = memoire.html || vide("inbox", "Vide");
+  if (!anime) return;
+  const connues = new Set(memoire.connues);
+  let n = 0;
+  for (const ligne of liste.querySelectorAll(".imp-row")) {
+    if (connues.has(Number(ligne.dataset.row))) continue;
+    ligne.classList.add("arrive");
+    ligne.style.setProperty("--n", Math.min(n++, 10));
   }
+}
 
-  for (const c of colis) impColis.set(c.id, c);
-
-  // Une etiquette deja imprimee n'a plus besoin d'etre supprimee d'ici : elle
-  // a besoin d'etre dropee quand on l'a postee, colis par colis.
+// Une etiquette deja imprimee n'a plus besoin d'etre supprimee d'ici : elle
+// a besoin d'etre dropee quand on l'a postee, colis par colis.
+function lignesColis(colis, scope) {
   const imprimee = scope === "printed";
-  const html = colis
+  return colis
     .map(
       (c) => `<div class="imp-row${c.note ? " noted" : ""}" data-row="${c.id}">
         <div class="imp-row-main">
@@ -3552,19 +3769,24 @@ async function fillCategory(cat) {
       </div>`
     )
     .join("");
+}
 
-  // seules les lignes que la liste ne montrait pas encore arrivent en glissant
-  const connues = new Set(impMemoire.get(memoireCle)?.ids || []);
-  impMemoire.set(memoireCle, { html, ids: colis.map((c) => c.id) });
-  // un formulaire d'edition ouvert ne doit pas sauter au rafraichissement
-  if (liste.querySelector(".imp-edit")) return;
-  liste.innerHTML = html;
-  let n = 0;
-  for (const ligne of liste.querySelectorAll(".imp-row")) {
-    if (connues.has(Number(ligne.dataset.row))) continue;
-    ligne.classList.add("arrive");
-    ligne.style.setProperty("--n", Math.min(n++, 10));
-  }
+// A l'ouverture de l'onglet, les listes se chargent en fond, quelques-unes a
+// la fois : deplier une categorie est ensuite instantane.
+async function prechargeCategories(resumes) {
+  const aCharger = resumes.flatMap(({ scope, categories }) =>
+    (categories || []).filter((c) => {
+      const m = impMemoire.get(`${scope}:${c.code}`);
+      return !m || m.perime || m.ids.length !== c.count;
+    }).map((c) => [c.code, scope])
+  );
+  const travail = async () => {
+    while (aCharger.length) {
+      const [code, scope] = aCharger.shift();
+      await chargeColis(code, scope).catch(() => {});
+    }
+  };
+  await Promise.all([travail(), travail(), travail()]);
 }
 
 // --- Edition d'un colis ------------------------------------------------------------
@@ -3684,11 +3906,14 @@ document.addEventListener("submit", (e) => {
   enregistreEdition(form);
 });
 
-// L'onglet s'ouvre AVANT la construction du PDF : un navigateur ne laisse
-// ouvrir une fenetre que pendant le clic, pas apres un aller-retour reseau.
+// Sur ordinateur, l'onglet s'ouvre AVANT la construction du PDF : un
+// navigateur ne laisse ouvrir une fenetre que pendant le clic, pas apres un
+// aller-retour reseau. Sur iPhone, cet onglet vide recouvrait toute l'app
+// pendant la construction (l'app semblait bloquee) : on construit d'abord,
+// puis un message "PDF pret" ouvre le PDF d'un appui.
 async function lancerImpression(bouton, corps) {
   if (bouton.getAttribute("aria-busy") === "true") return;
-  const onglet = window.open("", "_blank");
+  const onglet = surIPhone ? null : window.open("", "_blank");
   occupe(bouton, true);
   haptique();
 
@@ -3710,7 +3935,7 @@ async function lancerImpression(bouton, corps) {
   eclat(bouton, { nombre: 10, force: 0.9 });
 
   if (onglet) onglet.location = res.url;
-  else window.location = res.url; // fenetre bloquee : on y va quand meme
+  else if (!surIPhone) window.location = res.url; // fenetre bloquee : on y va quand meme
 
   // Un bloqueur de fenetres avale parfois l'onglet sans rien dire. Le lien
   // reste affiche : il y a toujours quelque chose a toucher pour ouvrir le
@@ -3722,7 +3947,8 @@ async function lancerImpression(bouton, corps) {
   lien.href = res.url;
   lien.innerHTML = `${ico("file")}<span>Rouvrir le PDF · ${escapeHtml(detail)}</span>${ico("external")}`;
   montre(lien);
-  toast(`PDF prêt · ${detail}`);
+  if (surIPhone) toast(`PDF prêt · ${detail} · Ouvrir`, "success", 9000, { lien: res.url });
+  else toast(`PDF prêt · ${detail}`);
 
   await loadImprime();
 }
