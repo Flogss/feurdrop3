@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Le serveur se regle dans l'app (Reglages > Serveur) : une adresse
+	     locale en http doit pouvoir passer, comme le serveur en ligne. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Drop se connecte à ton serveur quand il tourne sur le réseau local.</string>
+	<!-- Le rafraichissement en arriere-plan guette les nouveaux colis et
+	     previent par une notification. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.flogas.drop.refresh</string>
+	</array>
+</dict>
+</plist>

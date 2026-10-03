@@ -3,3 +3,9 @@ data/
 .env
 *.log
 .DS_Store
+
+# app iOS : produits de compilation et etat local de Xcode
+IOS/DropKit/.build/
+IOS/DropKit/.swiftpm/
+xcuserdata/
+DerivedData/
