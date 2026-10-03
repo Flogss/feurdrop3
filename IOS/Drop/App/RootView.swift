@@ -7,8 +7,8 @@ import DropKit
 /// de verre suit le doigt en se deformant -- et les messages en haut.
 ///
 /// Chaque onglet garde sa pile de navigation (et son defilement). Pas de
-/// balayage entre onglets : le doigt reste aux listes. L'ecran qui arrive se
-/// precise (flou -> net) au lieu d'apparaitre d'un coup.
+/// balayage entre onglets : le doigt reste aux listes. L'ecran qui arrive
+/// glisse depuis le cote d'ou l'on vient.
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.scenePhase) private var scenePhase
@@ -105,7 +105,8 @@ struct RootView: View {
 }
 
 /// L'onglet qui arrive : son contenu glisse depuis le cote d'ou l'on vient,
-/// en se precisant (flou -> net) et en se posant d'un ressort. Seul le
+/// en apparaissant, et se pose d'un ressort (sans flou : flouter tout un
+/// ecran coutait cher et brouillait le bas de l'ecran). Seul le
 /// contenu bouge : le fond reste en place. (Animer tout l'ecran, fond
 /// compris, decouvrait le noir de la barre d'onglets en haut.)
 struct TabArrivalState: Equatable {
@@ -138,9 +139,8 @@ private struct TabArrival: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // le glissement et le flou se posent d'un ressort...
-            .blur(radius: visible ? 0 : 10)
-            .scaleEffect(visible ? 1 : 0.975, anchor: .top)
+            // le glissement se pose d'un ressort...
+            .scaleEffect(visible ? 1 : 0.985, anchor: .top)
             .offset(x: visible ? 0 : 36 * etat.sens)
             .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.82), value: visible)
             // ...pendant que le contenu apparait tout de suite : pas d'ecran vide
