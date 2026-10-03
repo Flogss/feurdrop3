@@ -5,9 +5,29 @@ const {
   listSubscriptions,
   deleteSubscription,
   countSubscriptions,
-  countColisSince,
   getPendingSummary,
+  summarizeNewColis,
 } = require("./db");
+
+// "10,50 €", "1 893,00 €"
+const euros = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+const euro = (v) => euros.format(Number(v) || 0);
+
+// "1 h 12", "34 min"
+function duree(secondes) {
+  const h = Math.floor(secondes / 3600);
+  const m = Math.floor((secondes % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
+  return `${Math.max(1, m)} min`;
+}
+
+// "boxingmaestro ×2 · SRBOXING ×1 · +2 autres"
+function ligneExpediteurs(senders) {
+  const tete = senders.slice(0, 3).map((s) => (s.count > 1 ? `${s.name} ×${s.count}` : s.name));
+  const reste = senders.length - 3;
+  if (reste > 0) tete.push(`+${reste} autre${reste > 1 ? "s" : ""}`);
+  return tete.join(" · ");
+}
 
 // Les cles VAPID identifient le serveur aupres d'Apple/Google. On les prend
 // dans l'environnement si elles y sont, sinon on en genere une paire au
@@ -70,34 +90,52 @@ async function sendToAll(payload) {
   return { sent, removed };
 }
 
-// Notification "nouveaux colis" : c'est l'equivalent du son de vente Shopify.
-// Volontairement minimale : le nombre de colis arrives depuis la derniere fois
-// que le site a ete ouvert, puis le total en attente et sa valeur.
-// Le "+N" se cumule : si trois colis arrivent un par un sans qu'on ouvre le
-// dashboard, la troisieme notification affiche +3 et remplace les precedentes
-// (meme tag).
+// Notification "nouveaux colis" : l'equivalent du son de vente Shopify.
+// Le "+N" se cumule depuis la derniere fois que le site a ete ouvert : si
+// trois colis arrivent un par un sans qu'on regarde, la troisieme
+// notification dit "+3" et remplace les precedentes (meme tag).
+//   +3 colis · 10,50 €
+//   boxingmaestro ×2 · SRBOXING
+//   45 à dropper · 185,50 €
 function notifyNewColis({ count }) {
   const pending = getPendingSummary();
-  const since = countColisSince(getSetting("push_seen_at", null));
-  const added = since ? since.count : count;
+  const vuLe = getSetting("push_seen_at", null);
+  const recap = summarizeNewColis(vuLe ? { since: vuLe } : { dernier: count });
+  const n = recap.count || count;
 
   return sendToAll({
-    title: `+${added} colis`,
-    body: `${pending.count} colis en attente · ${pending.value.toFixed(2)} €`,
+    title: `+${n} colis · ${euro(recap.value)}`,
+    body: [ligneExpediteurs(recap.senders), `${pending.count} à dropper · ${euro(pending.value)}`].filter(Boolean).join("\n"),
     tag: "colis",
     url: "/",
   }).catch((err) => console.error("[push] notifyNewColis", err.message));
 }
 
-// Depart en tournee : rappel de ce qu'on emporte.
+// Depart en tournee : ce qu'on emporte.
 function notifyTourStart() {
   const pending = getPendingSummary();
   return sendToAll({
-    title: `🚚 ${pending.value.toFixed(2)} € en cours de drop`,
+    title: `🚚 En tournée · ${euro(pending.value)}`,
     body: `${pending.count} colis dans le sac`,
     tag: "tour",
     url: "/",
   }).catch((err) => console.error("[push] notifyTourStart", err.message));
 }
 
-module.exports = { getPublicKey, sendToAll, notifyNewColis, notifyTourStart, countSubscriptions };
+// Retour de tournee : ce qu'elle a rapporte, et a quel rythme.
+function notifyTourEnd({ count, value, seconds, smicHourly }) {
+  const taux = seconds > 0 ? (value * 3600) / seconds : 0;
+  const detail = [`${count} colis dropé${count > 1 ? "s" : ""}${seconds > 0 ? ` en ${duree(seconds)}` : ""}`];
+  if (seconds > 0) {
+    detail.push(`${euro(taux)}/h`);
+    if (smicHourly > 0) detail.push(`${(taux / smicHourly).toFixed(1).replace(".", ",")}× le SMIC`);
+  }
+  return sendToAll({
+    title: `✅ Tournée terminée · ${euro(value)}`,
+    body: detail.join(" · "),
+    tag: "tour",
+    url: "/",
+  }).catch((err) => console.error("[push] notifyTourEnd", err.message));
+}
+
+module.exports = { getPublicKey, sendToAll, notifyNewColis, notifyTourStart, notifyTourEnd, countSubscriptions, euro };

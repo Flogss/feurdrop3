@@ -107,6 +107,57 @@ function haptique() {
   if (document.activeElement?.id === "haptique" && avant?.focus) avant.focus({ preventScroll: true });
 }
 
+// --- Son des nouveaux colis ----------------------------------------------------
+// Le "cha-ching" de Shopify, version maison : il sonne des que des colis
+// arrivent, quelle que soit la page ouverte. Les navigateurs ne laissent
+// jouer un son qu'apres un geste : le premier appui sur la page ouvre le canal
+// audio (et charge le son), les suivants le reveillent s'il s'est endormi.
+const son = { ctx: null, buffer: null, chargement: null };
+const sonActif = () => localStorage.getItem("drop.son") !== "0";
+
+function preparerSon() {
+  if (!son.ctx) {
+    const Contexte = window.AudioContext || window.webkitAudioContext;
+    if (!Contexte) return;
+    son.ctx = new Contexte();
+  }
+  if (son.ctx.state !== "running") son.ctx.resume().catch(() => {});
+  if (!son.buffer && !son.chargement) {
+    son.chargement = fetch("/cha-ching.m4a")
+      .then((r) => r.arrayBuffer())
+      .then((octets) => son.ctx.decodeAudioData(octets))
+      .then((tampon) => (son.buffer = tampon))
+      .catch(() => (son.chargement = null));
+  }
+}
+for (const geste of ["pointerdown", "keydown"]) document.addEventListener(geste, preparerSon, { passive: true, capture: true });
+
+async function chaChing({ force = false } = {}) {
+  if ((!force && !sonActif()) || !son.ctx) return;
+  try {
+    if (son.ctx.state !== "running") await son.ctx.resume();
+    if (!son.buffer) await son.chargement;
+  } catch {
+    return;
+  }
+  if (!son.buffer || son.ctx.state !== "running") return;
+  const source = son.ctx.createBufferSource();
+  source.buffer = son.buffer;
+  const volume = son.ctx.createGain();
+  volume.gain.value = 0.9;
+  source.connect(volume).connect(son.ctx.destination);
+  source.start();
+}
+
+// Le dernier nombre de colis en attente connu : toute hausse fait cha-ching.
+let dernierEnAttente = null;
+function noteEnAttente(n) {
+  const hausse = dernierEnAttente !== null && n > dernierEnAttente;
+  dernierEnAttente = n;
+  if (hausse) chaChing();
+  return hausse;
+}
+
 // --- Retours d'action ---------------------------------------------------------
 
 const TOAST_ICONES = { success: "check", error: "alert", info: "info" };
@@ -1104,6 +1155,13 @@ async function loadStats(animate, force, riche) {
   $("stat-earned-count").textContent = pluriel(s.droppedCount, "colis dropé", "colis dropés");
 
   retiens({ pending: s.pendingCount, today: s.todayValue, earned: s.droppedValue });
+  // du nouveau depuis la derniere visite : le son part avec la bulle "+N"
+  if (premier && colis.nouveau && colis.depuis < s.pendingCount) {
+    dernierEnAttente = s.pendingCount;
+    setTimeout(chaChing, delai + 300);
+  } else {
+    noteEnAttente(s.pendingCount);
+  }
 
   majPastilleImprime(s.aImprimer);
   bagSummary = { count: s.pendingCount, value: s.pendingValue };
@@ -2542,7 +2600,19 @@ const CHARGEMENTS_PAR_VUE = {
   dashboard: () => [loadStats(false), loadStock(), loadSpecialCount()],
   stats: () => [loadStats(false), loadRevenueStats(false)],
   colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates()],
+  // ailleurs, on guette seulement les nouveaux colis (et la pastille)
+  imprime: () => [verifieCommandes()],
+  special: () => [verifieCommandes()],
+  suivi: () => [verifieCommandes()],
+  "suivi-detail": () => [verifieCommandes()],
 };
+
+async function verifieCommandes() {
+  const s = await fetchJSON("/api/stats", {}, { essais: 1 });
+  majPastilleImprime(s.aImprimer);
+  // de nouvelles etiquettes : l'onglet Imprime les montre tout de suite
+  if (noteEnAttente(s.pendingCount) && currentView === "imprime") loadImprime().catch(() => {});
+}
 
 async function refreshAll() {
   // app en arriere-plan : rien a afficher, rien a recharger
@@ -2813,6 +2883,27 @@ $("add-sender-form").addEventListener("submit", async (e) => {
     },
     { succes: `${name} ajouté`, eclats: true }
   );
+});
+
+// --- Reglage du son ----------------------------------------------------------------
+function afficheReglageSon() {
+  const actif = sonActif();
+  $("son-switch").setAttribute("aria-checked", String(actif));
+  const etat = $("son-state");
+  etat.textContent = actif ? "Activé" : "Désactivé";
+  etat.classList.toggle("is-on", actif);
+}
+afficheReglageSon();
+$("son-switch").addEventListener("click", () => {
+  const actif = !sonActif();
+  localStorage.setItem("drop.son", actif ? "1" : "0");
+  afficheReglageSon();
+  haptique();
+  if (actif) chaChing({ force: true });
+});
+$("son-test").addEventListener("click", (e) => {
+  fait(e.currentTarget);
+  chaChing({ force: true });
 });
 
 // --- Notifications push -----------------------------------------------------------

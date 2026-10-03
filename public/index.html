@@ -36,6 +36,7 @@
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15.5" r="4.5"/><path d="m11.2 12.3 8.3-8.3"/><path d="m16 7.5 2.5 2.5"/><path d="m18.5 5 2 2"/></symbol>
   <symbol id="i-barcode" viewBox="0 0 24 24"><path d="M3.5 5.5v13M7 5.5v13M10 5.5v13M14 5.5v13M17 5.5v13M20.5 5.5v13"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.75-4.75"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3.5v6h3L11 19z"/><path d="M15.5 9a4 4 0 0 1 0 6M18.5 6a8 8 0 0 1 0 12"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6.5 2.5 8.5 2.5 8.5h-17S6 15.5 6 9"/><path d="M10.25 20.5a2 2 0 0 0 3.5 0"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6.5 9.5 17 4 11.5"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
@@ -428,6 +429,25 @@
             <div class="setting-extra" id="push-extra" hidden>
               <button class="btn btn-sm btn-secondary" id="push-test" type="button">
                 <svg class="icon"><use href="#i-send"/></svg><span>Envoyer un test</span>
+              </button>
+            </div>
+          </article>
+
+          <article class="card setting-card">
+            <div class="setting-row">
+              <span class="setting-icon"><svg class="icon"><use href="#i-volume"/></svg></span>
+              <div class="setting-main">
+                <div class="setting-title">Son des nouveaux colis</div>
+                <div class="setting-sub" id="son-state">Activé</div>
+              </div>
+              <button class="switch" id="son-switch" type="button" role="switch" aria-checked="true" aria-label="Son des nouveaux colis">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <p class="hint">Cha-ching dès qu'un colis arrive, tant que le site est ouvert (après un premier appui sur la page). Site fermé, la notification garde le son de l'appareil : Apple ne laisse pas un site le changer.</p>
+            <div class="setting-extra">
+              <button class="btn btn-sm btn-secondary" id="son-test" type="button">
+                <svg class="icon"><use href="#i-volume"/></svg><span>Écouter</span>
               </button>
             </div>
           </article>

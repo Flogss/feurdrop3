@@ -77,7 +77,8 @@ final class DashboardModel {
             loaded = true
         }
         app.lastSeen.save(LastSeenSnapshot(pending: s.pendingCount, earned: s.droppedValue, today: s.todayValue, day: LastSeenStore.dayKey()))
-        Task { await BackgroundRefresh.noteForeground(pending: s.pendingCount, value: s.pendingValue) }
+        // sous les yeux : tout est vu, les notifications repartiront d'ici
+        ParcelWatch.seen(s)
     }
 
     /// La memoire de l'appareil decide d'ou partent les compteurs.

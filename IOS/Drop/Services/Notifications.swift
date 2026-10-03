@@ -2,9 +2,10 @@ import UIKit
 import UserNotifications
 import DropKit
 
-/// Les notifications natives. Aujourd'hui : des notifications locales, posees
-/// par l'app elle-meme quand le rafraichissement en arriere-plan voit arriver
-/// de nouveaux colis. Demain : le push distant (voir `PushRegistrar`).
+/// Les notifications natives : nouveaux colis et tournee, toutes avec le
+/// cha-ching. Elles sont posees par l'app elle-meme (ecoute en arriere-plan,
+/// reveil periodique d'iOS) ; le push distant est pret a prendre le relais
+/// (voir `PushRegistrar`).
 enum NotificationService {
     static var center: UNUserNotificationCenter { .current() }
 
@@ -13,39 +14,85 @@ enum NotificationService {
         await center.notificationSettings().authorizationStatus
     }
 
+    static func isAuthorized() async -> Bool {
+        let statut = await status()
+        return statut == .authorized || statut == .provisional
+    }
+
     /// Demande la permission (une seule fois : iOS ne redemande plus apres un
     /// refus, il faut passer par les Reglages).
     @discardableResult
     static func requestAuthorization() async -> Bool {
         let accorde = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-        if accorde { await MainActor.run { PushRegistrar.shared.registerIfPossible() } }
+        if accorde { PushRegistrar.shared.registerIfPossible() }
         return accorde
     }
 
-    /// "+3 colis à dropper" : un seul message qui se remplace au lieu de
-    /// s'empiler, groupe avec les precedents dans le centre de notifications.
-    static func announceNewParcels(added: Int, total: Int, value: Double) async {
-        let statut = await status()
-        guard statut == .authorized || statut == .provisional else { return }
-        let contenu = UNMutableNotificationContent()
-        contenu.title = added > 1 ? "+\(added) colis" : "+1 colis"
-        contenu.body = "\(Format.count(total, "colis", "colis")) à dropper · \(Format.euro(value))"
-        contenu.sound = Sounds.newParcelsNotification
-        contenu.threadIdentifier = "nouveaux-colis"
-        contenu.interruptionLevel = .active
-        contenu.relevanceScore = 0.8
-        let requete = UNNotificationRequest(identifier: "nouveaux-colis", content: contenu, trigger: nil)
-        try? await center.add(requete)
+    /// "+3 colis · 10,50 €" : une seule notification qui se remplace (le "+N"
+    /// se cumule) au lieu de s'empiler.
+    ///
+    ///     +3 colis · 10,50 €
+    ///     boxingmaestro ×2 · SRBOXING
+    ///     45 à dropper · 185,50 €
+    static func newParcels(added: Int, value: Double, senders: [(String, Int)], pending: Int, pendingValue: Double) async {
+        var lignes: [String] = []
+        if !senders.isEmpty { lignes.append(ligneExpediteurs(senders)) }
+        lignes.append("\(Format.integer(pending)) à dropper · \(Format.euro(pendingValue))")
+        await poste(
+            id: "nouveaux-colis",
+            titre: "+\(Format.count(added, "colis", "colis")) · \(Format.euro(value))",
+            corps: lignes.joined(separator: "\n"),
+            fil: "colis"
+        )
     }
 
-    /// Envoie une notification d'essai, comme le bouton "Tester" du site.
+    static func tourStarted(count: Int, value: Double) async {
+        await poste(id: "tournee", titre: "🚚 En tournée · \(Format.euro(value))", corps: "\(Format.count(count, "colis", "colis")) dans le sac", fil: "tournee")
+    }
+
+    static func tourEnded(_ t: TourSummary) async {
+        let secondes = t.durationSeconds
+        var detail = [Format.count(t.count, "colis dropé", "colis dropés") + (secondes > 0 ? " en \(Format.duration(secondes))" : "")]
+        if secondes > 0 {
+            let taux = t.value * 3600 / Double(secondes)
+            detail.append("\(Format.euro(taux))/h")
+            if let smic = t.smicHourly, smic > 0 { detail.append("\(Format.multiple(taux / smic)) le SMIC") }
+        }
+        await poste(id: "tournee", titre: "✅ Tournée terminée · \(Format.euro(t.value))", corps: detail.joined(separator: " · "), fil: "tournee")
+    }
+
+    /// Une notification d'essai, deux secondes apres l'appui.
     static func sendTest() async {
+        await poste(
+            id: "essai",
+            titre: "+3 colis · \(Format.euro(10.5))",
+            corps: "Exemple · boxingmaestro ×2 · SRBOXING\nLe cha-ching sonnera comme ça.",
+            fil: "colis",
+            apres: 2
+        )
+    }
+
+    // MARK: Outils
+
+    /// "boxingmaestro ×2 · SRBOXING · +2 autres"
+    private static func ligneExpediteurs(_ senders: [(String, Int)]) -> String {
+        var tete = senders.prefix(3).map { $0.1 > 1 ? "\($0.0) ×\($0.1)" : $0.0 }
+        let reste = senders.count - 3
+        if reste > 0 { tete.append("+\(reste) autre\(reste > 1 ? "s" : "")") }
+        return tete.joined(separator: " · ")
+    }
+
+    private static func poste(id: String, titre: String, corps: String, fil: String, apres: TimeInterval? = nil) async {
+        guard await isAuthorized() else { return }
         let contenu = UNMutableNotificationContent()
-        contenu.title = "Drop"
-        contenu.body = "Les notifications fonctionnent sur cet iPhone."
+        contenu.title = titre
+        contenu.body = corps
         contenu.sound = Sounds.newParcelsNotification
-        let requete = UNNotificationRequest(identifier: "essai", content: contenu, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false))
-        try? await center.add(requete)
+        contenu.threadIdentifier = fil
+        contenu.interruptionLevel = .active
+        contenu.relevanceScore = fil == "colis" ? 0.9 : 0.6
+        let declencheur = apres.map { UNTimeIntervalNotificationTrigger(timeInterval: $0, repeats: false) }
+        try? await center.add(UNNotificationRequest(identifier: id, content: contenu, trigger: declencheur))
     }
 }
 
@@ -66,7 +113,8 @@ final class PushRegistrar {
         // A brancher quand le serveur aura sa route APNs, par exemple :
         // try await api.client.send(.post, "/api/push/apns", body: ["token": deviceToken])
         // Le serveur mettra alors "sound": "cha-ching.caf" dans la charge "aps" :
-        // le meme son que les notifications locales.
+        // le meme son que les notifications locales, et l'ecoute en
+        // arriere-plan deviendra inutile.
     }
 
     func didFail(_ error: any Error) {

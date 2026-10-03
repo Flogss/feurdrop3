@@ -1111,6 +1111,24 @@ function countColisSince(since) {
     .get(since);
 }
 
+// Le detail des colis arrives depuis `since` (ou, faute de date, des
+// `dernier` derniers) : nombre, valeur, et qui les a envoyes.
+function summarizeNewColis({ since = null, dernier = 0 } = {}) {
+  const lignes = since
+    ? db.prepare("SELECT sender_name, price FROM colis WHERE created_at > ?").all(since)
+    : db.prepare("SELECT sender_name, price FROM colis ORDER BY id DESC LIMIT ?").all(Math.max(0, dernier));
+  const parExpediteur = new Map();
+  let value = 0;
+  for (const l of lignes) {
+    value += l.price;
+    parExpediteur.set(l.sender_name, (parExpediteur.get(l.sender_name) || 0) + 1);
+  }
+  const senders = [...parExpediteur.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  return { count: lignes.length, value, senders };
+}
+
 // --- Notifications push (PWA iOS/Android) -----------------------------------
 // Un abonnement = un appareil. iOS peut le revoquer silencieusement, donc le
 // client se reabonne a chaque ouverture et on supprime les endpoints morts
@@ -1234,6 +1252,7 @@ module.exports = {
   setSetting,
   markPushSeen,
   countColisSince,
+  summarizeNewColis,
   saveSubscription,
   deleteSubscription,
   listSubscriptions,

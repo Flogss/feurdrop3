@@ -15,10 +15,18 @@ struct DropApp: App {
                 .tint(Theme.violet)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { BackgroundRefresh.schedule() }
+            switch phase {
+            case .background:
+                BackgroundRefresh.schedule()
+                BackgroundListener.shared.start()
+            case .active:
+                BackgroundListener.shared.stop()
+            default:
+                break
+            }
         }
-        // Toutes les 15 minutes environ (quand iOS le permet), on regarde si de
-        // nouveaux colis sont arrives et on previent par une notification.
+        // Le filet de securite : quand iOS reveille l'app (au mieux toutes les
+        // 15 minutes), elle regarde aussi s'il y a du nouveau.
         .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
             await BackgroundRefresh.run()
         }

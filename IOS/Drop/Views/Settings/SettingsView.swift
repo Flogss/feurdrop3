@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var cible: Int?
     @State private var confirmeFusion = false
     @State private var adresse = ""
+    @AppStorage(ParcelWatch.newParcelsKey) private var notifColis = true
+    @AppStorage(ParcelWatch.tourKey) private var notifTournee = true
+    @AppStorage(BackgroundListener.enabledKey) private var ecoute = true
 
     private var model: SettingsModel { app.settings }
 
@@ -62,13 +65,25 @@ struct SettingsView: View {
         Section {
             switch model.notificationStatus {
             case .authorized, .provisional, .ephemeral:
-                Label {
-                    Text("Activées sur cet iPhone")
-                } icon: {
-                    Image(systemName: "bell.badge.fill").foregroundStyle(Theme.violet)
+                Toggle(isOn: $notifColis) {
+                    Label("Nouveaux colis", systemImage: "shippingbox.fill")
                 }
-                Button("Envoyer une notification d'essai", systemImage: "paperplane") {
+                Toggle(isOn: $notifTournee) {
+                    Label("Tournée", systemImage: "box.truck.fill")
+                }
+                Toggle(isOn: $ecoute) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Écoute en arrière-plan", systemImage: "antenna.radiowaves.left.and.right")
+                        Text(ecoute ? "Notification dans les 10 s, app fermée" : "Notification quand iOS réveille l'app")
+                            .font(.caption)
+                            .foregroundStyle(ecoute ? Theme.violetLight : Theme.text3)
+                            .contentTransition(.interpolate)
+                    }
+                }
+                Button {
                     Task { await model.testNotification() }
+                } label: {
+                    Label("Tester le cha-ching", systemImage: "speaker.wave.2.fill")
                 }
             case .denied:
                 Label("Refusées", systemImage: "bell.slash.fill")
@@ -86,8 +101,22 @@ struct SettingsView: View {
         } header: {
             Text("Notifications")
         } footer: {
-            Text("Un message quand de nouveaux colis arrivent, même app fermée (iOS vérifie de temps en temps).")
+            Text(piedNotifications)
         }
+        .tint(Theme.violet)
+        .animation(Theme.spring, value: ecoute)
+    }
+
+    private var piedNotifications: String {
+        guard model.notificationStatus == .authorized || model.notificationStatus == .provisional else {
+            return "Un cha-ching dès que des colis arrivent, même app fermée."
+        }
+        var texte = "Chaque notification fait cha-ching. "
+        texte += ecoute
+            ? "L'écoute garde l'app éveillée une fois quittée et consomme un peu de batterie. Elle s'arrête si tu fermes l'app de force (balayée vers le haut)."
+            : "Sans l'écoute, iOS réveille l'app quand il veut (de 15 min à quelques heures)."
+        texte += " Si le site est aussi installé sur cet iPhone avec ses notifications, coupe-les là-bas pour ne pas tout recevoir en double."
+        return texte
     }
 
     private var impressionAuto: some View {

@@ -49,7 +49,7 @@ const {
   markPrinted,
   getPrintToken,
 } = require("../db");
-const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart } = require("../push");
+const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart, notifyTourEnd, euro } = require("../push");
 const { refreshGroupStats, buildLabelsPdf } = require("../bot");
 
 // SMIC horaire NET francais, sert de point de comparaison apres une tournee :
@@ -197,6 +197,7 @@ router.post("/tour/finish", (req, res) => {
     };
     saveLastTour(summary);
   }
+  if (count > 0) notifyTourEnd({ count, value: bag.value, seconds: summary?.seconds || 0, smicHourly: SMIC_HOURLY });
 
   res.json({ ok: true, count, value: bag.value, startedAt, endedAt, summary, stocks: getStocks() });
 });
@@ -407,8 +408,8 @@ router.post("/push/seen", (req, res) => {
 router.post("/push/test", async (req, res) => {
   const pending = getPendingSummary();
   const result = await sendToAll({
-    title: "+3 colis",
-    body: `${pending.count} colis en attente · ${pending.value.toFixed(2)} €`,
+    title: `+3 colis · ${euro(10.5)}`,
+    body: `Exemple · boxingmaestro ×2 · SRBOXING\n${pending.count} à dropper · ${euro(pending.value)}`,
     tag: "colis",
     url: "/",
   });
