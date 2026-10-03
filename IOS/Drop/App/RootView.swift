@@ -13,7 +13,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.scenePhase) private var scenePhase
     @State private var booted = false
-    @State private var arrivees = 0
+    @State private var arrivee = TabArrivalState()
 
     var body: some View {
         @Bindable var app = app
@@ -23,24 +23,24 @@ struct RootView: View {
             TabView(selection: $app.tab) {
                 Tab(AppTab.dashboard.title, systemImage: AppTab.dashboard.symbol, value: AppTab.dashboard) {
                     DashboardView(booted: booted)
-                        .modifier(TabArrival(trigger: arrivees, active: app.tab == .dashboard))
                 }
                 Tab(AppTab.printing.title, systemImage: AppTab.printing.symbol, value: AppTab.printing) {
                     PrintView()
-                        .modifier(TabArrival(trigger: arrivees, active: app.tab == .printing))
                 }
                 .badge(badgeImprime)
                 Tab(AppTab.stats.title, systemImage: AppTab.stats.symbol, value: AppTab.stats) {
                     StatsView()
-                        .modifier(TabArrival(trigger: arrivees, active: app.tab == .stats))
                 }
             }
             .opacity(booted ? 1 : 0)
             .scaleEffect(booted ? 1 : 1.04)
             .blur(radius: booted ? 0 : 12)
         }
+        .environment(\.tabArrival, arrivee)
         .sensoryFeedback(.selection, trigger: app.tab)
-        .onChange(of: app.tab) { arrivees += 1 }
+        .onChange(of: app.tab) { ancien, nouveau in
+            arrivee = TabArrivalState(compte: arrivee.compte + 1, sens: nouveau.index > ancien.index ? 1 : -1, onglet: nouveau)
+        }
         .overlay(alignment: .top) {
             ToastOverlay(center: app.toasts)
                 .padding(.top, 4)
@@ -75,6 +75,7 @@ struct RootView: View {
         }
         withAnimation(.spring(response: 0.7, dampingFraction: 0.86)) { booted = true }
         Haptics.soft()
+        if app.tab == .dashboard { app.dashboard.playLaunchAnnouncement() }
         await chiffres
         if !app.dashboard.loaded { app.isColdStart = false }
     }
@@ -103,35 +104,66 @@ struct RootView: View {
     }
 }
 
-/// L'onglet qui arrive se precise : un leger flou qui se dissipe, une
-/// echelle qui se pose. Seul l'onglet devenu actif le joue.
+/// L'onglet qui arrive : son contenu glisse depuis le cote d'ou l'on vient,
+/// en se precisant (flou -> net) et en se posant d'un ressort. Seul le
+/// contenu bouge : le fond reste en place. (Animer tout l'ecran, fond
+/// compris, decouvrait le noir de la barre d'onglets en haut.)
+struct TabArrivalState: Equatable {
+    var compte = 0
+    var sens: CGFloat = 1
+    var onglet: AppTab = .dashboard
+}
+
+extension EnvironmentValues {
+    @Entry var tabArrival = TabArrivalState()
+}
+
+extension View {
+    /// a poser sur le contenu defilant de la page racine d'un onglet
+    func tabArrival(_ onglet: AppTab) -> some View {
+        modifier(TabArrival(onglet: onglet))
+    }
+}
+
 private struct TabArrival: ViewModifier {
-    let trigger: Int
-    let active: Bool
+    let onglet: AppTab
+    @Environment(\.tabArrival) private var etat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// cache des qu'on quitte l'onglet : au retour, la premiere image est
+    /// deja le debut de l'entree (pas d'eclair de l'etat final)
+    @State private var visible = false
+    /// l'arrivee deja jouee (apparition et changement d'onglet arrivent
+    /// parfois ensemble : une seule entree)
+    @State private var jouee = -1
 
     func body(content: Content) -> some View {
-        content.keyframeAnimator(initialValue: Arrivee(), trigger: active ? trigger : 0) { vue, a in
-            vue.opacity(a.opacite).blur(radius: a.flou).scaleEffect(a.echelle)
-        } keyframes: { _ in
-            KeyframeTrack(\.opacite) {
-                MoveKeyframe(0.35)
-                CubicKeyframe(1, duration: 0.32)
+        content
+            // le glissement et le flou se posent d'un ressort...
+            .blur(radius: visible ? 0 : 10)
+            .scaleEffect(visible ? 1 : 0.975, anchor: .top)
+            .offset(x: visible ? 0 : 36 * etat.sens)
+            .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.82), value: visible)
+            // ...pendant que le contenu apparait tout de suite : pas d'ecran vide
+            .opacity(visible ? 1 : 0.15)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: visible)
+            .onAppear {
+                if etat.onglet == onglet { entre() }
             }
-            KeyframeTrack(\.flou) {
-                MoveKeyframe(10)
-                CubicKeyframe(0, duration: 0.34)
+            .onChange(of: etat.compte) {
+                if etat.onglet == onglet {
+                    entre()
+                } else {
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) { visible = false }
+                }
             }
-            KeyframeTrack(\.echelle) {
-                MoveKeyframe(0.975)
-                SpringKeyframe(1, duration: 0.45, spring: .snappy)
-            }
-        }
     }
 
-    private struct Arrivee {
-        var opacite = 1.0
-        var flou: CGFloat = 0
-        var echelle: CGFloat = 1
+    private func entre() {
+        guard jouee != etat.compte else { return }
+        jouee = etat.compte
+        visible = true
     }
 }
 

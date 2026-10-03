@@ -51,6 +51,7 @@ struct PrintView: View {
             .scrollContentBackground(.hidden)
             .listSectionSpacing(18)
             .contentMargins(.top, 4, for: .scrollContent)
+            .tabArrival(.printing)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Imprimé")
             .refreshable { await model.refresh() }

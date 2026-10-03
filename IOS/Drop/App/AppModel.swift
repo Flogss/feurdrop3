@@ -74,7 +74,11 @@ final class AppModel {
     func refreshVisible() async {
         switch tab {
         case .dashboard: await dashboard.refresh()
-        case .printing: await printing.refresh()
+        case .printing:
+            // les nouveaux colis s'entendent aussi depuis cet onglet
+            async let colis: Void = dashboard.refresh()
+            await printing.refresh()
+            await colis
         case .stats: await stats.refresh(animated: false)
         }
     }

@@ -16,6 +16,8 @@ final class DashboardModel {
     /// valeur de CET appareil (avec bulle "+N") s'il y a du nouveau, sinon
     /// zero pour la grande entree. Vide une fois l'entree jouee.
     private(set) var starts: [Counter: CounterStart] = [:]
+    /// du nouveau depuis la derniere visite : le cha-ching attend la bulle "+N"
+    @ObservationIgnored private var annonceAuLancement = false
     enum Counter: Hashable { case pending, pendingValue, today, earned, bj }
 
     /// une gerbe d'etincelles sur la carte principale
@@ -58,6 +60,10 @@ final class DashboardModel {
         let premier = !loaded
         if premier { prepareStarts(s) }
 
+        // de nouveaux colis pendant que l'app est ouverte : cha-ching, quel que
+        // soit l'onglet
+        if let avant = stats, s.pendingCount > avant.pendingCount { Sounds.chaChing() }
+
         // le resume de tournee qui APPARAIT pendant qu'on regarde : c'est la fete
         let resume = s.tour.last.map { "\($0.endedAt)|\($0.value)" }
         if loaded, resume != nil, resume != dernierResume { tourCelebration += 1 }
@@ -86,6 +92,7 @@ final class DashboardModel {
             .pendingValue: CounterStart(from: flourish ? 0 : nil, announces: false),
             .bj: CounterStart(from: flourish ? 0 : nil, announces: false),
         ]
+        annonceAuLancement = starts[.pending]?.announces == true
         app.isColdStart = false
         Task { @MainActor in
             // l'entree jouee, les compteurs recrees partent de leur valeur
@@ -101,6 +108,17 @@ final class DashboardModel {
         if stockEnVol[.normal, default: 0] == 0 { affiche.normal = serveur.normal }
         if stockEnVol[.bj, default: 0] == 0 { affiche.bj = serveur.bj }
         if affiche != stock { stock = affiche }
+    }
+
+    /// Appele quand le dashboard apparait au lancement : le son part avec la
+    /// bulle "+N colis" (le compteur attend que la carte soit entree).
+    func playLaunchAnnouncement() {
+        guard annonceAuLancement else { return }
+        annonceAuLancement = false
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.55))
+            Sounds.chaChing()
+        }
     }
 
     /// Le "+N" des notifications compte depuis la derniere fois qu'on a

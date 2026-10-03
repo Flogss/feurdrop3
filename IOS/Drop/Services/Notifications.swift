@@ -30,7 +30,7 @@ enum NotificationService {
         let contenu = UNMutableNotificationContent()
         contenu.title = added > 1 ? "+\(added) colis" : "+1 colis"
         contenu.body = "\(Format.count(total, "colis", "colis")) à dropper · \(Format.euro(value))"
-        contenu.sound = .default
+        contenu.sound = Sounds.newParcelsNotification
         contenu.threadIdentifier = "nouveaux-colis"
         contenu.interruptionLevel = .active
         contenu.relevanceScore = 0.8
@@ -43,7 +43,7 @@ enum NotificationService {
         let contenu = UNMutableNotificationContent()
         contenu.title = "Drop"
         contenu.body = "Les notifications fonctionnent sur cet iPhone."
-        contenu.sound = .default
+        contenu.sound = Sounds.newParcelsNotification
         let requete = UNNotificationRequest(identifier: "essai", content: contenu, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false))
         try? await center.add(requete)
     }
@@ -65,6 +65,8 @@ final class PushRegistrar {
         deviceToken = token.map { String(format: "%02x", $0) }.joined()
         // A brancher quand le serveur aura sa route APNs, par exemple :
         // try await api.client.send(.post, "/api/push/apns", body: ["token": deviceToken])
+        // Le serveur mettra alors "sound": "cha-ching.caf" dans la charge "aps" :
+        // le meme son que les notifications locales.
     }
 
     func didFail(_ error: any Error) {

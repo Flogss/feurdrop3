@@ -46,18 +46,10 @@ struct StatsView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
+            .tabArrival(.stats)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Stats")
             .refreshable { await model.refresh(animated: true) }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Rejouer", systemImage: "sparkles") {
-                        Haptics.soft()
-                        model.replay()
-                    }
-                    .symbolEffect(.bounce, value: model.reveal)
-                }
-            }
             .containerBackground(for: .navigation) { AmbientBackground() }
         }
     }

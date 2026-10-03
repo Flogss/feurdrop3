@@ -55,6 +55,7 @@ struct DashboardView: View {
                 .padding(.bottom, 24)
                 .animation(Theme.spring, value: model.stats?.tour)
             }
+            .tabArrival(.dashboard)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .refreshable { await model.refresh() }
             .toolbarVisibility(.hidden, for: .navigationBar)

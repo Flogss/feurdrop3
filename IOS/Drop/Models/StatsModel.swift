@@ -60,10 +60,6 @@ final class StatsModel {
         // l'anneau par expediteur vit dans les chiffres du dashboard
         await app.dashboard.refresh()
     }
-
-    func replay() {
-        reveal += 1
-    }
 }
 
 /// Une part d'anneau. Au-dela de `max` parts, les plus petites se regroupent
