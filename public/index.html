@@ -6,7 +6,7 @@
 <title>DROP.ctrl</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#0b0c0e" />
+<meta name="theme-color" content="#08070b" />
 <meta name="color-scheme" content="dark" />
 <!-- iOS n'utilise pas le manifest pour l'ajout a l'ecran d'accueil : il lui
      faut ces balises pour ouvrir le site en plein ecran (et donc autoriser
@@ -17,7 +17,11 @@
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="boot">
+<!-- iPhone : basculer un interrupteur natif fait vibrer le telephone. C'est le
+     seul retour haptique que Safari laisse passer. -->
+<label class="haptique" aria-hidden="true"><input type="checkbox" switch id="haptique" tabindex="-1" /></label>
+
 <!-- Icones : un seul jeu, trait de 1,75, appele par <use href="#i-…">. -->
 <svg class="sprite" aria-hidden="true" focusable="false">
   <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3.5v10.5M7.5 9.5 12 14l4.5-4.5"/><path d="M4.5 14.5v3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
@@ -64,7 +68,16 @@
   <symbol id="i-party" viewBox="0 0 24 24"><path d="M4 20 8.5 7.5l8 8z"/><path d="M14 4.5c.8 1 .8 2.2 0 3.2M19.5 10c-1-.8-2.2-.8-3.2 0M17.5 3.5v1M20.5 6.5h-1M11 3.5l.5 1"/></symbol>
 </svg>
 
-<div class="ambient" aria-hidden="true"></div>
+<!-- Le fond vit : des halos violets qui derivent, quelques particules, un grain
+     fin. Tout est fixe derriere le contenu et ne recoit jamais un clic. -->
+<div class="ambient" aria-hidden="true">
+  <span class="blob blob-1"></span>
+  <span class="blob blob-2"></span>
+  <span class="blob blob-3"></span>
+  <canvas class="particules" id="particules"></canvas>
+  <span class="grain"></span>
+</div>
+<div class="eclats" id="eclats" aria-hidden="true"></div>
 
 <!-- Mode locker : le code-barre en plein ecran, sur fond blanc pour le
      lecteur, le numero en tres gros pour le rapprocher du colis. -->
@@ -103,7 +116,9 @@
     </button>
 
     <nav class="tabbar" id="tabbar" aria-label="Navigation">
-      <span class="tab-indicator" aria-hidden="true"></span>
+      <span class="tab-glass" aria-hidden="true"></span>
+      <span class="tab-hover" aria-hidden="true"></span>
+      <span class="tab-indicator" id="tab-indicator" aria-hidden="true"><span class="tab-indicator-shine"></span></span>
       <button class="tab active" data-view="dashboard" type="button">
         <svg class="icon"><use href="#i-home"/></svg>
         <span>Dashboard</span>
@@ -132,9 +147,11 @@
 
   <main>
     <!-- ===================================================== DASHBOARD -->
-    <section id="view-dashboard" class="view active" aria-label="Dashboard">
+    <section id="view-dashboard" class="view active attente" aria-label="Dashboard">
       <div class="dash">
         <article class="card hero" id="hero">
+          <span class="hero-aura" aria-hidden="true"></span>
+          <span class="hero-dots" aria-hidden="true"></span>
           <div class="hero-head">
             <span class="eyebrow" id="hero-eyebrow">À dropper</span>
             <span class="tour-pill" id="tour-banner" hidden>
@@ -173,22 +190,20 @@
         </article>
 
         <article class="card summary" id="tour-summary" hidden>
-          <header class="summary-head">
-            <span class="summary-icon"><svg class="icon"><use href="#i-flag"/></svg></span>
-            <div class="summary-titles">
-              <h2 class="summary-title" id="tour-summary-title">Tournée terminée</h2>
-              <p class="summary-sub" id="tour-summary-sub">—</p>
-            </div>
-            <button class="icon-btn icon-btn-sm" id="tour-summary-close" type="button" aria-label="Fermer le résumé">
-              <svg class="icon"><use href="#i-x"/></svg>
-            </button>
-          </header>
+          <span class="summary-icon"><svg class="icon"><use href="#i-flag"/></svg></span>
+          <div class="summary-titles">
+            <h2 class="summary-title" id="tour-summary-title">Tournée terminée</h2>
+            <p class="summary-sub" id="tour-summary-sub">—</p>
+          </div>
           <div class="tour-rate" id="tour-rate"></div>
           <p class="summary-day" id="tour-day" hidden>—</p>
+          <button class="icon-btn icon-btn-sm summary-close" id="tour-summary-close" type="button" aria-label="Fermer le résumé">
+            <svg class="icon"><use href="#i-x"/></svg>
+          </button>
         </article>
 
         <div class="metrics">
-          <button class="card metric" data-goto="stats" type="button">
+          <button class="card metric metric-money" data-goto="stats" type="button">
             <span class="eyebrow">Aujourd'hui</span>
             <span class="metric-value" id="stat-today" data-skeleton>0,00 €</span>
             <span class="metric-sub" id="stat-today-count">0 colis dropés</span>
@@ -351,9 +366,14 @@
           <span class="metric-value" id="day-average">—</span>
           <span class="metric-sub" id="day-average-sub">—</span>
         </article>
+        <article class="card metric metric-week">
+          <span class="eyebrow">Cette semaine</span>
+          <span class="metric-value" id="stat-week-value">—</span>
+          <span class="metric-sub" id="stat-week-sub">—</span>
+        </article>
       </div>
 
-      <article class="card">
+      <article class="card chart-card">
         <header class="card-head">
           <h2>Revenus par jour</h2>
           <span class="card-meta" id="week-range">—</span>
@@ -361,20 +381,23 @@
         <div class="chart-scroll" id="chart-week"><div class="chart-track"></div></div>
       </article>
 
-      <article class="card">
-        <header class="card-head">
-          <h2>Revenus par semaine</h2>
-          <span class="card-meta" id="month-range">—</span>
-        </header>
-        <div class="chart-scroll" id="chart-month"><div class="chart-track"></div></div>
-      </article>
+      <div class="stats-duo">
+        <article class="card chart-card">
+          <header class="card-head">
+            <h2>Revenus par semaine</h2>
+            <span class="card-meta" id="month-range">—</span>
+          </header>
+          <div class="chart-scroll" id="chart-month"><div class="chart-track"></div></div>
+        </article>
 
-      <article class="card">
-        <header class="card-head">
-          <h2>Gains par expéditeur</h2>
-        </header>
-        <div class="donut-wrap" id="donut-sender"></div>
-      </article>
+        <article class="card">
+          <header class="card-head">
+            <h2>Gains par expéditeur</h2>
+            <span class="card-meta" id="donut-hint">Touche une part</span>
+          </header>
+          <div class="donut-wrap" id="donut-sender"></div>
+        </article>
+      </div>
     </section>
 
     <!-- ===================================================== REGLAGES -->
