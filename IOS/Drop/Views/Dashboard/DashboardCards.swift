@@ -88,6 +88,9 @@ struct MetricsRow: View {
 
     var body: some View {
         let starts = app.dashboard.starts
+        // un conteneur de verre : iOS rend les verres voisins en une passe
+        // (espacement 0 : ils ne fusionnent jamais, l'aspect ne change pas)
+        GlassEffectContainer(spacing: 0) {
         HStack(spacing: 12) {
             metrique(
                 titre: "Aujourd'hui", valeur: stats.todayValue, start: starts[.today], retard: 0.92,
@@ -97,6 +100,7 @@ struct MetricsRow: View {
                 titre: "Gagné au total", valeur: stats.droppedValue, start: starts[.earned], retard: 1.0,
                 sous: Format.count(stats.droppedCount, "colis dropé", "colis dropés"), accent: false
             )
+        }
         }
     }
 
@@ -142,9 +146,11 @@ struct StockCard: View {
         let stock = app.dashboard.stock ?? .init()
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader("Stock de pochettes")
-            HStack(spacing: 12) {
-                compteur(.normal, valeur: stock.normal)
-                compteur(.bj, valeur: stock.bj)
+            GlassEffectContainer(spacing: 0) {
+                HStack(spacing: 12) {
+                    compteur(.normal, valeur: stock.normal)
+                    compteur(.bj, valeur: stock.bj)
+                }
             }
         }
         .surfaceCard()
@@ -243,10 +249,12 @@ struct CarriersCard: View {
             if lignes.isEmpty {
                 EmptyStateView(symbol: "party.popper.fill", title: "Rien à poster", subtitle: "Tout est dropé, beau travail.", positive: true)
             } else {
-                VStack(spacing: 4) {
-                    ForEach(lignes) { c in
-                        ligne(c, part: total > 0 ? Double(c.pendingCount) / Double(total) : 0)
-                            .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity.combined(with: .offset(x: 40)).combined(with: .scale(scale: 0.95))))
+                GlassEffectContainer(spacing: 0) {
+                    VStack(spacing: 4) {
+                        ForEach(lignes) { c in
+                            ligne(c, part: total > 0 ? Double(c.pendingCount) / Double(total) : 0)
+                                .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity.combined(with: .offset(x: 40)).combined(with: .scale(scale: 0.95))))
+                        }
                     }
                 }
             }
@@ -314,9 +322,11 @@ struct SendersCard: View {
             if senders.isEmpty {
                 EmptyStateView(symbol: "shippingbox", title: "Aucun colis pour le moment", subtitle: "Les fichiers envoyés au bot apparaîtront ici.")
             } else {
-                VStack(spacing: 2) {
-                    ForEach(senders) { s in
-                        SenderRow(sender: s)
+                GlassEffectContainer(spacing: 0) {
+                    VStack(spacing: 2) {
+                        ForEach(senders) { s in
+                            SenderRow(sender: s)
+                        }
                     }
                 }
             }

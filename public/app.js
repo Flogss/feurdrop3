@@ -1232,6 +1232,7 @@ async function loadStats(animate, force, riche) {
   $("stat-earned-count").textContent = pluriel(s.droppedCount, "colis dropé", "colis dropés");
 
   retiens({ pending: s.pendingCount, today: s.todayValue, earned: s.droppedValue });
+  signatureRevenus = `${s.droppedCount}|${s.droppedValue}|${aujourdhui()}`;
   // du nouveau depuis la derniere visite : le son part avec la bulle "+N"
   if (premier && colis.nouveau && colis.depuis < s.pendingCount) {
     dernierEnAttente = s.pendingCount;
@@ -2647,7 +2648,14 @@ function renderSemaine(items, animate) {
     (ecart !== null && ecart > 0 ? ` · <span class="up">+${ecart} %</span>` : "");
 }
 
+// Les revenus ne changent que quand des colis sont dropes (ou au changement
+// de jour) : le rafraichissement de fond ne les relit que dans ce cas, ou au
+// plus tard toutes les 60 s. Les revelations animees les relisent toujours.
+let signatureRevenus = "";
+let revenusCharges = { signature: null, le: 0 };
 async function loadRevenueStats(animate, force, riche) {
+  if (!animate && !force && revenusCharges.signature === signatureRevenus && Date.now() - revenusCharges.le < 60000) return;
+  revenusCharges = { signature: signatureRevenus, le: Date.now() };
   await Promise.all([loadDayScrollChart(animate, force, riche), loadWeekScrollChart(animate, force, riche)]);
 
   const r = await fetchJSON("/api/stats/revenue");
@@ -2715,7 +2723,8 @@ window.addEventListener("focus", () => markSeen(true));
 // revelation des Stats ne se joue qu'en arrivant sur l'onglet.
 const CHARGEMENTS_PAR_VUE = {
   dashboard: () => [loadStats(false), loadStock(), loadSpecialCount()],
-  stats: () => [loadStats(false), loadRevenueStats(false)],
+  // les chiffres d'abord : ils disent si les revenus ont pu changer
+  stats: () => [loadStats(false).then(() => loadRevenueStats(false))],
   colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates()],
   // ailleurs, on guette seulement les nouveaux colis (et la pastille)
   imprime: () => [verifieCommandes()],

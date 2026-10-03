@@ -121,15 +121,9 @@ struct HeroCard: View {
 
     /// la lumiere violette qui respire derriere le chiffre
     private var aura: some View {
-        TimelineView(.animation(minimumInterval: 1 / 20)) { contexte in
-            let t = contexte.date.timeIntervalSinceReferenceDate
-            ZStack {
-                RadialGradient(colors: [Theme.violet.opacity(0.55), .clear], center: .init(x: 0.25 + sin(t * 0.4) * 0.08, y: 0.25), startRadius: 0, endRadius: 220)
-                RadialGradient(colors: [Theme.violetDeep.opacity(0.35), .clear], center: .init(x: 0.9, y: 0.95 + cos(t * 0.3) * 0.05), startRadius: 0, endRadius: 200)
-            }
-        }
-        .clipShape(.rect(cornerRadius: Theme.Radius.card))
-        .allowsHitTesting(false)
+        HeroAura()
+            .clipShape(.rect(cornerRadius: Theme.Radius.card))
+            .allowsHitTesting(false)
     }
 
     private var noteTournee: String {
@@ -186,6 +180,39 @@ struct HeroCard: View {
             }
         }
         .sensoryFeedback(.success, trigger: enTournee)
+    }
+}
+
+/// La lumiere qui respire derriere le chiffre : deux halos qui derivent
+/// lentement (meme trajectoire qu'avant). Leur mouvement est une animation
+/// de position : la vue n'est plus recalculee 20 fois par seconde, seul le
+/// deplacement est anime.
+private struct HeroAura: View {
+    @State private var derive = false
+    @State private var houle = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            ZStack {
+                halo(Theme.violet.opacity(0.55), rayon: 220)
+                    .position(x: w * 0.25, y: h * 0.25)
+                    .offset(x: (derive ? 0.08 : -0.08) * w)
+                halo(Theme.violetDeep.opacity(0.35), rayon: 200)
+                    .position(x: w * 0.9, y: h * 0.95)
+                    .offset(y: (houle ? 0.05 : -0.05) * h)
+            }
+        }
+        .onAppear {
+            // demi-periodes de sin(t * 0.4) et cos(t * 0.3)
+            withAnimation(.easeInOut(duration: .pi / 0.4).repeatForever(autoreverses: true)) { derive = true }
+            withAnimation(.easeInOut(duration: .pi / 0.3).repeatForever(autoreverses: true)) { houle = true }
+        }
+    }
+
+    private func halo(_ couleur: Color, rayon: CGFloat) -> some View {
+        RadialGradient(colors: [couleur, .clear], center: .center, startRadius: 0, endRadius: rayon)
+            .frame(width: rayon * 2, height: rayon * 2)
     }
 }
 

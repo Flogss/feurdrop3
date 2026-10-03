@@ -50,7 +50,7 @@ final class LockerModel {
         if liste != pairs {
             withAnimation(Theme.spring) { pairs = liste }
         }
-        loaded = true
+        if !loaded { loaded = true }
     }
 
     /// L'image du code, chargee une fois puis gardee.
@@ -58,8 +58,10 @@ final class LockerModel {
         guard pair.code, images[pair.id] == nil, !enCours.contains(pair.id) else { return }
         enCours.insert(pair.id)
         defer { enCours.remove(pair.id) }
-        guard let data = try? await app.api.lockerCodeImage(pairID: pair.id), let image = UIImage(data: data) else { return }
-        images[pair.id] = image
+        guard let data = try? await app.api.lockerCodeImage(pairID: pair.id), let brute = UIImage(data: data) else { return }
+        // decodee hors du fil principal : le balayage du locker ne saccade pas
+        // a l'arrivee d'un code
+        images[pair.id] = await brute.byPreparingForDisplay() ?? brute
     }
 
     /// "Deposé" (ou "Fait" pour un code seul) : la paire quitte la liste.

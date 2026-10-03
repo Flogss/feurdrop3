@@ -18,7 +18,12 @@ struct RootView: View {
     var body: some View {
         @Bindable var app = app
         ZStack {
-            AmbientBackground()
+            // le fond de la charpente ne sert qu'au lancement : ensuite chaque
+            // onglet a le sien, et celui-ci, cache dessous, se dessinait pour rien
+            if !booted {
+                AmbientBackground()
+                    .transition(.opacity)
+            }
 
             TabView(selection: $app.tab) {
                 Tab(AppTab.dashboard.title, systemImage: AppTab.dashboard.symbol, value: AppTab.dashboard) {
@@ -165,6 +170,12 @@ private struct TabArrival: ViewModifier {
                     withTransaction(t) { visible = true }
                     jouee = etat.compte
                 }
+            }
+            .onDisappear {
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { visible = false }
+                jouee = -1
             }
             .onChange(of: etat.compte) {
                 if etat.onglet == onglet {

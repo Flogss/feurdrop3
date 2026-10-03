@@ -95,6 +95,7 @@ private struct DashboardHeader: View {
 
     var body: some View {
         PageHeader("Drop") {
+            GlassEffectContainer(spacing: 0) {
             HStack(spacing: 10) {
                 LivePill(online: app.isOnline)
                 NavigationLink(value: Route.settings) {
@@ -106,6 +107,7 @@ private struct DashboardHeader: View {
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
                 .accessibilityLabel("Réglages")
+            }
             }
         }
     }

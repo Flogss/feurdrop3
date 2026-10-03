@@ -78,7 +78,7 @@ struct SparkBurst: View {
 
     var body: some View {
         TimelineView(.animation(paused: gerbes.isEmpty)) { contexte in
-            Canvas { ctx, taille in
+            Canvas(rendersAsynchronously: true) { ctx, taille in
                 let centre = CGPoint(x: taille.width / 2, y: taille.height / 2)
                 for gerbe in gerbes {
                     let t = contexte.date.timeIntervalSince(gerbe.depart) / 0.95

@@ -42,7 +42,24 @@ final class StatsModel {
         return DonutSlice.grouped(lignes.map { ($0.senderName, $0.droppedValue) }, max: 7)
     }
 
+    /// ce qui fait changer les revenus : les colis dropes (montant, nombre)
+    /// et le jour. Tant que rien de cela ne bouge, les series sont les memes.
+    @ObservationIgnored private var signatureChargee: String?
+    @ObservationIgnored private var chargeeLe: Date = .distantPast
+
+    private var signatureActuelle: String? {
+        guard let s = app.dashboard.stats else { return nil }
+        return "\(s.droppedCount)|\(s.droppedValue)|\(LastSeenStore.dayKey())"
+    }
+
     func refresh(animated: Bool) async {
+        // l'anneau par expediteur vit dans les chiffres du dashboard : on les
+        // relit d'abord, ils disent aussi si les revenus ont pu changer
+        await app.dashboard.refresh()
+        let signature = signatureActuelle
+        if !animated, loaded, signature != nil, signature == signatureChargee, Date.now.timeIntervalSince(chargeeLe) < 60 {
+            return
+        }
         do {
             async let r = app.api.revenue()
             async let d = app.api.dailySeries()
@@ -54,11 +71,11 @@ final class StatsModel {
             if semaines != weeks { weeks = semaines }
             if !loaded { withAnimation(Theme.spring) { loaded = true } }
             if animated { reveal += 1 }
+            signatureChargee = signature
+            chargeeLe = .now
         } catch {
             app.report(error)
         }
-        // l'anneau par expediteur vit dans les chiffres du dashboard
-        await app.dashboard.refresh()
     }
 }
 

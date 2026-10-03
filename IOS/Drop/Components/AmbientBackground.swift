@@ -51,7 +51,7 @@ struct AmbientBackground: View {
     /// Des points de lumiere qui montent lentement et scintillent. Leur
     /// position ne depend que du temps : rien a memoriser, rien a recalculer.
     private func particules(_ t: Double) -> some View {
-        Canvas { ctx, taille in
+        Canvas(rendersAsynchronously: true) { ctx, taille in
             for i in 0..<38 {
                 let graine = Double(i) * 12.9898
                 let alea = { (k: Double) in (sin(graine * k) * 43758.5453).truncatingRemainder(dividingBy: 1).magnitude }

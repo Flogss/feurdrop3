@@ -69,12 +69,17 @@ final class DashboardModel {
         if loaded, resume != nil, resume != dernierResume { tourCelebration += 1 }
         dernierResume = resume
 
+        // n'ecrire que ce qui change : chaque ecriture fait recalculer toutes
+        // les vues qui lisent la valeur, meme si elle est identique
         if let maintenant = ServerDate.parse(s.tour.now) {
-            clockOffset = maintenant.timeIntervalSinceNow
+            let ecart = maintenant.timeIntervalSinceNow
+            if abs(ecart - clockOffset) > 0.5 { clockOffset = ecart }
         }
-        withAnimation(Theme.spring) {
-            stats = s
-            loaded = true
+        if s != stats || !loaded {
+            withAnimation(Theme.spring) {
+                stats = s
+                if !loaded { loaded = true }
+            }
         }
         app.lastSeen.save(LastSeenSnapshot(pending: s.pendingCount, earned: s.droppedValue, today: s.todayValue, day: LastSeenStore.dayKey()))
         // sous les yeux : tout est vu, les notifications repartiront d'ici

@@ -55,10 +55,12 @@ final class PrintModel {
             async let b = app.api.printSummary(scope: .printed)
             let (nouveau, deja) = try await (a, b)
             app.reachedServer()
-            withAnimation(Theme.spring) {
-                pending = nouveau
-                printed = deja
-                loadError = nil
+            if nouveau != pending || deja != printed || loadError != nil {
+                withAnimation(Theme.spring) {
+                    pending = nouveau
+                    printed = deja
+                    loadError = nil
+                }
             }
             for cle in expanded { await loadParcels(cle) }
         } catch {

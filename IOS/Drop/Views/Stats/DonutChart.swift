@@ -158,7 +158,7 @@ private struct DonutRing: View, Animatable {
     }
 
     var body: some View {
-        Canvas { ctx, taille in
+        Canvas(rendersAsynchronously: true) { ctx, taille in
             let total = slices.reduce(0) { $0 + $1.value }
             guard total > 0 else { return }
             let centre = CGPoint(x: taille.width / 2, y: taille.height / 2)

@@ -11,6 +11,9 @@ struct DropApp: App {
         WindowGroup {
             RootView()
                 .environment(app)
+                #if DEBUG
+                .onAppear { PerfProbe.shared.start() }
+                #endif
                 .preferredColorScheme(.dark)
                 .tint(Theme.violet)
         }

@@ -16,6 +16,17 @@ struct RevenueCurveChart: View {
     @State private var progress: Double = 0
     @State private var selection: Int?
     @State private var dejaVu = -1
+    /// d'ou part la tete : le bord gauche de ce qu'on voit (les jours plus
+    /// anciens, hors de l'ecran, sont deja traces)
+    @State private var depart: CGFloat = 0
+    @State private var traceFini = false
+    /// le defilement courant, lu au depart du trace (une classe : le suivre
+    /// ne fait pas recalculer la vue a chaque image de defilement)
+    @State private var defilement = Defilement()
+
+    private final class Defilement {
+        var x: CGFloat = 0
+    }
 
     static let spacing: CGFloat = 54
     static let height: CGFloat = 230
@@ -26,9 +37,19 @@ struct RevenueCurveChart: View {
             let geometrie = CurveGeometry(values: days.map(\.value), width: largeur, height: Self.height)
             ScrollView(.horizontal) {
                 ZStack(alignment: .topLeading) {
-                    CurveLayer(geometry: geometrie, labels: days.map { ServerDate.weekdayShort($0.date) }, progress: progress, selection: selection)
+                    // trois couches : ce qui ne bouge pas (grille, jours), la courbe
+                    // dessinee une fois et devoilee par un masque, puis seulement ce
+                    // qui change a chaque image (tete, points, valeurs)
+                    CurveBase(geometry: geometrie, labels: days.map { ServerDate.weekdayShort($0.date) })
                         .frame(width: largeur, height: Self.height)
-                    if progress >= 1, let dernier = geometrie.points.last {
+                    CurveTrace(geometry: geometrie)
+                        .frame(width: largeur, height: Self.height)
+                        .mask(alignment: .topLeading) {
+                            RevealMask(debut: depart, fin: geometrie.points.last?.x ?? 0, progress: progress)
+                        }
+                    CurvePoints(geometry: geometrie, depart: depart, progress: progress, selection: selection)
+                        .frame(width: largeur, height: Self.height)
+                    if traceFini, let dernier = geometrie.points.last {
                         DernierPoint()
                             .position(dernier)
                     }
@@ -49,7 +70,8 @@ struct RevenueCurveChart: View {
             .scrollIndicators(.hidden)
             .defaultScrollAnchor(.trailing)
             .onScrollGeometryChange(for: ClosedRange<Int>.self) { g in
-                visibles(offset: g.contentOffset.x, largeur: g.containerSize.width)
+                defilement.x = g.contentOffset.x
+                return visibles(offset: g.contentOffset.x, largeur: g.containerSize.width)
             } action: { _, visibles in
                 range = texte(visibles)
             }
@@ -68,10 +90,21 @@ struct RevenueCurveChart: View {
         selection = nil
         var t = Transaction()
         t.disablesAnimations = true
-        withTransaction(t) { progress = 0 }
+        withTransaction(t) {
+            progress = 0
+            traceFini = false
+        }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(0.35))
-            withAnimation(.timingCurve(0.45, 0.05, 0.2, 1, duration: 2.0)) { progress = 1 }
+            // la tete part du bord gauche de l'ecran, pas du premier jour (hors
+            // de l'ecran, on ne voyait rien pendant presque tout le trace)
+            let premierX = Self.spacing / 2
+            withTransaction(t) { depart = max(premierX, defilement.x - 12) }
+            withAnimation(.timingCurve(0.45, 0.05, 0.2, 1, duration: 2.0)) {
+                progress = 1
+            } completion: {
+                traceFini = true
+            }
         }
     }
 
@@ -199,10 +232,86 @@ struct CurveGeometry {
     }
 }
 
-/// Le dessin lui-meme, recalcule a chaque image pendant que `progress` avance.
-private struct CurveLayer: View, Animatable {
+/// La grille et les jours : ne dependent que des donnees, dessines une fois.
+private struct CurveBase: View {
     let geometry: CurveGeometry
     let labels: [String]
+
+    var body: some View {
+        Canvas(rendersAsynchronously: true) { ctx, taille in
+            let g = geometry
+            for k in 0...2 {
+                let y = CurveGeometry.padTop + (g.baseY - CurveGeometry.padTop) * CGFloat(k) / 2
+                var ligne = Path()
+                ligne.move(to: CGPoint(x: 0, y: y))
+                ligne.addLine(to: CGPoint(x: taille.width, y: y))
+                ctx.stroke(ligne, with: .color(.white.opacity(k == 2 ? 0.1 : 0.05)), style: StrokeStyle(lineWidth: 1, dash: k == 2 ? [] : [3, 5]))
+            }
+            for (i, p) in g.points.enumerated() where i < labels.count {
+                let dernierJour = i == g.points.count - 1
+                let texte = Text(dernierJour ? "Auj." : labels[i])
+                    .font(.system(size: 10.5, weight: dernierJour ? .bold : .medium))
+                    .foregroundStyle(dernierJour ? Theme.violetLight : Theme.text3)
+                ctx.draw(texte, at: CGPoint(x: p.x, y: taille.height - 8), anchor: .center)
+            }
+        }
+    }
+}
+
+/// L'aire, le halo et le trait : la courbe entiere, dessinee UNE fois (avec
+/// son flou) et gardee en texture. Le trace progressif est un masque qui
+/// s'elargit : plus de flou recalcule a chaque image.
+private struct CurveTrace: View {
+    let geometry: CurveGeometry
+
+    var body: some View {
+        Canvas { ctx, taille in
+            let g = geometry
+            guard let premier = g.points.first, let dernier = g.points.last else { return }
+            var aire = g.path
+            aire.addLine(to: CGPoint(x: dernier.x, y: g.baseY))
+            aire.addLine(to: CGPoint(x: premier.x, y: g.baseY))
+            aire.closeSubpath()
+            ctx.fill(aire, with: .linearGradient(
+                Gradient(colors: [Theme.violet.opacity(0.42), Theme.violet.opacity(0.08), .clear]),
+                startPoint: CGPoint(x: 0, y: CurveGeometry.padTop), endPoint: CGPoint(x: 0, y: g.baseY)
+            ))
+            ctx.drawLayer { halo in
+                halo.addFilter(.blur(radius: 7))
+                halo.stroke(g.path, with: .color(Theme.violet.opacity(0.9)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+            }
+            ctx.stroke(g.path, with: .linearGradient(
+                Gradient(colors: [Theme.violetDeep, Theme.violetBright, Theme.violetPale]),
+                startPoint: .zero, endPoint: CGPoint(x: taille.width, y: 0)
+            ), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
+        }
+        .drawingGroup()
+    }
+}
+
+/// Le masque du trace : tout ce qui est a gauche de la tete.
+private nonisolated struct RevealMask: Shape {
+    let debut: CGFloat
+    let fin: CGFloat
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let teteX = debut + (fin - debut) * progress
+        return Path(CGRect(x: 0, y: 0, width: teteX + 1, height: rect.height))
+    }
+}
+
+/// Ce qui change a chaque image du trace : la tete lumineuse, et les points
+/// qui s'allument au passage avec leur valeur. Les textes et le halo de la
+/// tete sont prepares une fois (symboles) puis seulement poses.
+private struct CurvePoints: View, Animatable {
+    let geometry: CurveGeometry
+    let depart: CGFloat
     var progress: Double
     let selection: Int?
 
@@ -211,46 +320,15 @@ private struct CurveLayer: View, Animatable {
         set { progress = newValue }
     }
 
+    private enum Symbole: Hashable { case valeur(Int), record, lueur }
+
     var body: some View {
-        Canvas { ctx, taille in
+        Canvas(rendersAsynchronously: true) { ctx, taille in
             let g = geometry
-            guard let premier = g.points.first, let dernier = g.points.last else { return }
-            let teteX = premier.x + (dernier.x - premier.x) * progress
+            guard let dernier = g.points.last else { return }
+            let teteX = depart + (dernier.x - depart) * progress
             let tete = g.point(atX: teteX)
 
-            // la grille : trois lignes discretes
-            for k in 0...2 {
-                let y = CurveGeometry.padTop + (g.baseY - CurveGeometry.padTop) * CGFloat(k) / 2
-                var ligne = Path()
-                ligne.move(to: CGPoint(x: 0, y: y))
-                ligne.addLine(to: CGPoint(x: taille.width, y: y))
-                ctx.stroke(ligne, with: .color(.white.opacity(k == 2 ? 0.1 : 0.05)), style: StrokeStyle(lineWidth: 1, dash: k == 2 ? [] : [3, 5]))
-            }
-
-            // tout ce qui est a droite de la tete n'existe pas encore
-            var devoile = ctx
-            devoile.clip(to: Path(CGRect(x: 0, y: 0, width: teteX + 1, height: taille.height)))
-
-            var aire = g.path
-            aire.addLine(to: CGPoint(x: dernier.x, y: g.baseY))
-            aire.addLine(to: CGPoint(x: premier.x, y: g.baseY))
-            aire.closeSubpath()
-            devoile.fill(aire, with: .linearGradient(
-                Gradient(colors: [Theme.violet.opacity(0.42), Theme.violet.opacity(0.08), .clear]),
-                startPoint: CGPoint(x: 0, y: CurveGeometry.padTop), endPoint: CGPoint(x: 0, y: g.baseY)
-            ))
-
-            // le trait, avec son halo
-            devoile.drawLayer { halo in
-                halo.addFilter(.blur(radius: 7))
-                halo.stroke(g.path, with: .color(Theme.violet.opacity(0.9)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
-            }
-            devoile.stroke(g.path, with: .linearGradient(
-                Gradient(colors: [Theme.violetDeep, Theme.violetBright, Theme.violetPale]),
-                startPoint: .zero, endPoint: CGPoint(x: taille.width, y: 0)
-            ), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
-
-            // les points s'allument quand la tete les depasse
             for (i, p) in g.points.enumerated() {
                 let passe = (teteX - p.x) / 26
                 guard passe > 0 else { continue }
@@ -269,38 +347,32 @@ private struct CurveLayer: View, Animatable {
                 ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(estRecord ? .white : Theme.violetPale))
                 ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(Theme.violetDeep), lineWidth: 1.4)
 
-                // la valeur, au-dessus
-                if g.values[i] > 0 {
+                if g.values[i] > 0, let valeur = ctx.resolveSymbol(id: Symbole.valeur(i)) {
                     ctx.opacity = pop
-                    let texte = Text(Format.euroGraphe(g.values[i]))
-                        .font(.system(size: estRecord ? 11.5 : 10, weight: estRecord ? .bold : .semibold).monospacedDigit())
-                        .foregroundStyle(estRecord ? Theme.violetPale : Theme.text2)
-                    ctx.draw(texte, at: CGPoint(x: p.x, y: p.y - 14 - 6 * pop), anchor: .bottom)
-                    if estRecord {
-                        let badge = Text("Record").font(.system(size: 9, weight: .heavy)).foregroundStyle(Theme.violetBright)
+                    ctx.draw(valeur, at: CGPoint(x: p.x, y: p.y - 14 - 6 * pop), anchor: .bottom)
+                    if estRecord, let badge = ctx.resolveSymbol(id: Symbole.record) {
                         ctx.draw(badge, at: CGPoint(x: p.x, y: p.y - 30 - 6 * pop), anchor: .bottom)
                     }
                     ctx.opacity = 1
                 }
             }
 
-            // les jours, en bas
-            for (i, p) in g.points.enumerated() where i < labels.count {
-                let dernierJour = i == g.points.count - 1
-                let texte = Text(dernierJour ? "Auj." : labels[i])
-                    .font(.system(size: 10.5, weight: dernierJour ? .bold : .medium))
-                    .foregroundStyle(dernierJour ? Theme.violetLight : Theme.text3)
-                ctx.draw(texte, at: CGPoint(x: p.x, y: taille.height - 8), anchor: .center)
-            }
-
             // la tete lumineuse, tant que le trace avance
             if progress > 0.001 && progress < 0.999 {
-                ctx.drawLayer { lumiere in
-                    lumiere.addFilter(.blur(radius: 10))
-                    lumiere.fill(Path(ellipseIn: CGRect(x: tete.x - 14, y: tete.y - 14, width: 28, height: 28)), with: .color(Theme.violetBright))
-                }
+                if let lueur = ctx.resolveSymbol(id: Symbole.lueur) { ctx.draw(lueur, at: tete) }
                 ctx.fill(Path(ellipseIn: CGRect(x: tete.x - 5, y: tete.y - 5, width: 10, height: 10)), with: .color(.white))
             }
+        } symbols: {
+            ForEach(Array(geometry.values.enumerated()), id: \.offset) { i, v in
+                let estRecord = i == geometry.best
+                Text(Format.euroGraphe(v))
+                    .font(.system(size: estRecord ? 11.5 : 10, weight: estRecord ? .bold : .semibold).monospacedDigit())
+                    .foregroundStyle(estRecord ? Theme.violetPale : Theme.text2)
+                    .tag(Symbole.valeur(i))
+            }
+            Text("Record").font(.system(size: 9, weight: .heavy)).foregroundStyle(Theme.violetBright).tag(Symbole.record)
+            // le halo de la tete : un disque flou, rendu une fois
+            Circle().fill(Theme.violetBright).frame(width: 28, height: 28).blur(radius: 10).padding(20).tag(Symbole.lueur)
         }
     }
 }
