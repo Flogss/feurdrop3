@@ -2571,7 +2571,19 @@ function markSeen(force = false) {
   // seule requete suffit
   if (Date.now() - dernierVu < (force ? 2000 : 30000)) return;
   dernierVu = Date.now();
-  fetch("/api/push/seen", { method: "POST" }).catch(() => {});
+  // le "vu" est celui de CET appareil : les autres gardent leur "+N"
+  monAbonnement()
+    .then((endpoint) => {
+      if (!endpoint) return;
+      fetch("/api/push/seen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint }),
+      }).catch(() => {});
+      // la notification "+N" deja affichee sur cet appareil n'a plus lieu d'etre
+      swRegistration?.getNotifications?.({ tag: "colis" }).then((l) => l.forEach((n) => n.close())).catch(() => {});
+    })
+    .catch(() => {});
 }
 
 // Rafraichissement de fond (le tour de 5 s, le retour sur l'app) : deux
@@ -2922,6 +2934,13 @@ function urlBase64ToUint8Array(base64) {
   return Uint8Array.from([...raw].map((ch) => ch.charCodeAt(0)));
 }
 
+// l'adresse d'abonnement de cet appareil : c'est elle qui l'identifie
+async function monAbonnement() {
+  if (!pushSupported) return null;
+  const sub = await currentSubscription();
+  return sub ? sub.endpoint : null;
+}
+
 async function currentSubscription() {
   if (!swRegistration) return null;
   return swRegistration.pushManager.getSubscription();
@@ -3002,6 +3021,8 @@ async function initPush() {
     // iOS revoque parfois l'abonnement en silence : on se reabonne a chaque
     // ouverture tant que la permission est accordee.
     if (Notification.permission === "granted") await subscribePush();
+    // l'appareil est identifie : on peut dire au serveur qu'il a regarde
+    markSeen(true);
   } catch (err) {
     console.error("[push] init", err);
     pushError = err.message || String(err);

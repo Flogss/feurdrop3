@@ -76,7 +76,6 @@ final class BackgroundListener {
 
     static func verifie() async {
         let adresse = UserDefaults.standard.string(forKey: "drop.serveur").flatMap(URL.init(string:)) ?? AppModel.defaultServer
-        guard let stats = try? await DropAPI(baseURL: adresse).stats() else { return }
-        await ParcelWatch.check(stats)
+        await ParcelWatch.check(api: DropAPI(baseURL: adresse))
     }
 }

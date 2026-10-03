@@ -140,3 +140,22 @@ public struct DropResult: Codable, Sendable, Equatable {
 public struct OK: Codable, Sendable, Equatable {
     public var ok: Bool?
 }
+
+/// `GET /api/colis/nouveaux?depuis=` : les colis arrives depuis une date (heure
+/// du serveur). Le "+N" d'un appareil se compte depuis SON dernier regard.
+public struct NewParcels: Codable, Sendable, Equatable {
+    public var count: Int
+    public var value: Double
+    public var senders: [NewParcelsSender]
+
+    public init(count: Int = 0, value: Double = 0, senders: [NewParcelsSender] = []) {
+        self.count = count
+        self.value = value
+        self.senders = senders
+    }
+}
+
+public struct NewParcelsSender: Codable, Sendable, Equatable {
+    public var name: String
+    public var count: Int
+}

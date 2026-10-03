@@ -18,6 +18,17 @@ struct ServeurReel {
         #expect(stock.normal > -10_000)
     }
 
+    /// le "+N" d'un appareil : les colis arrives depuis son dernier regard
+    @Test func nouveauxColis() async throws {
+        let stats = try await api.stats()
+        let maintenant = try #require(stats.tour.now)
+        let depuisMaintenant = try await api.newParcels(since: maintenant)
+        #expect(depuisMaintenant.count == 0)
+        let depuisLongtemps = try await api.newParcels(since: "2000-01-01 00:00:00")
+        #expect(depuisLongtemps.count > 0)
+        #expect(depuisLongtemps.senders.reduce(0) { $0 + $1.count } == depuisLongtemps.count)
+    }
+
     @Test func statistiques() async throws {
         _ = try await api.revenue()
         let jours = try await api.dailySeries()

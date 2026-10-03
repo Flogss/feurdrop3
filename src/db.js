@@ -96,6 +96,21 @@ db.exec(`
 `);
 
 // migration guard for existing databases created before type/chat_id/message_id/batch_id existed
+// Chaque appareil abonne aux notifications a son propre "vu le" : le "+N"
+// d'un telephone compte les colis arrives depuis que CE telephone a regarde,
+// pas depuis que quelqu'un d'autre l'a fait. Les abonnements existants
+// reprennent l'ancien "vu le" commun.
+const pushColumns = db.prepare("PRAGMA table_info(push_subscriptions)").all().map((c) => c.name);
+if (!pushColumns.includes("seen_at")) {
+  db.exec("ALTER TABLE push_subscriptions ADD COLUMN seen_at TEXT");
+  const ancien = db.prepare("SELECT value FROM settings WHERE key = 'push_seen_at'").get();
+  db.prepare("UPDATE push_subscriptions SET seen_at = COALESCE(?, datetime('now'))").run(ancien ? ancien.value : null);
+}
+// le "+N" deja affiche sur l'appareil : sans hausse, pas de nouvelle sonnerie
+if (!pushColumns.includes("announced")) {
+  db.exec("ALTER TABLE push_subscriptions ADD COLUMN announced INTEGER NOT NULL DEFAULT 0");
+}
+
 const colisColumns = db.prepare("PRAGMA table_info(colis)").all().map((c) => c.name);
 if (!colisColumns.includes("type")) db.exec("ALTER TABLE colis ADD COLUMN type TEXT NOT NULL DEFAULT 'normal'");
 if (!colisColumns.includes("chat_id")) db.exec("ALTER TABLE colis ADD COLUMN chat_id INTEGER");
@@ -1096,11 +1111,20 @@ function mergeSenderInto(sourceId, targetId) {
   return { moved, source: source.name, target: target.name };
 }
 
-// Horodatage de la derniere fois que le dashboard a ete regarde. Sert a
-// cumuler les notifications : tant que le site n'a pas ete rouvert, le "+N"
-// compte tous les colis arrives depuis, pas seulement le dernier lot.
-function markPushSeen() {
-  setSetting("push_seen_at", db.prepare("SELECT datetime('now') AS d").get().d);
+// Cet appareil vient de regarder le dashboard : son "+N" repart de zero. Les
+// autres appareils gardent le leur. Sert aussi a cumuler : tant que cet
+// appareil n'a pas regarde, le "+N" compte tous les colis arrives depuis, pas
+// seulement le dernier lot.
+function markPushSeen(endpoint) {
+  if (!endpoint) return 0;
+  return db
+    .prepare("UPDATE push_subscriptions SET seen_at = datetime('now'), announced = 0 WHERE endpoint = ?")
+    .run(endpoint).changes;
+}
+
+// Le "+N" que cet appareil affiche desormais.
+function setPushAnnounced(endpoint, count) {
+  db.prepare("UPDATE push_subscriptions SET announced = ? WHERE endpoint = ?").run(count, endpoint);
 }
 
 // Colis enregistres depuis la derniere consultation du site.
@@ -1134,9 +1158,11 @@ function summarizeNewColis({ since = null, dernier = 0 } = {}) {
 // client se reabonne a chaque ouverture et on supprime les endpoints morts
 // des que le service de push repond 404/410.
 function saveSubscription({ endpoint, keys, label }) {
+  // un nouvel appareil part de maintenant ; un appareil qui se reabonne
+  // garde son "vu le"
   db.prepare(
-    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, label)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, label, seen_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
      ON CONFLICT(endpoint) DO UPDATE SET
        p256dh = excluded.p256dh,
        auth = excluded.auth,
@@ -1151,9 +1177,9 @@ function deleteSubscription(endpoint) {
 
 function listSubscriptions() {
   return db
-    .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions")
+    .prepare("SELECT endpoint, p256dh, auth, seen_at, announced FROM push_subscriptions")
     .all()
-    .map((r) => ({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } }));
+    .map((r) => ({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth }, seenAt: r.seen_at, announced: r.announced }));
 }
 
 function countSubscriptions() {
@@ -1251,6 +1277,7 @@ module.exports = {
   getSetting,
   setSetting,
   markPushSeen,
+  setPushAnnounced,
   countColisSince,
   summarizeNewColis,
   saveSubscription,

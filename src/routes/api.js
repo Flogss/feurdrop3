@@ -40,6 +40,7 @@ const {
   saveSubscription,
   deleteSubscription,
   markPushSeen,
+  summarizeNewColis,
   getPendingSummary,
   isAutoPrintEnabled,
   setAutoPrintEnabled,
@@ -398,18 +399,28 @@ router.post("/push/unsubscribe", (req, res) => {
   res.json({ ok: true, devices: countSubscriptions() });
 });
 
-// Le dashboard signale qu'il est sous les yeux : le "+N" des notifications
-// repart de zero a partir de la.
+// Le dashboard signale qu'il est sous les yeux SUR CET APPAREIL : le "+N"
+// des notifications de cet appareil repart de zero. Les autres appareils
+// gardent leur propre compte.
 router.post("/push/seen", (req, res) => {
-  markPushSeen();
-  res.json({ ok: true });
+  const endpoint = req.body && req.body.endpoint;
+  res.json({ ok: true, updated: markPushSeen(endpoint) });
+});
+
+// Les colis arrives depuis une date (heure du serveur, "2026-10-03
+// 10:20:00") : l'app iOS s'en sert pour compter, de son cote, ce qui est
+// nouveau depuis que CE telephone a regarde.
+router.get("/colis/nouveaux", (req, res) => {
+  const depuis = String(req.query.depuis || "");
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(depuis)) return res.status(400).json({ error: "Date invalide" });
+  res.json(summarizeNewColis({ since: depuis }));
 });
 
 router.post("/push/test", async (req, res) => {
   const pending = getPendingSummary();
   const result = await sendToAll({
-    title: `+3 colis · ${euro(10.5)}`,
-    body: `Exemple · boxingmaestro ×2 · SRBOXING\n${pending.count} à dropper · ${euro(pending.value)}`,
+    title: "+3 nouveaux colis",
+    body: `${euro(10.5)} · boxingmaestro ×2 · SRBOXING (exemple)\n${pending.count} à dropper · ${euro(pending.value)}`,
     tag: "colis",
     url: "/",
   });

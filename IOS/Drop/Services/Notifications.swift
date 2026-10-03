@@ -28,22 +28,29 @@ enum NotificationService {
         return accorde
     }
 
-    /// "+3 colis · 10,50 €" : une seule notification qui se remplace (le "+N"
-    /// se cumule) au lieu de s'empiler.
+    /// l'identifiant fixe de la notification "nouveaux colis" : chaque
+    /// nouvelle version remplace la precedente
+    static let newParcelsID = "nouveaux-colis"
+
+    /// Une seule notification qui se met a jour ("+3" puis "+5" puis "+9")
+    /// au lieu de s'empiler.
     ///
-    ///     +3 colis · 10,50 €
-    ///     boxingmaestro ×2 · SRBOXING
+    ///     +5 nouveaux colis
+    ///     17,50 € · boxingmaestro ×3 · SRBOXING ×2
     ///     45 à dropper · 185,50 €
-    static func newParcels(added: Int, value: Double, senders: [(String, Int)], pending: Int, pendingValue: Double) async {
-        var lignes: [String] = []
-        if !senders.isEmpty { lignes.append(ligneExpediteurs(senders)) }
-        lignes.append("\(Format.integer(pending)) à dropper · \(Format.euro(pendingValue))")
+    static func newParcels(_ recap: NewParcels, pending: Int, pendingValue: Double) async {
+        let expediteurs = recap.senders.map { ($0.name, $0.count) }
+        let premiere = ([Format.euro(recap.value)] + (expediteurs.isEmpty ? [] : [ligneExpediteurs(expediteurs)])).joined(separator: " · ")
         await poste(
-            id: "nouveaux-colis",
-            titre: "+\(Format.count(added, "colis", "colis")) · \(Format.euro(value))",
-            corps: lignes.joined(separator: "\n"),
+            id: newParcelsID,
+            titre: titreNouveauxColis(recap.count),
+            corps: "\(premiere)\n\(Format.integer(pending)) à dropper · \(Format.euro(pendingValue))",
             fil: "colis"
         )
+    }
+
+    static func titreNouveauxColis(_ n: Int) -> String {
+        n > 1 ? "+\(Format.integer(n)) nouveaux colis" : "+1 nouveau colis"
     }
 
     static func tourStarted(count: Int, value: Double) async {
@@ -65,8 +72,8 @@ enum NotificationService {
     static func sendTest() async {
         await poste(
             id: "essai",
-            titre: "+3 colis · \(Format.euro(10.5))",
-            corps: "Exemple · boxingmaestro ×2 · SRBOXING\nLe cha-ching sonnera comme ça.",
+            titre: titreNouveauxColis(3),
+            corps: "\(Format.euro(10.5)) · boxingmaestro ×2 · SRBOXING (exemple)\nLe cha-ching sonnera comme ça.",
             fil: "colis",
             apres: 2
         )

@@ -94,18 +94,7 @@ private struct DashboardHeader: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide).locale(Locale(identifier: "fr_FR"))).uppercased())
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.text3)
-                Text("Drop")
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.numberGradient)
-                    .shadow(color: Theme.violet.opacity(0.45), radius: 16)
-            }
-            Spacer()
+        PageHeader("Drop") {
             HStack(spacing: 10) {
                 LivePill(online: app.isOnline)
                 NavigationLink(value: Route.settings) {
@@ -119,8 +108,6 @@ private struct DashboardHeader: View {
                 .accessibilityLabel("Réglages")
             }
         }
-        .padding(.top, 8)
-        .padding(.horizontal, 4)
     }
 }
 

@@ -24,7 +24,17 @@ self.addEventListener("push", (event) => {
     data: { url: data.url || "/" },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  // Une seule notification par sujet : la nouvelle ("+5 nouveaux colis")
+  // remplace la precedente ("+3") au lieu de s'empiler. Le tag suffit sur la
+  // plupart des appareils ; on ferme aussi l'ancienne a la main, pour ceux
+  // (iPhone) qui l'ignorent.
+  event.waitUntil(
+    self.registration
+      .getNotifications({ tag: options.tag })
+      .then((anciennes) => anciennes.forEach((n) => n.close()))
+      .catch(() => {})
+      .then(() => self.registration.showNotification(title, options))
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {

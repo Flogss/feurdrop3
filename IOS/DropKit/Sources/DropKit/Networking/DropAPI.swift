@@ -33,6 +33,11 @@ public struct DropAPI: Sendable {
         _ = try await client.raw(.post, "/api/push/seen")
     }
 
+    /// Les colis arrives depuis `since` ("2026-10-03 10:20:00", heure du serveur).
+    public func newParcels(since: String) async throws -> NewParcels {
+        try await client.send(.get, "/api/colis/nouveaux", query: [URLQueryItem(name: "depuis", value: since)])
+    }
+
     // MARK: - Tournee
 
     public func startTour() async throws {

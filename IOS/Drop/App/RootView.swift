@@ -147,7 +147,9 @@ private struct TabArrival: ViewModifier {
             .opacity(visible ? 1 : 0.15)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: visible)
             .onAppear {
-                if etat.onglet == onglet { entre() }
+                // au lancement (aucun changement d'onglet encore), l'onglet
+                // affiche entre aussi, quel qu'il soit
+                if etat.onglet == onglet || etat.compte == 0 { entre() }
             }
             .onChange(of: etat.compte) {
                 if etat.onglet == onglet {

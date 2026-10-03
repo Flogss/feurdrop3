@@ -7,6 +7,7 @@ const {
   countSubscriptions,
   getPendingSummary,
   summarizeNewColis,
+  setPushAnnounced,
 } = require("./db");
 
 // "10,50 €", "1 893,00 €"
@@ -63,18 +64,21 @@ function getPublicKey() {
 // Envoie une notification a tous les appareils abonnes. Les endpoints que le
 // service de push declare morts (404/410) sont supprimes : sur iOS un
 // abonnement est revoque des que l'icone est retiree de l'ecran d'accueil.
+// `payload` : le meme message pour tous, ou une fonction qui compose celui de
+// chaque appareil (et rend null pour ne rien lui envoyer).
 async function sendToAll(payload) {
   const subs = listSubscriptions();
   if (subs.length === 0) return { sent: 0, removed: 0 };
 
-  const body = JSON.stringify(payload);
   let sent = 0;
   let removed = 0;
 
   await Promise.all(
     subs.map(async (sub) => {
+      const message = typeof payload === "function" ? payload(sub) : payload;
+      if (!message) return;
       try {
-        await webpush.sendNotification(sub, body, { TTL: 3600, urgency: "high" });
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, JSON.stringify(message), { TTL: 3600, urgency: "high" });
         sent += 1;
       } catch (err) {
         if (err.statusCode === 404 || err.statusCode === 410) {
@@ -91,24 +95,48 @@ async function sendToAll(payload) {
 }
 
 // Notification "nouveaux colis" : l'equivalent du son de vente Shopify.
-// Le "+N" se cumule depuis la derniere fois que le site a ete ouvert : si
-// trois colis arrivent un par un sans qu'on regarde, la troisieme
-// notification dit "+3" et remplace les precedentes (meme tag).
-//   +3 colis · 10,50 €
-//   boxingmaestro ×2 · SRBOXING
+// Chaque appareil recoit SON compte : les colis arrives depuis la derniere
+// fois que cet appareil a regarde le dashboard (pas depuis la derniere
+// notification envoyee, ni depuis qu'un autre appareil a regarde). Une seule
+// notification par appareil, remplacee a chaque nouveau lot (meme tag) :
+//   +3 nouveaux colis      puis      +5 nouveaux colis
+//   10,50 € · boxingmaestro ×2 · SRBOXING
 //   45 à dropper · 185,50 €
-function notifyNewColis({ count }) {
-  const pending = getPendingSummary();
-  const vuLe = getSetting("push_seen_at", null);
-  const recap = summarizeNewColis(vuLe ? { since: vuLe } : { dernier: count });
-  const n = recap.count || count;
-
-  return sendToAll({
-    title: `+${n} colis · ${euro(recap.value)}`,
-    body: [ligneExpediteurs(recap.senders), `${pending.count} à dropper · ${euro(pending.value)}`].filter(Boolean).join("\n"),
+function messageNouveauxColis(recap, pending) {
+  if (!recap || recap.count <= 0) return null;
+  return {
+    title: titreNouveauxColis(recap.count),
+    body: [
+      [euro(recap.value), ligneExpediteurs(recap.senders)].filter(Boolean).join(" · "),
+      `${pending.count} à dropper · ${euro(pending.value)}`,
+    ].join("\n"),
     tag: "colis",
     url: "/",
-  }).catch((err) => console.error("[push] notifyNewColis", err.message));
+  };
+}
+
+function titreNouveauxColis(n) {
+  return n > 1 ? `+${n} nouveaux colis` : "+1 nouveau colis";
+}
+
+async function notifyNewColis({ count }) {
+  const pending = getPendingSummary();
+  const annonces = new Map();
+  try {
+    await sendToAll((sub) => {
+      const recap = summarizeNewColis(sub.seenAt ? { since: sub.seenAt } : { dernier: count });
+      // pas de hausse pour CET appareil : sa notification dit deja tout
+      if (recap.count <= (sub.announced || 0)) {
+        if (recap.count < sub.announced) annonces.set(sub.endpoint, recap.count);
+        return null;
+      }
+      annonces.set(sub.endpoint, recap.count);
+      return messageNouveauxColis(recap, pending);
+    });
+  } catch (err) {
+    console.error("[push] notifyNewColis", err.message);
+  }
+  for (const [endpoint, n] of annonces) setPushAnnounced(endpoint, n);
 }
 
 // Depart en tournee : ce qu'on emporte.
@@ -138,4 +166,4 @@ function notifyTourEnd({ count, value, seconds, smicHourly }) {
   }).catch((err) => console.error("[push] notifyTourEnd", err.message));
 }
 
-module.exports = { getPublicKey, sendToAll, notifyNewColis, notifyTourStart, notifyTourEnd, countSubscriptions, euro };
+module.exports = { getPublicKey, sendToAll, notifyNewColis, notifyTourStart, notifyTourEnd, countSubscriptions, euro, titreNouveauxColis };

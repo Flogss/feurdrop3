@@ -46,6 +46,39 @@ extension View {
     }
 }
 
+/// L'en-tete des trois onglets : la date, puis le grand titre, au meme
+/// endroit sur chaque onglet (pas de barre de navigation au-dessus, qui
+/// laissait un vide sur Imprime et Stats).
+struct PageHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: Trailing
+
+    init(_ title: String, @ViewBuilder trailing: () -> Trailing = { EmptyView() }) {
+        self.title = title
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide).locale(Locale(identifier: "fr_FR"))).uppercased())
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.text3)
+                Text(title)
+                    .font(.system(size: 38, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.numberGradient)
+                    .shadow(color: Theme.violet.opacity(0.45), radius: 16)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer()
+            trailing
+        }
+        .padding(.top, 8)
+        .padding(.horizontal, 4)
+    }
+}
+
 /// Le titre d'une section, avec un complement a droite.
 struct SectionHeader<Trailing: View>: View {
     let title: String

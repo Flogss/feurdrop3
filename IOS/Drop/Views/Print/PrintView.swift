@@ -15,9 +15,12 @@ struct PrintView: View {
         NavigationStack {
             List {
                 Section {
-                    PrintHeader()
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                    VStack(alignment: .leading, spacing: 12) {
+                        PageHeader("Imprimé")
+                        PrintHeader()
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
 
                 if let notice = model.notice {
@@ -50,10 +53,11 @@ struct PrintView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .listSectionSpacing(18)
-            .contentMargins(.top, 4, for: .scrollContent)
+            .contentMargins(.top, 0, for: .scrollContent)
             .tabArrival(.printing)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Imprimé")
+            .toolbarVisibility(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
             .containerBackground(for: .navigation) { AmbientBackground() }
             .sheet(item: $edition) { colis in

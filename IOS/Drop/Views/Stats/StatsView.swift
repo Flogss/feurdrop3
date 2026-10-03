@@ -14,6 +14,7 @@ struct StatsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    PageHeader("Stats")
                     if model.loaded {
                         metriques
                         carteGraphe("Revenus par jour", plage: plageJours) {
@@ -49,6 +50,7 @@ struct StatsView: View {
             .tabArrival(.stats)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Stats")
+            .toolbarVisibility(.hidden, for: .navigationBar)
             .refreshable { await model.refresh(animated: true) }
             .containerBackground(for: .navigation) { AmbientBackground() }
         }

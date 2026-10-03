@@ -1,24 +1,29 @@
 import Foundation
+import UserNotifications
 import DropKit
 
-/// Ce que les notifications ont deja annonce, et a partir d'ou. Une seule
-/// memoire pour l'ecoute en arriere-plan et le reveil periodique d'iOS : un
-/// colis n'est annonce qu'une fois, et le "+N" se cumule depuis la derniere
-/// fois qu'on a eu l'app sous les yeux (comme sur le site).
+/// Ce que CE telephone a vu, et ce que ses notifications ont deja dit.
+///
+/// Le "+N" se compte depuis la derniere fois que ce telephone a eu l'app sous
+/// les yeux -- pas depuis la derniere notification, ni depuis qu'un autre
+/// appareil a regarde : chaque installation a sa propre memoire, rangee
+/// localement. Le serveur donne le compte exact des colis arrives depuis
+/// cette heure-la (les drops faits entre-temps ne le faussent pas).
+///
+/// Une seule notification "nouveaux colis" par telephone : elle porte
+/// toujours le meme identifiant, donc "+5" remplace "+3" au lieu de s'empiler.
 @MainActor
 enum ParcelWatch {
     struct State: Codable {
-        /// ce qu'on avait sous les yeux en quittant l'app
-        var basePending: Int
-        var baseValue: Double
-        var baseSenders: [String: Int]
-        /// le dernier nombre deja annonce
-        var announcedPending: Int
+        /// heure du serveur du dernier regard sur ce telephone
+        var seenAt: String
+        /// le "+N" deja affiche (rien de nouveau : pas de nouvelle notification)
+        var announced: Int
         var tourStartedAt: String?
         var tourEndedAt: String?
     }
 
-    private static let cle = "drop.veille"
+    private static let cle = "drop.veille.appareil"
 
     // les reglages (Reglages > Notifications)
     static let newParcelsKey = "drop.notif.colis"
@@ -26,36 +31,37 @@ enum ParcelWatch {
     static var notifiesNewParcels: Bool { UserDefaults.standard.object(forKey: newParcelsKey) as? Bool ?? true }
     static var notifiesTour: Bool { UserDefaults.standard.object(forKey: tourKey) as? Bool ?? true }
 
-    /// L'app est sous les yeux : tout est vu, le "+N" repart de zero.
+    /// L'app est sous les yeux : tout est vu, le "+N" de ce telephone repart
+    /// de zero, et sa notification "nouveaux colis" n'a plus lieu d'etre.
     static func seen(_ s: Stats) {
-        save(base(s))
+        let avant = load()
+        save(State(
+            seenAt: s.tour.now ?? heureServeur(),
+            announced: 0,
+            tourStartedAt: s.tour.startedAt,
+            tourEndedAt: s.tour.last?.endedAt ?? avant?.tourEndedAt
+        ))
+        if (avant?.announced ?? 0) > 0 {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [NotificationService.newParcelsID])
+        }
     }
 
-    /// Une lecture faite app fermee : annonce ce qui a change depuis.
-    static func check(_ s: Stats) async {
+    /// Une lecture faite app fermee : annonce ce qui est nouveau pour ce
+    /// telephone.
+    static func check(api: DropAPI) async {
+        guard let s = try? await api.stats() else { return }
         guard var etat = load() else {
             seen(s)
             return
         }
 
-        // des colis ont ete dropes ailleurs (le site) : la base suit
-        if s.pendingCount < etat.basePending {
-            let suivante = base(s)
-            etat.basePending = suivante.basePending
-            etat.baseValue = suivante.baseValue
-            etat.baseSenders = suivante.baseSenders
+        if notifiesNewParcels, let recap = try? await api.newParcels(since: etat.seenAt) {
+            if recap.count > etat.announced {
+                await NotificationService.newParcels(recap, pending: s.pendingCount, pendingValue: s.pendingValue)
+            }
+            // des colis retires entre-temps : le compte suit, sans notifier
+            etat.announced = recap.count
         }
-
-        if s.pendingCount > etat.announcedPending, s.pendingCount > etat.basePending, notifiesNewParcels {
-            await NotificationService.newParcels(
-                added: s.pendingCount - etat.basePending,
-                value: max(0, s.pendingValue - etat.baseValue),
-                senders: nouveauxExpediteurs(s, depuis: etat.baseSenders),
-                pending: s.pendingCount,
-                pendingValue: s.pendingValue
-            )
-        }
-        etat.announcedPending = s.pendingCount
 
         if notifiesTour {
             if let debut = s.tour.startedAt, debut != etat.tourStartedAt {
@@ -72,23 +78,13 @@ enum ParcelWatch {
 
     // MARK: Outils
 
-    private static func base(_ s: Stats) -> State {
-        State(
-            basePending: s.pendingCount,
-            baseValue: s.pendingValue,
-            baseSenders: Dictionary(s.bySender.map { ($0.senderName, $0.pendingCount) }, uniquingKeysWith: +),
-            announcedPending: s.pendingCount,
-            tourStartedAt: s.tour.startedAt,
-            tourEndedAt: s.tour.last?.endedAt
-        )
-    }
-
-    /// qui a envoye les nouveaux : "boxingmaestro ×2", du plus gros au plus petit
-    private static func nouveauxExpediteurs(_ s: Stats, depuis base: [String: Int]) -> [(String, Int)] {
-        s.bySender
-            .map { ($0.senderName, $0.pendingCount - (base[$0.senderName] ?? 0)) }
-            .filter { $0.1 > 0 }
-            .sorted { $0.1 > $1.1 }
+    /// l'heure au format du serveur (UTC), si le serveur ne l'a pas donnee
+    private static func heureServeur() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f.string(from: .now)
     }
 
     private static func load() -> State? {
