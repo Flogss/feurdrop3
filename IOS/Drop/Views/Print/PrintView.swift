@@ -19,6 +19,7 @@ struct PrintView: View {
                         PageHeader("Imprimé")
                         PrintHeader()
                     }
+                    .tabArrival(.printing)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 }
@@ -31,6 +32,7 @@ struct PrintView: View {
                             Image(systemName: "bolt.fill").foregroundStyle(Theme.violetLight)
                         }
                         .onTapGesture { model.dismissNotice() }
+                        .tabArrival(.printing)
                     }
                     .listRowBackground(Theme.violet.opacity(0.18))
                 }
@@ -38,11 +40,12 @@ struct PrintView: View {
                 if let erreur = model.loadError, model.pending == nil {
                     Section {
                         EmptyStateView(symbol: "exclamationmark.triangle", title: "Liste indisponible", subtitle: erreur)
+                            .tabArrival(.printing)
                     }
                     .listRowBackground(Color.clear)
                 } else if model.pending == nil {
                     Section {
-                        ForEach(0..<3, id: \.self) { _ in SkeletonRow(height: 44) }
+                        ForEach(0..<3, id: \.self) { _ in SkeletonRow(height: 44).tabArrival(.printing) }
                     }
                     .listRowBackground(Color.clear)
                 } else {
@@ -54,7 +57,6 @@ struct PrintView: View {
             .scrollContentBackground(.hidden)
             .listSectionSpacing(18)
             .contentMargins(.top, 0, for: .scrollContent)
-            .tabArrival(.printing)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Imprimé")
             .toolbarVisibility(.hidden, for: .navigationBar)
@@ -80,8 +82,10 @@ struct PrintView: View {
             if liste.isEmpty {
                 if scope == .new {
                     EmptyStateView(symbol: "checkmark", title: "Tout est imprimé", subtitle: "Les nouvelles étiquettes apparaîtront ici.", positive: true)
+                        .tabArrival(.printing)
                 } else {
                     EmptyStateView(symbol: "printer", title: "Aucune étiquette imprimée en attente")
+                        .tabArrival(.printing)
                 }
             } else {
                 ForEach(liste) { cat in
@@ -97,6 +101,7 @@ struct PrintView: View {
                         .textCase(nil)
                 }
             }
+            .tabArrival(.printing)
         }
         .listRowBackground(Theme.surface.opacity(0.78))
     }
@@ -206,6 +211,7 @@ private struct CategoryGroup: View {
             } else if let colis = model.parcels[cle], !colis.isEmpty {
                 ForEach(colis) { c in
                     ParcelRow(parcel: c, scope: scope)
+                        .tabArrival(.printing)
                         .contentShape(.rect)
                         .onTapGesture { onEdit(c) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -284,6 +290,7 @@ private struct CategoryGroup: View {
                 .disabled(model.building.contains(cle))
                 .accessibilityLabel("Imprimer \(category.label)")
             }
+            .tabArrival(.printing)
         }
         .tint(Theme.text3)
     }

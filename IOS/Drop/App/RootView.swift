@@ -39,7 +39,7 @@ struct RootView: View {
         .environment(\.tabArrival, arrivee)
         .sensoryFeedback(.selection, trigger: app.tab)
         .onChange(of: app.tab) { ancien, nouveau in
-            arrivee = TabArrivalState(compte: arrivee.compte + 1, sens: nouveau.index > ancien.index ? 1 : -1, onglet: nouveau)
+            arrivee = TabArrivalState(compte: arrivee.compte + 1, sens: nouveau.index > ancien.index ? 1 : -1, onglet: nouveau, depuis: .now)
         }
         .overlay(alignment: .top) {
             ToastOverlay(center: app.toasts)
@@ -105,14 +105,21 @@ struct RootView: View {
 }
 
 /// L'onglet qui arrive : son contenu glisse depuis le cote d'ou l'on vient,
-/// en apparaissant, et se pose d'un ressort (sans flou : flouter tout un
-/// ecran coutait cher et brouillait le bas de l'ecran). Seul le
+/// en se precisant (flou -> net) et en se posant d'un ressort.
+///
+/// A poser sur le CONTENU (dans le defilement, ou sur chaque ligne d'une
+/// liste), jamais sur le ScrollView ou la List eux-memes : deplacer ou
+/// flouter la liste faussait ses bords (la date floutee en haut, un
+/// rectangle noir en bas sans lignes sous la barre d'onglets). Seul le
 /// contenu bouge : le fond reste en place. (Animer tout l'ecran, fond
 /// compris, decouvrait le noir de la barre d'onglets en haut.)
 struct TabArrivalState: Equatable {
     var compte = 0
     var sens: CGFloat = 1
     var onglet: AppTab = .dashboard
+    /// l'instant du changement : une ligne qui apparait bien apres (en
+    /// faisant defiler) s'affiche directement, sans rejouer l'entree
+    var depuis: Date = .distantPast
 }
 
 extension EnvironmentValues {
@@ -139,17 +146,25 @@ private struct TabArrival: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // le glissement se pose d'un ressort...
-            .scaleEffect(visible ? 1 : 0.985, anchor: .top)
+            // le glissement et le flou se posent d'un ressort...
+            .blur(radius: visible ? 0 : 10)
+            .scaleEffect(visible ? 1 : 0.975, anchor: .top)
             .offset(x: visible ? 0 : 36 * etat.sens)
             .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.82), value: visible)
             // ...pendant que le contenu apparait tout de suite : pas d'ecran vide
             .opacity(visible ? 1 : 0.15)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: visible)
             .onAppear {
-                // au lancement (aucun changement d'onglet encore), l'onglet
-                // affiche entre aussi, quel qu'il soit
-                if etat.onglet == onglet || etat.compte == 0 { entre() }
+                if etat.onglet == onglet, Date.now.timeIntervalSince(etat.depuis) < 1 {
+                    entre()
+                } else {
+                    // au lancement, ou une ligne qui arrive en faisant defiler :
+                    // affichee tout de suite
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) { visible = true }
+                    jouee = etat.compte
+                }
             }
             .onChange(of: etat.compte) {
                 if etat.onglet == onglet {

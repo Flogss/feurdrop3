@@ -46,8 +46,8 @@ struct StatsView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
+                .tabArrival(.stats)
             }
-            .tabArrival(.stats)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Stats")
             .toolbarVisibility(.hidden, for: .navigationBar)
