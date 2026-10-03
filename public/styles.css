@@ -290,6 +290,18 @@ body.boot .tabbar { animation: boot-barre 900ms var(--ease-spring) 220ms both; }
   background-size: 200% 200%;
   color: #fff;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45), 0 6px 20px -4px rgb(var(--accent-rgb) / 0.75);
+}
+/* le degrade qui vit : une couche deux fois plus grande qui glisse
+   (transform, calcule par la carte graphique) plutot qu'un
+   background-position qui repeignait le logo a chaque image */
+.brand-mark::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200%;
+  height: 200%;
+  background: var(--grad-accent);
   animation: marque-vit 9s ease-in-out infinite;
 }
 /* un reflet passe sur le logo, de temps en temps */
@@ -302,7 +314,7 @@ body.boot .tabbar { animation: boot-barre 900ms var(--ease-spring) 220ms both; }
   animation: reflet-logo 7s var(--ease-in-out) 1.6s infinite;
 }
 .brand-mark .icon { position: relative; width: 19px; height: 19px; stroke-width: 2.3; }
-@keyframes marque-vit { 50% { background-position: 100% 100%; } }
+@keyframes marque-vit { 50% { transform: translate(-50%, -50%); } }
 @keyframes reflet-logo { 0%, 70% { transform: translateX(-120%); } 85%, 100% { transform: translateX(120%); } }
 .brand-word { font: 760 17px/1 var(--font-display); letter-spacing: -0.02em; }
 .brand-ext { font: 500 13px/1 var(--font-mono); color: var(--text-3); letter-spacing: 0; margin-left: 1px; }
@@ -1331,16 +1343,20 @@ input[type="number"].field::-webkit-outer-spin-button { -webkit-appearance: none
   -webkit-mask-image: radial-gradient(circle at 100% 0%, #000 0, transparent 52%);
   mask-image: radial-gradient(circle at 100% 0%, #000 0, transparent 52%);
 }
+/* le trait de lumiere : une bande trois fois plus large qui glisse (meme
+   course qu'avant, mais par transform, sans repeindre la carte) */
 .hero-dots::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 300%;
   background: linear-gradient(115deg, transparent 40%, rgb(var(--violet-300) / 0.35) 50%, transparent 60%);
-  background-size: 300% 100%;
   animation: balaye 6s var(--ease-in-out) infinite;
   mix-blend-mode: screen;
 }
-@keyframes balaye { from { background-position: 120% 0; } to { background-position: -20% 0; } }
+@keyframes balaye { from { transform: translateX(-80%); } to { transform: translateX(13.333%); } }
 .hero.is-touring {
   border-color: rgb(var(--violet-300) / 0.45);
   animation: respire 3.2s ease-in-out infinite;
@@ -2770,5 +2786,5 @@ a.toast-lien { color: inherit; text-decoration: none; cursor: pointer; }
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
   }
-  .live-dot::after, .suivi-fill-glow, .blob, .particules, .hero-aura, .hero-dots::after, .brand-mark::after, .btn-primary::before { display: none; }
+  .live-dot::after, .suivi-fill-glow, .blob, .particules, .hero-aura, .hero-dots::after, .brand-mark::after, .brand-mark::before, .btn-primary::before { display: none; }
 }

@@ -423,67 +423,102 @@ if (avecSouris && !prefersReducedMotion) {
 // --- Fond vivant ----------------------------------------------------------------
 // Des particules tres discretes qui montent lentement et scintillent, et des
 // halos qui glissent un peu avec le defilement et la souris.
+
+// Les particules : dans un worker quand le navigateur sait transferer une
+// toile (Chrome, Safari 16.4+), sinon sur le fil principal comme avant.
+function lanceParticules(toile) {
+  const nombre = innerWidth < 700 ? 34 : 64;
+  const dpr = () => Math.min(devicePixelRatio || 1, 2);
+  let envoie = null;
+  if (toile.transferControlToOffscreen && window.Worker) {
+    try {
+      const hors = toile.transferControlToOffscreen();
+      const travailleur = new Worker("/particules.js");
+      travailleur.postMessage({ type: "init", toile: hors, L: innerWidth, H: innerHeight, dpr: dpr(), nombre }, [hors]);
+      envoie = (message) => travailleur.postMessage(message);
+    } catch {
+      envoie = null;
+    }
+  }
+  if (!envoie) envoie = particulesSurFilPrincipal(toile, nombre);
+  window.addEventListener("resize", () => envoie({ type: "taille", L: innerWidth, H: innerHeight, dpr: dpr() }));
+  // en pause quand la page est cachee ou que le locker est ouvert
+  const majPause = () => envoie({ type: "pause", pause: document.hidden || document.body.classList.contains("locker-ouvert") });
+  document.addEventListener("visibilitychange", majPause);
+  new MutationObserver(majPause).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  return { defilement: (y) => envoie({ type: "defilement", y }) };
+}
+
+// Secours sans worker : le meme dessin, avec le defilement memorise (au lieu
+// de relire window.scrollY a chaque image, ce qui forcait un recalcul).
+function particulesSurFilPrincipal(toile, nombre) {
+  const ctx = toile.getContext("2d");
+  let L = 0;
+  let H = 0;
+  let decalage = 0;
+  let pause = false;
+  const dimensionne = (largeur, hauteur, dpr) => {
+    L = largeur;
+    H = hauteur;
+    toile.width = L * dpr;
+    toile.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  dimensionne(innerWidth, innerHeight, Math.min(devicePixelRatio || 1, 2));
+  const points = Array.from({ length: nombre }, () => ({
+    x: Math.random() * L,
+    y: Math.random() * H,
+    r: 0.5 + Math.random() * 1.5,
+    vx: (Math.random() - 0.5) * 0.08,
+    vy: -(0.04 + Math.random() * 0.16),
+    a: 0.18 + Math.random() * 0.5,
+    phase: Math.random() * Math.PI * 2,
+    profondeur: 0.3 + Math.random() * 0.7,
+    blanc: Math.random() < 0.3,
+  }));
+  const dessine = (t) => {
+    requestAnimationFrame(dessine);
+    if (pause) return;
+    ctx.clearRect(0, 0, L, H);
+    for (const p of points) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.y < -12) {
+        p.y = H + 12;
+        p.x = Math.random() * L;
+      }
+      if (p.x < -12) p.x = L + 12;
+      if (p.x > L + 12) p.x = -12;
+      const y = (((p.y - decalage * p.profondeur) % (H + 24)) + H + 24) % (H + 24) - 12;
+      const alpha = p.a * (0.55 + 0.45 * Math.sin(t / 900 + p.phase));
+      ctx.globalAlpha = alpha * (p.blanc ? 0.25 : 0.22);
+      ctx.fillStyle = p.blanc ? "#ffffff" : "#aa84ff";
+      ctx.beginPath();
+      ctx.arc(p.x, y, p.r * 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.blanc ? "#ffffff" : "#cebaff";
+      ctx.beginPath();
+      ctx.arc(p.x, y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  };
+  requestAnimationFrame(dessine);
+  return (message) => {
+    if (message.type === "taille") dimensionne(message.L, message.H, message.dpr);
+    else if (message.type === "defilement") decalage = message.y * 0.06;
+    else if (message.type === "pause") pause = message.pause;
+  };
+}
+
 {
   const fond = document.querySelector(".ambient");
   const toile = $("particules");
-  if (!prefersReducedMotion && toile) {
-    const ctx = toile.getContext("2d");
-    let L = 0;
-    let H = 0;
-    const points = [];
-    const nombre = innerWidth < 700 ? 34 : 64;
-    const dimensionne = () => {
-      const dpr = Math.min(devicePixelRatio || 1, 2);
-      L = innerWidth;
-      H = innerHeight;
-      toile.width = L * dpr;
-      toile.height = H * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    dimensionne();
-    window.addEventListener("resize", dimensionne);
-    for (let i = 0; i < nombre; i++) {
-      points.push({
-        x: Math.random() * L,
-        y: Math.random() * H,
-        r: 0.5 + Math.random() * 1.5,
-        vx: (Math.random() - 0.5) * 0.08,
-        vy: -(0.04 + Math.random() * 0.16),
-        a: 0.18 + Math.random() * 0.5,
-        phase: Math.random() * Math.PI * 2,
-        profondeur: 0.3 + Math.random() * 0.7,
-        blanc: Math.random() < 0.3,
-      });
-    }
-    const dessine = (t) => {
-      requestAnimationFrame(dessine);
-      if (document.hidden || document.body.classList.contains("locker-ouvert")) return;
-      ctx.clearRect(0, 0, L, H);
-      const decalage = window.scrollY * 0.06;
-      for (const p of points) {
-        p.x += p.vx;
-        p.y += p.vy;
-        if (p.y < -12) {
-          p.y = H + 12;
-          p.x = Math.random() * L;
-        }
-        if (p.x < -12) p.x = L + 12;
-        if (p.x > L + 12) p.x = -12;
-        const y = (((p.y - decalage * p.profondeur) % (H + 24)) + H + 24) % (H + 24) - 12;
-        const scintille = 0.55 + 0.45 * Math.sin(t / 900 + p.phase);
-        const alpha = p.a * scintille;
-        ctx.fillStyle = p.blanc ? `rgba(255,255,255,${alpha * 0.25})` : `rgba(170,132,255,${alpha * 0.22})`;
-        ctx.beginPath();
-        ctx.arc(p.x, y, p.r * 3.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = p.blanc ? `rgba(255,255,255,${alpha})` : `rgba(206,186,255,${alpha})`;
-        ctx.beginPath();
-        ctx.arc(p.x, y, p.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    };
-    requestAnimationFrame(dessine);
-  }
+  // le dessin tourne dans un worker (toile transferee) : le fil principal ne
+  // fait plus que lui envoyer le defilement et l'etat de pause
+  let particules = null;
+  if (!prefersReducedMotion && toile) particules = lanceParticules(toile);
 
   // parallaxe : le defilement et la souris deplacent un peu les halos
   let attente = false;
@@ -492,6 +527,7 @@ if (avecSouris && !prefersReducedMotion) {
     attente = true;
     requestAnimationFrame(() => {
       attente = false;
+      particules?.defilement(window.scrollY);
       fond.style.setProperty("--py", `${window.scrollY}px`);
       document.body.classList.toggle("is-scrolled", window.scrollY > 8);
     });
@@ -535,15 +571,21 @@ const barre = { x: 0, w: 0, vx: 0, vw: 0, cx: 0, cw: 0, raf: null, pret: false, 
 const tabbar = $("tabbar");
 const indicateur = $("tab-indicator");
 
+let largeurBarre = 0;
+const mesureBarre = () => (largeurBarre = tabbar.clientWidth || 1);
+let largeurEcrite = -1;
 function dessineIndicateur() {
   const etire = Math.min(Math.abs(barre.vx) / 1700, 0.3);
   // tenue sous le doigt, la goutte gonfle comme une loupe de verre
   const sx = 1 + etire + 0.12 * barre.loupe;
   const sy = 1 - etire * 0.5 + 0.18 * barre.loupe;
-  indicateur.style.width = `${barre.w}px`;
+  if (Math.abs(barre.w - largeurEcrite) > 0.05) {
+    largeurEcrite = barre.w;
+    indicateur.style.width = `${barre.w}px`;
+  }
   indicateur.style.transform = `translate3d(${barre.x}px, 0, 0) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})`;
   if (!tabbar.classList.contains("has-hover")) {
-    tabbar.style.setProperty("--hx", `${((barre.x + barre.w / 2) / (tabbar.clientWidth || 1)) * 100}%`);
+    tabbar.style.setProperty("--hx", `${((barre.x + barre.w / 2) / (largeurBarre || mesureBarre())) * 100}%`);
   }
 }
 
@@ -733,7 +775,10 @@ if (avecSouris) {
   });
 }
 
-window.addEventListener("resize", () => placeIndicateur(VUE_PARENT[currentView] || currentView, { instantane: true }));
+window.addEventListener("resize", () => {
+  mesureBarre();
+  placeIndicateur(VUE_PARENT[currentView] || currentView, { instantane: true });
+});
 
 // --- Navigation -----------------------------------------------------------------
 
@@ -750,9 +795,11 @@ const vuesVisitees = new Set();
 
 // La page qui part reste figee a sa place et s'efface pendant que la
 // nouvelle entre : les deux se croisent.
-function quittePage(page, sens) {
+// `r` : la position de la page, relevee AVANT toute modification (la lire
+// apres forcait le navigateur a tout recalculer pendant le clic)
+function quittePage(page, sens, r) {
   if (!page || prefersReducedMotion) return;
-  const r = page.getBoundingClientRect();
+  r = r || page.getBoundingClientRect();
   page.classList.add("is-leaving", sens === "from-left" ? "vers-droite" : sens === "from-right" ? "vers-gauche" : "sur-place");
   page.style.top = `${r.top}px`;
   page.style.left = `${r.left}px`;
@@ -772,11 +819,14 @@ function liberePage(page) {
 let observateur = null;
 const BLOCS = ".dash > *, :scope > .card, .stats-top > *, .stats-duo > *, .imp-columns > *, .special-list > *, .settings-col > *, .suivi-grid > *";
 
-function entreePage(page, riche) {
+// `affichee` : la page etait deja a l'ecran (il faut alors relancer ses
+// animations d'un recalcul) ; sinon elle apparait et ses animations partent
+// d'elles-memes, sans recalcul force.
+function entreePage(page, riche, affichee = true) {
   page.classList.remove("entree-riche", "entree-legere");
   page.querySelectorAll(".a-reveler, .revele").forEach((el) => el.classList.remove("a-reveler", "revele"));
   if (prefersReducedMotion) return;
-  void page.offsetWidth;
+  if (affichee) void page.offsetWidth;
   page.classList.add(riche ? "entree-riche" : "entree-legere");
   clearTimeout(page._entree);
   page._entree = setTimeout(() => page.classList.remove("entree-riche", "entree-legere"), 1500);
@@ -794,12 +844,22 @@ function entreePage(page, riche) {
     },
     { rootMargin: "0px 0px -8% 0px" }
   );
-  const bas = window.innerHeight * 0.96;
-  for (const bloc of page.querySelectorAll(BLOCS)) {
-    if (bloc.getBoundingClientRect().top < bas) continue;
-    bloc.classList.add("a-reveler");
-    observateur.observe(bloc);
-  }
+  // les positions des blocs se lisent a l'image suivante, une fois la page
+  // mise en page par le navigateur (les lire tout de suite forcait un
+  // recalcul complet dans le clic). Les blocs concernes sont hors de l'ecran :
+  // rien ne se voit de ce petit decalage.
+  const obs = observateur;
+  // deux images plus tard : la premiere affiche la page (et calcule sa mise
+  // en page), la seconde lit des positions deja a jour, sans rien forcer
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (obs !== observateur) return;
+    const bas = window.innerHeight * 0.96;
+    const hors = [...page.querySelectorAll(BLOCS)].filter((bloc) => bloc.getBoundingClientRect().top >= bas);
+    for (const bloc of hors) {
+      bloc.classList.add("a-reveler");
+      obs.observe(bloc);
+    }
+  }));
 }
 
 function switchView(view) {
@@ -807,12 +867,21 @@ function switchView(view) {
   const arrivee = view !== precedente;
   const onglet = VUE_PARENT[view] || view;
 
+  // Toutes les lectures d'abord, sur une mise en page encore propre : lire
+  // une position apres avoir change des classes forcait le navigateur a tout
+  // recalculer dans le clic (jusqu'a 100 ms sur telephone).
+  placeIndicateur(onglet);
+  const quittee = arrivee ? $(`view-${precedente}`) : null;
+  const rectQuittee = quittee && !prefersReducedMotion ? quittee.getBoundingClientRect() : null;
+  const yQuittee = window.scrollY;
+  const nouvelleAvant = $(`view-${view}`);
+  const dejaAffichee = nouvelleAvant.classList.contains("active") || nouvelleAvant.classList.contains("is-leaving");
+
   document.querySelectorAll(".tab").forEach((t) => {
     const actif = t.dataset.view === onglet;
     if (actif && !t.classList.contains("active")) rejoue(t, "is-arriving", 700);
     t.classList.toggle("active", actif);
   });
-  placeIndicateur(onglet);
 
   // le sens du glissement suit la navigation : on entre vers la droite, on
   // revient vers la gauche, et les onglets suivent leur ordre
@@ -826,12 +895,12 @@ function switchView(view) {
       const b = ONGLETS.indexOf(precedente);
       if (a >= 0 && b >= 0) sens = a > b ? "from-right" : "from-left";
     }
-    defilement[precedente] = window.scrollY;
+    defilement[precedente] = yQuittee;
   }
 
-  const nouvelle = $(`view-${view}`);
+  const nouvelle = nouvelleAvant;
   if (arrivee) {
-    quittePage($(`view-${precedente}`), sens);
+    quittePage(quittee, sens, rectQuittee);
     liberePage(nouvelle);
   }
   document.querySelectorAll(".view").forEach((v) => {
@@ -840,7 +909,9 @@ function switchView(view) {
   });
   if (arrivee) {
     nouvelle.classList.remove("from-right", "from-left", "from-none");
-    void nouvelle.offsetWidth;
+    // une page cachee qui reapparait relance ses animations d'elle-meme ;
+    // seule une page deja a l'ecran a besoin d'un recalcul pour les rejouer
+    if (dejaAffichee) void nouvelle.offsetWidth;
     nouvelle.classList.add(sens);
   }
   nouvelle.classList.add("active");
@@ -852,7 +923,7 @@ function switchView(view) {
     const y = sens === "from-right" && PROFONDEUR[view] ? 0 : defilement[view] || 0;
     window.scrollTo(0, y);
     vuesVisitees.add(view);
-    entreePage(nouvelle, riche);
+    entreePage(nouvelle, riche, dejaAffichee);
     haptique();
     history.replaceState(null, "", view === "dashboard" ? location.pathname : `#${view}`);
   }
@@ -965,9 +1036,13 @@ function compte(el, valeur, { format = entier, depuis, delai = 0, bulle, duree, 
   const lance = () => {
     el.classList.add("is-counting");
     const t0 = performance.now();
+    let affiche = el.textContent;
     const pas = (now) => {
       const p = Math.min((now - t0) / total, 1);
-      el.textContent = format(avant + (cible - avant) * courbe(p));
+      // un texte identique a l'image precedente n'est pas reecrit : chaque
+      // ecriture relance la mise en page de la carte
+      const texte = format(avant + (cible - avant) * courbe(p));
+      if (texte !== affiche) el.textContent = affiche = texte;
       if (p < 1) el._raf = requestAnimationFrame(pas);
       else {
         el.textContent = format(cible);
@@ -1041,9 +1116,11 @@ function animateNumberText(el, target, format, duration = 900, delay = 0) {
   }
   const start = () => {
     const t0 = performance.now();
+    let affiche = el.textContent;
     const step = (now) => {
       const p = Math.min((now - t0) / duration, 1);
-      el.textContent = format(target * easeOutCubic(p));
+      const texte = format(target * easeOutCubic(p));
+      if (texte !== affiche) el.textContent = affiche = texte;
       if (p < 1) requestAnimationFrame(step);
       else el.textContent = format(target);
     };
@@ -1966,6 +2043,33 @@ document.querySelectorAll("[data-stock-form]").forEach((form) => {
 
 // Chemin lisse (Catmull-Rom -> Bezier cubique) passant par tous les points.
 // `plancher` : la courbe ne plonge jamais sous la ligne de base.
+// Les memes courbes que smoothPath, echantillonnees en JS : la tete lumineuse
+// suit la courbe sans interroger le SVG (getPointAtLength, 261 appels, gelait
+// la page pres d'une demi-seconde a l'arrivee sur Stats).
+function echantillonsCourbe(points, plancher = Infinity, parSegment = 18) {
+  if (points.length === 0) return [];
+  const ech = [{ x: points[0].x, y: points[0].y }];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = Math.min(p1.y + (p2.y - p0.y) / 6, plancher);
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = Math.min(p2.y - (p3.y - p1.y) / 6, plancher);
+    for (let k = 1; k <= parSegment; k++) {
+      const t = k / parSegment;
+      const u = 1 - t;
+      ech.push({
+        x: u * u * u * p1.x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * p2.x,
+        y: u * u * u * p1.y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * p2.y,
+      });
+    }
+  }
+  return ech;
+}
+
 function smoothPath(points, plancher = Infinity) {
   if (points.length === 0) return "";
   if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
@@ -2082,7 +2186,7 @@ function scrollChartSVG(items, { highlightBest = false, animate = false, spacing
         <circle class="chart-head" r="4.5"/>
       </g>
     </svg>`;
-  return { html, points, baseY, W, padTop };
+  return { html, points, baseY, W, padTop, echantillons: echantillonsCourbe(points, baseY) };
 }
 
 function runCurveReveal(track, geo, { duree = 1900 } = {}) {
@@ -2134,10 +2238,8 @@ function runCurveReveal(track, geo, { duree = 1900 } = {}) {
   const x1 = W;
   points.forEach((p, i) => p.x < x0 && montre(i, false));
 
-  // y(x) le long de la courbe : on l'echantillonne une fois
-  const L = ligne.getTotalLength();
-  const ech = [];
-  for (let i = 0; i <= 260; i++) ech.push(ligne.getPointAtLength((L * i) / 260));
+  // y(x) le long de la courbe, d'apres ses echantillons precalcules
+  const ech = geo.echantillons;
   const yA = (x) => {
     let bas = 0;
     let haut = ech.length - 1;
@@ -2241,7 +2343,10 @@ function runBarReveal(track, geo, { duree = 1100, ecart = 75 } = {}) {
   const labelEls = track.querySelectorAll(".chart-value-label[data-target]");
   if (barEls.length === 0) return;
 
+  const posee = new Array(bars.length).fill(false);
   const pose = (i, e, p) => {
+    if (posee[i]) return;
+    if (p >= 1) posee[i] = true;
     const h = Math.max(bars[i].h * e, 0);
     const y = baseY - h;
     barEls[i].setAttribute("height", h);
