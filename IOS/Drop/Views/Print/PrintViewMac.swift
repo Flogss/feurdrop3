@@ -298,6 +298,7 @@ private struct CategorieCarte: View {
                     lineWidth: ouverte ? 1 : 0.8
                 )
         }
+        .lumiereSurvol(22)
         .shadow(color: ouverte ? couleur.opacity(0.35) : .black.opacity(0.25), radius: ouverte ? 22 : 12, y: 10)
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: ouverte)
         .animation(Theme.spring, value: model.parcels[cle])

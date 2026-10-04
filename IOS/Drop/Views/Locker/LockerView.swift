@@ -126,6 +126,7 @@ private struct PairCard: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.danger.opacity(0.5), lineWidth: 1)
             }
         }
+        .souleveSurvol(20, hauteur: 3, lueur: pair.isIncomplete ? Theme.danger : Theme.special)
     }
 
     @ViewBuilder

@@ -136,6 +136,7 @@ struct TrackingView: View {
                     }
                 }
                 .padding(.vertical, 3)
+                .ligneSurvol()
             }
         }
         .surfaceCard()
@@ -167,10 +168,11 @@ struct TrackingView: View {
                         Text(Format.integer(l.count))
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .foregroundStyle(Theme.text2)
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.text3)
+                        ChevronLigne()
                     }
                     .padding(.vertical, 6)
                     .contentShape(.rect)
+                    .ligneSurvol()
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.98))
             }

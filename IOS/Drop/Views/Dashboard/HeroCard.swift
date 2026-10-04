@@ -68,6 +68,7 @@ struct HeroCard: View {
                 )
                 .allowsHitTesting(false)
         }
+        .lumiereSurvol()
         .overlay(alignment: .topLeading) {
             SparkBurst(trigger: model.celebration, count: 20, power: 1.4)
                 .frame(width: 200, height: 200)

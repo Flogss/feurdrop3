@@ -13,6 +13,7 @@ extension View {
             .padding(Theme.Space.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(interactive ? .regular.tint(tint).interactive() : .regular.tint(tint), in: .rect(cornerRadius: cornerRadius))
+            .lumiereSurvol(cornerRadius)
     }
 
     /// Une surface calme pour le contenu dense.
@@ -32,6 +33,7 @@ extension View {
                     }
                     .shadow(color: .black.opacity(0.35), radius: 18, y: 10)
             }
+            .lumiereSurvol(cornerRadius)
     }
 
     /// L'entree d'un bloc : il monte, se precise (flou -> net) et grandit un

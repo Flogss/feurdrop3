@@ -28,12 +28,24 @@ struct DonutChart: View {
                     .gesture(SpatialTapGesture().onEnded { tap in
                         choisis(partAt: tap.location, taille: 210)
                     })
+                    #if os(macOS)
+                    // a la souris, comme sur le site : la part survolee ressort
+                    .onContinuousHover { phase in
+                        guard case .active(let p) = phase, progress > 0.95, let id = part(at: p, taille: 210), id != selection else { return }
+                        withAnimation(Theme.bouncy) { selection = id }
+                    }
+                    #endif
                 centre
             }
             .frame(maxWidth: .infinity)
 
             legende
         }
+        #if os(macOS)
+        .onHover { dedans in
+            if !dedans && selection != nil { withAnimation(Theme.spring) { selection = nil } }
+        }
+        #endif
         .onScrollVisibilityChange(threshold: 0.4) { vu in
             visible = vu
             if vu { rejoue() }
@@ -95,6 +107,11 @@ struct DonutChart: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.98))
+                #if os(macOS)
+                .onHover { dedans in
+                    if dedans && selection != s.id && progress > 0.95 { withAnimation(Theme.bouncy) { selection = s.id } }
+                }
+                #endif
                 .opacity(progress > Double(i) / Double(max(slices.count, 1)) * 0.8 ? 1 : 0)
                 .offset(y: progress > Double(i) / Double(max(slices.count, 1)) * 0.8 ? 0 : 8)
                 .animation(Theme.entrance, value: progress > Double(i) / Double(max(slices.count, 1)) * 0.8)
@@ -124,12 +141,15 @@ struct DonutChart: View {
 
     /// la part sous le doigt, d'apres l'angle
     private func choisis(partAt point: CGPoint, taille: CGFloat) {
+        let id = part(at: point, taille: taille)
+        withAnimation(Theme.bouncy) { selection = id == nil || selection == id ? nil : id }
+    }
+
+    /// la part a cet endroit de l'anneau (rien au centre ni dehors)
+    private func part(at point: CGPoint, taille: CGFloat) -> String? {
         let dx = point.x - taille / 2, dy = point.y - taille / 2
         let distance = hypot(dx, dy)
-        guard distance > taille / 2 - 40, distance < taille / 2 + 6, total > 0 else {
-            withAnimation(Theme.bouncy) { selection = nil }
-            return
-        }
+        guard distance > taille / 2 - 40, distance < taille / 2 + 6, total > 0 else { return nil }
         // le dessin est tourne de -90 degres : sa part 0 commence en haut, et
         // tourne dans le sens horaire
         var angle = atan2(dy, dx) / (2 * .pi) + 0.25
@@ -138,11 +158,9 @@ struct DonutChart: View {
         var cumul = 0.0
         for s in slices {
             cumul += s.value / total
-            if angle <= cumul {
-                withAnimation(Theme.bouncy) { selection = selection == s.id ? nil : s.id }
-                return
-            }
+            if angle <= cumul { return s.id }
         }
+        return nil
     }
 }
 

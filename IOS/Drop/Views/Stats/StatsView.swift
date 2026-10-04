@@ -108,7 +108,7 @@ struct StatsView: View {
     }
 
     private var grapheExpediteurs: some View {
-        carteGraphe("Gains par expéditeur", plage: model.senderShares.isEmpty ? "" : "Touche une part") {
+        carteGraphe("Gains par expéditeur", plage: model.senderShares.isEmpty ? "" : (Platform.isMac ? "Survole une part" : "Touche une part")) {
             if model.senderShares.isEmpty {
                 EmptyStateView(symbol: "chart.pie", title: "Pas encore de gains")
             } else {
@@ -143,6 +143,7 @@ struct StatsView: View {
                 .clipShape(.rect(cornerRadius: Theme.Radius.card))
         }
         .glassEffect(.regular.tint(Theme.violetDark.opacity(0.4)), in: .rect(cornerRadius: Theme.Radius.card))
+        .lumiereSurvol()
         .overlay(alignment: .topTrailing) {
             Image(systemName: "trophy.fill")
                 .font(.system(size: 54))
@@ -172,6 +173,7 @@ struct StatsView: View {
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
         .glassEffect(.regular.tint(.black.opacity(0.25)), in: .rect(cornerRadius: 24))
+        .lumiereSurvol(24)
     }
 
     @ViewBuilder

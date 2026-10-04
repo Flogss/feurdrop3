@@ -89,6 +89,9 @@ struct MacRootView: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .controlSize(.large)
+        // pas de barres de defilement, meme avec une souris : on defile a la
+        // molette (glissement doux) ou au trackpad, comme sur le site
+        .scrollIndicators(.never)
         .overlay(alignment: .top) {
             ToastOverlay(center: app.toasts)
                 .padding(.top, MacTopBar.hauteur + 6)
@@ -270,6 +273,7 @@ struct MacSettingsView: View {
         }
         .formStyle(.grouped)
         .controlSize(.large)
+        .scrollIndicators(.never)
         .frame(width: 620, height: 720)
         .background { AmbientBackground() }
     }

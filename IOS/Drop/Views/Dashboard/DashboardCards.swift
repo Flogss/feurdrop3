@@ -127,6 +127,8 @@ struct MetricsRow: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(.regular.tint(accent ? Theme.violet.opacity(0.28) : .black.opacity(0.25)).interactive(), in: .rect(cornerRadius: 24))
+            .lumiereSurvol(24)
+            .souleveSurvol(24)
         }
         .buttonStyle(PressScaleStyle())
     }
@@ -290,6 +292,7 @@ struct CarriersCard: View {
             .disabled(occupe)
         }
         .padding(.vertical, 8)
+        .ligneSurvol()
     }
 }
 
@@ -397,6 +400,7 @@ private struct SenderRow: View {
         }
         .padding(.vertical, 7)
         .contentShape(.rect)
+        .ligneSurvol()
         .contextMenu {
             if sender.pendingCount > 0 {
                 Button("Dropper \(Format.count(sender.pendingCount, "colis", "colis"))", systemImage: "paperplane.fill") {
@@ -418,7 +422,7 @@ private struct SenderRow: View {
                 .frame(width: 30, height: 32)
                 .contentShape(.rect)
         }
-        .buttonStyle(PressScaleStyle(scale: 0.85))
+        .buttonStyle(PasStyle())
         .accessibilityLabel(ajout ? "Ajouter un colis à \(sender.senderName)" : "Retirer un colis à \(sender.senderName)")
     }
 }

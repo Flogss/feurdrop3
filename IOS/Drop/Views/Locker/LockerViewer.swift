@@ -41,7 +41,7 @@ struct LockerViewer: View {
                 .scrollTargetLayout()
             }
             .scrollTargetBehavior(.paging)
-            .scrollIndicators(.hidden)
+            .sansIndicateurs()
             .scrollPosition(id: Binding(get: { courant?.id }, set: { id in
                 index = paires.firstIndex { $0.id == id }
             }))

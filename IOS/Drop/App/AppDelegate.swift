@@ -40,8 +40,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         MacWatcher.shared.start()
+        // la molette d'une souris glisse au lieu de sauter, comme dans un navigateur
+        DefilementDoux.shared.demarre()
         #if DEBUG
         MacCapture.planifie()
+        TestSouris.planifie()
+        if let chemin = UserDefaults.standard.string(forKey: "DropTestDefilement") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(UserDefaults.standard.double(forKey: "DropTestDelai").nonZero ?? 6))
+                await DefilementDoux.shared.testeDefilement(chemin: chemin)
+            }
+        }
         #endif
     }
 

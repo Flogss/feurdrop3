@@ -26,6 +26,8 @@ struct RevenueCurveChart: View {
 
     private final class Defilement {
         var x: CGFloat = 0
+        /// le jour sous la souris (Mac)
+        var survole: Int?
     }
 
     static let spacing: CGFloat = 54
@@ -66,9 +68,25 @@ struct RevenueCurveChart: View {
                     withAnimation(Theme.bouncy) { selection = selection == i ? nil : i }
                     Haptics.selection()
                 })
+                #if os(macOS)
+                // a la souris : la valeur du jour survole, la bulle suit le pointeur
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p):
+                        let i = geometrie.nearest(x: p.x)
+                        guard i != defilement.survole, traceFini else { return }
+                        defilement.survole = i
+                        withAnimation(.snappy(duration: 0.22)) { selection = i }
+                    case .ended:
+                        defilement.survole = nil
+                        if selection != nil { withAnimation(.snappy(duration: 0.22)) { selection = nil } }
+                    }
+                }
+                #endif
             }
-            .scrollIndicators(.hidden)
+            .sansIndicateurs()
             .defaultScrollAnchor(.trailing)
+            .tirerPourDefiler()
             .onScrollGeometryChange(for: ClosedRange<Int>.self) { g in
                 defilement.x = g.contentOffset.x
                 return visibles(offset: g.contentOffset.x, largeur: g.containerSize.width)

@@ -43,13 +43,22 @@ struct WeeklyBarsChart: View {
                             Haptics.selection()
                             withAnimation(Theme.bouncy) { selection = selection == w.id ? nil : w.id }
                         }
+                        #if os(macOS)
+                        .onHover { dedans in
+                            guard montee else { return }
+                            withAnimation(.snappy(duration: 0.22)) {
+                                if dedans { selection = w.id } else if selection == w.id { selection = nil }
+                            }
+                        }
+                        #endif
                     }
                 }
                 .frame(width: largeur, height: Self.height, alignment: .bottom)
                 .background(alignment: .top) { grille }
             }
-            .scrollIndicators(.hidden)
+            .sansIndicateurs()
             .defaultScrollAnchor(.trailing)
+            .tirerPourDefiler()
             .onScrollGeometryChange(for: ClosedRange<Int>.self) { g in
                 visibles(offset: g.contentOffset.x, largeur: g.containerSize.width, total: largeur)
             } action: { _, r in

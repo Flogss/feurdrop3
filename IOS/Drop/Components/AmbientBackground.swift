@@ -7,11 +7,25 @@ import CoreMotion
 /// lentement (MeshGradient), des particules tres discretes qui montent en
 /// scintillant, et une parallaxe legere qui suit l'inclinaison du telephone.
 /// C'est lui que le verre des barres et des cartes refracte.
+///
+/// Sur Mac (de la puissance a revendre), le fond est plus riche : voir
+/// `FondMac`. Sur iPhone, il reste tel quel, pour la batterie.
 struct AmbientBackground: View {
     private let motion = MotionParallax.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        #if os(macOS) && DEBUG
+        // comparaison en developpement : `-DropFondSimple 1` remet le fond du telephone
+        if UserDefaults.standard.bool(forKey: "DropFondSimple") { fondTelephone } else { FondMac() }
+        #elseif os(macOS)
+        FondMac()
+        #else
+        fondTelephone
+        #endif
+    }
+
+    private var fondTelephone: some View {
         TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { contexte in
             let t = contexte.date.timeIntervalSinceReferenceDate
             ZStack {
@@ -83,25 +97,12 @@ final class MotionParallax {
     var y: Double = 0
 
     #if os(macOS)
-    @ObservationIgnored private var cibleX: Double = 0
-    @ObservationIgnored private var cibleY: Double = 0
-    @ObservationIgnored private var minuteur: Timer?
+    /// ou est le pointeur (-1...1) ; le fond du Mac le suit en douceur a
+    /// chaque image (voir `FondMac`), sans minuteur a part
+    @ObservationIgnored private(set) var cibleX: Double = 0
+    @ObservationIgnored private(set) var cibleY: Double = 0
 
-    func start() {
-        guard minuteur == nil else { return }
-        // le fond glisse doucement vers la position du pointeur
-        minuteur = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let nx = self.x * 0.88 + self.cibleX * 0.12
-                let ny = self.y * 0.88 + self.cibleY * 0.12
-                if abs(nx - self.x) > 0.0005 || abs(ny - self.y) > 0.0005 {
-                    self.x = nx
-                    self.y = ny
-                }
-            }
-        }
-    }
+    func start() {}
 
     /// position du pointeur dans la fenetre (0...1 sur chaque axe)
     func suit(_ fraction: CGPoint) {
@@ -109,10 +110,7 @@ final class MotionParallax {
         cibleY = max(-1, min(1, (fraction.y - 0.5) * 2))
     }
 
-    func stop() {
-        minuteur?.invalidate()
-        minuteur = nil
-    }
+    func stop() {}
     #else
     @ObservationIgnored private let manager = CMMotionManager()
 
