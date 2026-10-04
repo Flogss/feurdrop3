@@ -125,6 +125,15 @@ private struct DashboardHeader: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        if Platform.isMac {
+            // sur Mac, l'etat et les reglages sont dans la barre du haut
+            PageHeader("Dashboard")
+        } else {
+            enTeteIPhone
+        }
+    }
+
+    private var enTeteIPhone: some View {
         PageHeader("Drop") {
             GlassEffectContainer(spacing: 0) {
             HStack(spacing: 10) {
@@ -146,8 +155,7 @@ private struct DashboardHeader: View {
                 }
                 #endif
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .boutonVerre(.rond)
                 .accessibilityLabel("Réglages")
             }
             }

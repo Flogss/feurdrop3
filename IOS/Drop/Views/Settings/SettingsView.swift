@@ -32,6 +32,7 @@ struct SettingsView: View {
             serveur
         }
         .scrollContentBackground(.hidden)
+        .toggleStyle(.switch)
         .navigationTitle("Réglages")
         .task { await model.refresh() }
         .refreshable { await model.refresh() }
@@ -180,7 +181,7 @@ struct SettingsView: View {
                             Haptics.warning()
                             dettePayee = d
                         }
-                        .buttonStyle(.glass)
+                        .boutonVerre()
                         .disabled(model.isBusy("paye:" + d.senderName))
                     }
                     .swipeActions {

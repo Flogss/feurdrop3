@@ -108,8 +108,7 @@ struct LockerViewer: View {
             } label: {
                 Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).frame(width: 44, height: 44)
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .boutonVerre(.rond)
             .accessibilityLabel("Fermer")
             Spacer()
             if let courant {
@@ -168,8 +167,7 @@ struct LockerViewer: View {
         } label: {
             Image(systemName: symbole).font(.system(size: 18, weight: .bold)).frame(width: 56, height: 56)
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .boutonVerre(.rond)
         .disabled(!paires.indices.contains(cible))
     }
 
@@ -206,8 +204,7 @@ struct LockerViewer: View {
             .frame(maxWidth: .infinity)
             .frame(height: 56)
         }
-        .buttonStyle(.glassProminent)
-        .tint(arme ? Theme.warn : Theme.violetDeep)
+        .boutonVerreFort(arme ? Theme.warn : Theme.violetDeep)
         .disabled(!(p?.canComplete ?? false) || envoi)
         .scaleEffect(arme ? 1.04 : 1)
     }

@@ -134,7 +134,8 @@ extension View {
         #if os(iOS)
         self.containerBackground(for: .navigation) { AmbientBackground() }
         #else
-        self.background { AmbientBackground() }
+        // sur Mac, la fenetre dessine le fond une fois, sous toutes les pages
+        self
         #endif
     }
 

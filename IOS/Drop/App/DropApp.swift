@@ -49,7 +49,9 @@ struct DropApp: App {
                 .frame(minWidth: 940, minHeight: 640)
         }
         .defaultSize(width: 1280, height: 860)
-        .windowToolbarStyle(.unified)
+        // pas de barre de titre grise : le fond vivant prend toute la fenetre,
+        // la barre de Drop sert de poignee
+        .windowStyle(.hiddenTitleBar)
         .commands { DropCommands(app: app) }
 
         // Reglages : Drop > Reglages... (Cmd ,)

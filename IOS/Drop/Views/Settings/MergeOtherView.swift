@@ -61,8 +61,7 @@ struct MergeOtherView: View {
                     .frame(height: 50)
                     .contentTransition(.numericText())
             }
-            .buttonStyle(.glassProminent)
-            .tint(Theme.violetDeep)
+            .boutonVerreFort(Theme.violetDeep)
             .disabled(choisis.isEmpty)
             .padding(.horizontal, 20)
             .padding(.bottom, 90)

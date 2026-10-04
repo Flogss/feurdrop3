@@ -63,11 +63,10 @@ struct MenuBarPanel: View {
                     Label("Ouvrir Drop", systemImage: "macwindow")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.violetDeep)
+                .boutonVerreFort()
                 Button("Quitter", systemImage: "power") { NSApp.terminate(nil) }
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.glass)
+                    .boutonVerre(.rond)
                     .help("Quitter Drop")
             }
         }

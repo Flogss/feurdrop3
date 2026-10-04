@@ -95,6 +95,8 @@ final class AppModel {
             async let colis: Void = dashboard.refresh()
             await locker.refresh()
             await colis
+        case .settings:
+            await dashboard.refresh()
         }
         #else
         switch tab {

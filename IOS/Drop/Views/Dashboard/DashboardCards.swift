@@ -41,8 +41,7 @@ struct TourSummaryCard: View {
                         .font(.system(size: 12, weight: .bold))
                         .frame(width: 30, height: 30)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .boutonVerre(.rond)
                 .accessibilityLabel("Fermer le résumé")
             }
 
@@ -215,7 +214,7 @@ struct StockCard: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 36)
         }
-        .buttonStyle(.glass)
+        .boutonVerre()
         .accessibilityLabel(delta > 0 ? "Ajouter une pochette \(kind.label)" : "Retirer une pochette \(kind.label)")
     }
 
@@ -287,7 +286,7 @@ struct CarriersCard: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(minWidth: 70)
             }
-            .buttonStyle(.glass)
+            .boutonVerre()
             .disabled(occupe)
         }
         .padding(.vertical, 8)
@@ -315,8 +314,8 @@ struct SendersCard: View {
                         .font(.system(size: 15, weight: .bold))
                         .frame(width: 34, height: 34)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .boutonVerre(.rond)
+                .menuIndicator(.hidden)
                 .disabled((stats?.pendingCount ?? 0) == 0)
             }
             if senders.isEmpty {
@@ -383,8 +382,7 @@ private struct SenderRow: View {
                     }
                     .fixedSize()
                 }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.violetDeep)
+                .boutonVerreFort(Theme.violetDeep)
                 .disabled(model.busy.contains("exp:" + nom))
                 .accessibilityLabel("Dropper les \(sender.pendingCount) colis de \(nom)")
                 .transition(.scale(scale: 0.6).combined(with: .opacity))

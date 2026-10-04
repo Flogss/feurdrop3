@@ -143,8 +143,7 @@ private struct PrintHeader: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
             }
-            .buttonStyle(.glassProminent)
-            .tint(Theme.violetDeep)
+            .boutonVerreFort(Theme.violetDeep)
             .disabled(n == 0 || model.building.contains("*"))
             .overlay { SparkBurst(trigger: model.celebration, count: 12).allowsHitTesting(false) }
 
@@ -159,11 +158,11 @@ private struct PrintHeader: View {
                     Spacer()
                     Button("Réimprimer", systemImage: "printer") { model.reprint() }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(.glass)
+                        .boutonVerre()
                     ShareLink(item: pdf.file) {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    .buttonStyle(.glass)
+                    .boutonVerre()
                 }
                 .padding(12)
                 .glassEffect(.regular.tint(Theme.violet.opacity(0.15)), in: .rect(cornerRadius: 18))
@@ -284,8 +283,7 @@ private struct CategoryGroup: View {
                     }
                     .frame(width: 32, height: 32)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .boutonVerre(.rond)
                 .disabled(model.building.contains(cle))
                 .accessibilityLabel("Imprimer \(category.label)")
             }

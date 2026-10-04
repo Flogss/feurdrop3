@@ -87,8 +87,7 @@ struct ParcelEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Enregistrer", systemImage: "checkmark") { Task { await enregistre() } }
-                        .buttonStyle(.glassProminent)
-                        .tint(Theme.violetDeep)
+                        .boutonVerreFort(Theme.violetDeep)
                         .disabled(envoi)
                 }
             }

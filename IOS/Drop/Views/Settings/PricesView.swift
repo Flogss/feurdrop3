@@ -181,8 +181,7 @@ struct AddSenderSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Ajouter", systemImage: "checkmark") { Task { await ajoute() } }
-                        .buttonStyle(.glassProminent)
-                        .tint(Theme.violetDeep)
+                        .boutonVerreFort(Theme.violetDeep)
                         .disabled(nom.trimmingCharacters(in: .whitespaces).isEmpty || envoi)
                 }
             }

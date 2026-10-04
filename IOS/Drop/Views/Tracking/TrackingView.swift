@@ -78,8 +78,7 @@ struct TrackingView: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 48)
                         }
-                        .buttonStyle(.glassProminent)
-                        .tint(Theme.violetDeep)
+                        .boutonVerreFort(Theme.violetDeep)
                         PasteButton(payloadType: String.self) { textes in
                             guard let texte = textes.first else { return }
                             Task { await model.verify(text: texte, name: "presse-papiers.txt") }
@@ -129,8 +128,7 @@ struct TrackingView: View {
                         } label: {
                             Image(systemName: "arrow.clockwise").font(.footnote.weight(.bold)).frame(width: 30, height: 30)
                         }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
+                        .boutonVerre(.rond)
                         .disabled(model.liveRunning)
                         .accessibilityLabel("Revérifier ces \(m.count) numéros")
                     } else {
@@ -264,7 +262,7 @@ private struct LiveProgress: View {
             }
 
             Button("Arrêter", systemImage: "stop.fill", role: .destructive, action: onCancel)
-                .buttonStyle(.glass)
+                .boutonVerre()
         }
     }
 

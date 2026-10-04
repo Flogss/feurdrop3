@@ -164,8 +164,7 @@ struct HeroCard: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 50)
             }
-            .buttonStyle(.glassProminent)
-            .tint(Theme.violetDeep)
+            .boutonVerreFort(Theme.violetDeep)
             .disabled(model.busy.contains("tour"))
 
             if enTournee {
@@ -175,7 +174,7 @@ struct HeroCard: View {
                 .font(.headline)
                 .frame(height: 50)
                 .padding(.horizontal, 6)
-                .buttonStyle(.glass)
+                .boutonVerre()
                 .transition(.scale(scale: 0.5, anchor: .leading).combined(with: .opacity))
             }
         }

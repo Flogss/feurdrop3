@@ -28,11 +28,11 @@ struct LockerView: View {
                 } label: {
                     Label(model.pairs.first.map { "Commencer au #\($0.numero)" } ?? "Commencer", systemImage: "play.fill")
                         .font(.headline)
-                        .frame(maxWidth: .infinity)
+                        // pleine largeur sous le pouce ; taille normale sur Mac
+                        .frame(maxWidth: Platform.isMac ? 300 : .infinity)
                         .frame(height: 50)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.special)
+                .boutonVerreFort(Theme.special)
                 .disabled(model.pairs.isEmpty)
 
                 if !model.loaded {
