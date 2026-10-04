@@ -1193,8 +1193,9 @@ async function loadStats(animate, force, riche) {
     if (valable && m !== valeur) return { depuis: m, nouveau: true };
     return { depuis: nouvelleSession ? 0 : valable ? m : undefined, nouveau: false };
   };
-  // au lancement, on attend que la carte ait fini d'entrer pour compter
-  const delai = premier ? 780 : 0;
+  // au lancement, on attend que la carte ait fini d'entrer pour compter (et,
+  // pendant la meteorite, que son onde ait ouvert l'interface)
+  const delai = premier ? 780 + (window.lancementDrop?.reste() ?? 0) : 0;
   const colis = depart("pending", s.pendingCount);
   const jour = depart("today", s.todayValue, true);
   const gagne = depart("earned", s.droppedValue);
@@ -4484,9 +4485,12 @@ async function demarre() {
   requestAnimationFrame(() => placeIndicateur(VUE_PARENT[initiale] || initiale, { instantane: true }));
   vuesVisitees.add(initiale);
 
+  // la sequence de lancement (lancement.js) : la meteorite file pendant que
+  // les premiers chiffres arrivent ; son onde ouvre l'interface
+  const lancement = window.lancementDrop;
   const chargement =
     initiale === "stats"
-      ? Promise.all([loadStats(true, true, true), loadRevenueStats(true, true, true)])
+      ? (lancement?.revelation ?? Promise.resolve()).then(() => Promise.all([loadStats(true, true, true), loadRevenueStats(true, true, true)]))
       : initiale === "imprime"
         ? loadImprime()
         : initiale === "special"
@@ -4496,10 +4500,16 @@ async function demarre() {
             : refreshAll();
   if (initiale === "imprime" || initiale === "special" || initiale === "suivi") refreshAll().catch(() => {});
 
-  // on n'attend jamais plus d'un instant : au-dela, la cascade part avec les
-  // squelettes et les chiffres suivront
-  await Promise.race([chargement.catch(() => {}), attends(1100)]);
-  await attends(140);
+  if (lancement) {
+    await lancement.revelation;
+  } else {
+    // on n'attend jamais plus d'un instant : au-dela, la cascade part avec les
+    // squelettes et les chiffres suivront
+    await Promise.race([chargement.catch(() => {}), attends(1100)]);
+    await attends(140);
+  }
+  // les barres arrivent (CSS body.boot), le contenu entre en cascade
+  document.body.classList.add("boot");
   page.classList.remove("attente");
   entreePage(page, true);
   setTimeout(() => document.body.classList.remove("boot"), 2200);

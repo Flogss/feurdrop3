@@ -583,7 +583,7 @@ nonisolated final class MoteurLancement: @unchecked Sendable {
         float arrivee = p.b.y + p.b.z;
         float pose = t > arrivee ? 1.0 + 0.8 * exp(-(t - arrivee) / 0.12) : 1.0;
         float scintille = t > arrivee ? 0.85 + 0.15 * sin(t * 9.0 + float(i)) : 1.0;
-        float alpha = age > 0.0 ? clamp(age / 0.06, 0.0, 1.0) * (1.0 - lisse((t - (LOGO + 0.02)) / 0.28)) * min(pose * scintille, 1.6) * 0.9 : 0.0;
+        float alpha = age > 0.0 ? clamp(age / 0.14, 0.0, 1.0) * (1.0 - lisse((t - (LOGO + 0.02)) / 0.28)) * min(pose * scintille, 1.6) * 0.9 : 0.0;
         float2 ici = positionParticule(p, t, u);
         float2 avant = positionParticule(p, t - 1.0 / 120.0, u);
         float rayon = p.c.x * (t > arrivee ? 0.9 : 1.0);

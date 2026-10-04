@@ -248,6 +248,55 @@ body.boot .tabbar { animation: boot-barre 900ms var(--ease-spring) 220ms both; }
 @keyframes boot-haut { from { opacity: 0; transform: translate3d(0, -14px, 0); filter: blur(6px); } }
 @keyframes boot-barre { from { opacity: 0; transform: translate3d(0, 40px, 0) scale(0.86); } }
 
+/* Le lancement (lancement.js) : la meteorite par-dessus tout, sur du
+   graphite tant que sa premiere image n'est pas la ; le logo qu'elle fait
+   naitre vole ensuite jusqu'a la marque, cachee jusque-la. */
+#lancement {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  background: #07060a;
+  touch-action: none;
+}
+#lancement.allumee { background: transparent; }
+body.lancement { overflow: hidden; }
+.lancement-logo {
+  position: fixed;
+  z-index: 1001;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--grad-accent);
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    0 0 36px rgb(var(--accent-rgb) / 0.75),
+    0 0 110px rgb(var(--accent-rgb) / 0.4);
+  will-change: transform, opacity;
+}
+.lancement-logo .icon { position: relative; width: 56%; height: 56%; stroke-width: 2.3; }
+.lancement-reflet {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6), transparent);
+  transform: translateX(-140%) rotate(20deg);
+  mix-blend-mode: plus-lighter;
+}
+body.lancement-marque .brand-mark { opacity: 0; }
+.brand-mark.pose { animation: marque-pose 640ms var(--ease-bounce); }
+@keyframes marque-pose {
+  0% { transform: scale(1); filter: brightness(1.7); }
+  25% { transform: scale(1.16); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
 /* tant que les premiers chiffres ne sont pas la, le contenu attend */
 .view.attente > * { opacity: 0; }
 

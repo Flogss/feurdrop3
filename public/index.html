@@ -17,7 +17,7 @@
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="stylesheet" href="styles.css" />
 </head>
-<body class="boot">
+<body class="lancement lancement-marque">
 <!-- iPhone : basculer un interrupteur natif fait vibrer le telephone. C'est le
      seul retour haptique que Safari laisse passer. -->
 <label class="haptique" aria-hidden="true"><input type="checkbox" switch id="haptique" tabindex="-1" /></label>
@@ -68,6 +68,11 @@
   <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5a1.5 1.5 0 0 1 1.4-1h9.2a1.5 1.5 0 0 1 1.4 1l2.5 8"/><path d="M3.5 13.5v5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-5h-5l-1.5 2.5h-4L8.5 13.5z"/></symbol>
   <symbol id="i-party" viewBox="0 0 24 24"><path d="M4 20 8.5 7.5l8 8z"/><path d="M14 4.5c.8 1 .8 2.2 0 3.2M19.5 10c-1-.8-2.2-.8-3.2 0M17.5 3.5v1M20.5 6.5h-1M11 3.5l.5 1"/></symbol>
 </svg>
+
+<!-- Le lancement : une meteorite, son impact, la naissance du logo, puis
+     l'onde qui ouvre l'interface (lancement.js). -->
+<canvas id="lancement" aria-hidden="true"></canvas>
+<script src="lancement.js"></script>
 
 <!-- Le fond vit : des halos violets qui derivent, quelques particules, un grain
      fin. Tout est fixe derriere le contenu et ne recoit jamais un clic. -->
