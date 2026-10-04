@@ -87,6 +87,7 @@ struct RevenueCurveChart: View {
             .sansIndicateurs()
             .defaultScrollAnchor(.trailing)
             .tirerPourDefiler()
+            .bordsEstompes()
             .onScrollGeometryChange(for: ClosedRange<Int>.self) { g in
                 defilement.x = g.contentOffset.x
                 return visibles(offset: g.contentOffset.x, largeur: g.containerSize.width)

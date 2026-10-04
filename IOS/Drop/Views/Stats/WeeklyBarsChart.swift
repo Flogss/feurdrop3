@@ -59,6 +59,7 @@ struct WeeklyBarsChart: View {
             .sansIndicateurs()
             .defaultScrollAnchor(.trailing)
             .tirerPourDefiler()
+            .bordsEstompes()
             .onScrollGeometryChange(for: ClosedRange<Int>.self) { g in
                 visibles(offset: g.contentOffset.x, largeur: g.containerSize.width, total: largeur)
             } action: { _, r in

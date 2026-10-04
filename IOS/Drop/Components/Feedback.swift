@@ -69,6 +69,8 @@ struct SparkBurst: View {
 
     @State private var gerbes: [Gerbe] = []
 
+    private var portee: CGFloat { (82 + 26) * power + 14 }
+
     private struct Gerbe: Identifiable {
         let id = UUID()
         let depart = Date.now
@@ -97,6 +99,10 @@ struct SparkBurst: View {
                 }
             }
         }
+        // sa toile a la portee des etincelles (la plus lointaine, sa chute et
+        // sa lueur), centree sur l'element qui la porte : elle ne prend plus
+        // la taille de cet element, qui coupait la gerbe dans un rectangle
+        .frame(width: portee * 2, height: portee * 2)
         .allowsHitTesting(false)
         .onChange(of: trigger) {
             let n = count

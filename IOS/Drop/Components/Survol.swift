@@ -248,3 +248,17 @@ private struct TirerPourDefiler: ViewModifier {
     private func borne(_ x: CGFloat) -> CGFloat { Swift.min(Swift.max(x, 0), etat.max) }
 }
 #endif
+
+extension View {
+    /// Les bords d'un graphique qui defile s'estompent (comme sur le site) au
+    /// lieu de couper net un point ou une valeur.
+    func bordsEstompes(_ largeur: CGFloat = 22) -> some View {
+        mask {
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: largeur)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: largeur)
+            }
+        }
+    }
+}
