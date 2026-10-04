@@ -43,6 +43,12 @@ enum MacCapture {
         }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(delai > 0 ? delai : 6))
+            await photographie(chemin)
+        }
+    }
+
+    /// photographie la fenetre principale de l'app (sans le curseur)
+    static func photographie(_ chemin: String) async {
             do {
                 let contenu = try await SCShareableContent.currentProcess
                 let liste = contenu.windows.map { "\($0.windowID) \($0.title ?? "-") \($0.frame) layer=\($0.windowLayer) visible=\($0.isOnScreen)" }.joined(separator: "\n")
@@ -61,7 +67,6 @@ enum MacCapture {
             } catch {
                 try? "erreur: \(error)".write(toFile: chemin + ".txt", atomically: true, encoding: .utf8)
             }
-        }
     }
 }
 #endif
@@ -91,6 +96,26 @@ enum TestSouris {
                 fenetre.sendEvent(e)
             }
             switch quoi {
+            case "balayage":
+                // une photo sans pointeur, puis une a chaque point (x,y;x,y...)
+                let dossier = reglages.string(forKey: "DropTestSortie") ?? "/tmp"
+                let points = (reglages.string(forKey: "DropBalayage") ?? "").split(separator: ";").compactMap { paire -> CGPoint? in
+                    let n = paire.split(separator: ",").compactMap { Double($0) }
+                    return n.count == 2 ? CGPoint(x: n[0], y: n[1]) : nil
+                }
+                await MacCapture.photographie(dossier + "/survol-ref.png")
+                var precedent = CGPoint(x: 10, y: 40)
+                for (i, p) in points.enumerated() {
+                    for k in 1...8 {
+                        let f = CGFloat(k) / 8
+                        envoie(.mouseMoved, precedent.x + (p.x - precedent.x) * f, precedent.y + (p.y - precedent.y) * f)
+                        try? await Task.sleep(for: .milliseconds(25))
+                    }
+                    precedent = p
+                    try? await Task.sleep(for: .milliseconds(700))
+                    await MacCapture.photographie(dossier + "/survol-\(i).png")
+                }
+                try? "fini".write(toFile: dossier + "/survol-fini.txt", atomically: true, encoding: .utf8)
             case "survol":
                 let morceaux = (reglages.string(forKey: "DropSurvol") ?? "400,300").split(separator: ",").compactMap { Double($0) }
                 guard morceaux.count == 2 else { return }

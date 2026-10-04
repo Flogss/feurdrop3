@@ -16,6 +16,12 @@ import SwiftUI
 struct FondMac: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var lissage = Lissage()
+    #if DEBUG
+    /// `-DropFondFige 1` : le fond arrete (photos comparees)
+    static let fige = UserDefaults.standard.bool(forKey: "DropFondFige")
+    #else
+    static let fige = false
+    #endif
 
     /// le pointeur suivi en douceur (lissage exponentiel a chaque image)
     private final class Lissage {
@@ -34,8 +40,8 @@ struct FondMac: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 60, paused: reduceMotion)) { contexte in
-            let t = contexte.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: reduceMotion || Self.fige)) { contexte in
+            let t = Self.fige ? 1000 : contexte.date.timeIntervalSinceReferenceDate
             let pointeur = MotionParallax.shared
             let p = lissage.avance(vers: pointeur.cibleX, pointeur.cibleY, a: t)
             let px = p.0, py = p.1

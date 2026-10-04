@@ -259,7 +259,13 @@ private struct CategorieCarte: View {
                 }
                 .padding(.horizontal, 18)
                 .frame(minHeight: 60)
-                .background(survol ? Color.white.opacity(0.03) : .clear)
+                // un fond arrondi, inscrit dans la carte (un rectangle plein
+                // laissait des angles droits sous l'en-tete d'une carte depliee)
+                .background {
+                    RoundedRectangle(cornerRadius: 17, style: .continuous)
+                        .fill(.white.opacity(survol ? 0.045 : 0))
+                        .padding(5)
+                }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)

@@ -136,7 +136,6 @@ struct TrackingView: View {
                     }
                 }
                 .padding(.vertical, 3)
-                .ligneSurvol()
             }
         }
         .surfaceCard()

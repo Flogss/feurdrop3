@@ -75,6 +75,15 @@ struct LaunchSequence: View {
         .contentShape(.rect)
         .onTapGesture { accelere() }
         .onAppear {
+            #if DEBUG
+            // `-DropSansIntro 1` : directement l'interface (verifications)
+            if UserDefaults.standard.bool(forKey: "DropSansIntro") {
+                onRevelation()
+                onLogoPose()
+                onFin()
+                return
+            }
+            #endif
             // mouvements reduits : pas de meteorite, le logo puis l'onde
             recommence(a: reduceMotion ? Scenario.logo : 0)
             moteur.demarre()

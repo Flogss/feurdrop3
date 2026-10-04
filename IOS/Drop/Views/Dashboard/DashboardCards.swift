@@ -292,7 +292,6 @@ struct CarriersCard: View {
             .disabled(occupe)
         }
         .padding(.vertical, 8)
-        .ligneSurvol()
     }
 }
 
@@ -400,7 +399,6 @@ private struct SenderRow: View {
         }
         .padding(.vertical, 7)
         .contentShape(.rect)
-        .ligneSurvol()
         .contextMenu {
             if sender.pendingCount > 0 {
                 Button("Dropper \(Format.count(sender.pendingCount, "colis", "colis"))", systemImage: "paperplane.fill") {

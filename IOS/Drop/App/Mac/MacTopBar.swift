@@ -168,7 +168,9 @@ struct MacTabBar: View {
                 }
             }
             .padding(5)
-            .glassEffect(.regular.interactive(), in: .capsule)
+            // le verre de la capsule n'est pas interactif : seuls les onglets
+            // (et la goutte) reagissent au pointeur, pas les espaces entre eux
+            .glassEffect(.regular, in: .capsule)
             .overlay { reflet }
         }
         .shadow(color: Theme.violet.opacity(0.3), radius: 22, y: 8)

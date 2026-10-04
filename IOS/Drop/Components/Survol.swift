@@ -16,8 +16,11 @@ extension View {
         #endif
     }
 
-    /// Une ligne de liste qui s'eclaire au survol ; le fond deborde de
-    /// `marge` de chaque cote, sans deplacer le contenu.
+    /// Une ligne CLIQUABLE (lien, choix) qui s'eclaire au survol ; le fond
+    /// deborde de `marge` de chaque cote, sans deplacer le contenu. Jamais sur
+    /// une ligne qui ne fait que contenir des boutons : elle s'allumait en
+    /// rectangle sous le pointeur alors qu'il n'y avait rien a cliquer (les
+    /// boutons de la ligne ont leur propre survol).
     @ViewBuilder
     func ligneSurvol(rayon: CGFloat = 12, marge: CGFloat = 10) -> some View {
         #if os(macOS)

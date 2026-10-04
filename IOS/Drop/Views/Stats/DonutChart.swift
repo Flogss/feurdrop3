@@ -54,6 +54,14 @@ struct DonutChart: View {
             if visible { rejoue() } else { dejaVu = -1 }
         }
         .sensoryFeedback(.selection, trigger: selection)
+        #if DEBUG
+        // `-DropDonutChoix 0` : une part choisie (photos)
+        .task {
+            guard let i = UserDefaults.standard.string(forKey: "DropDonutChoix").flatMap(Int.init), i < slices.count else { return }
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation(Theme.bouncy) { selection = slices[i].id }
+        }
+        #endif
     }
 
     private var centre: some View {
@@ -82,6 +90,12 @@ struct DonutChart: View {
         .multilineTextAlignment(.center)
         .contentTransition(.opacity)
         .animation(Theme.spring, value: selection)
+        .background {
+            RadialGradient(colors: [(choisie?.color ?? Theme.violet).opacity(0.16), .clear], center: .center, startRadius: 20, endRadius: 80)
+                .frame(width: 160, height: 160)
+                .animation(Theme.spring, value: selection)
+                .allowsHitTesting(false)
+        }
     }
 
     private var legende: some View {
@@ -164,7 +178,11 @@ struct DonutChart: View {
     }
 }
 
-/// Les arcs, recalcules a chaque image pendant le remplissage.
+/// Les arcs, recalcules a chaque image pendant le remplissage. Des formes
+/// SwiftUI plutot qu'un Canvas : un Canvas ne dessine que dans son cadre, et
+/// la lueur de la part choisie (son arc grossi et son flou) etait coupee net
+/// sur les bords d'un carre invisible de 210 points. Ici chaque part porte sa
+/// propre lumiere, de sa couleur, qui deborde librement et s'eteint en douceur.
 private struct DonutRing: View, Animatable {
     let slices: [DonutSlice]
     var progress: Double
@@ -175,48 +193,96 @@ private struct DonutRing: View, Animatable {
         set { progress = newValue }
     }
 
-    var body: some View {
-        Canvas(rendersAsynchronously: true) { ctx, taille in
-            let total = slices.reduce(0) { $0 + $1.value }
-            guard total > 0 else { return }
-            let centre = CGPoint(x: taille.width / 2, y: taille.height / 2)
-            let rayon = min(taille.width, taille.height) / 2 - 16
-            // le fond de l'anneau
-            ctx.stroke(Path(ellipseIn: CGRect(x: centre.x - rayon, y: centre.y - rayon, width: rayon * 2, height: rayon * 2)), with: .color(.white.opacity(0.05)), lineWidth: 20)
+    private let rayon: CGFloat = 89
+    private let epaisseur: CGFloat = 20
 
-            let ecart = slices.count > 1 ? 0.012 : 0
-            var debut = 0.0
-            for s in slices {
-                let part = s.value / total
-                let fin = debut + part
-                let visibleFin = min(fin, progress)
-                if visibleFin > debut + ecart / 2 {
-                    let choisie = s.id == selection
-                    let estompee = selection != nil && !choisie
-                    var arc = Path()
-                    arc.addArc(center: centre, radius: rayon + (choisie ? 5 : 0),
-                               startAngle: .radians((debut + ecart / 2) * 2 * .pi),
-                               endAngle: .radians((visibleFin - (visibleFin == fin ? ecart / 2 : 0)) * 2 * .pi),
-                               clockwise: false)
-                    if choisie {
-                        ctx.drawLayer { halo in
-                            halo.addFilter(.blur(radius: 9))
-                            halo.stroke(arc, with: .color(s.color.opacity(0.8)), style: StrokeStyle(lineWidth: 26, lineCap: .round))
-                        }
-                    }
-                    ctx.stroke(arc, with: .color(s.color.opacity(estompee ? 0.35 : 1)), style: StrokeStyle(lineWidth: choisie ? 28 : 20, lineCap: .butt))
-                }
-                debut = fin
+    private struct Part: Identifiable {
+        let id: String
+        let couleur: Color
+        let debut: Double
+        let fin: Double
+    }
+
+    private var parts: [Part] {
+        let total = slices.reduce(0) { $0 + $1.value }
+        guard total > 0 else { return [] }
+        let ecart = slices.count > 1 ? 0.012 : 0
+        var debut = 0.0
+        var resultat: [Part] = []
+        for s in slices {
+            let fin = debut + s.value / total
+            let visibleFin = min(fin, progress)
+            if visibleFin > debut + ecart / 2 {
+                resultat.append(Part(id: s.id, couleur: s.color, debut: debut + ecart / 2, fin: visibleFin - (visibleFin == fin ? ecart / 2 : 0)))
             }
+            debut = fin
+        }
+        return resultat
+    }
+
+    var body: some View {
+        ZStack {
+            // le creux de l'anneau : la piste, une ombre interieure
+            Circle()
+                .stroke(.white.opacity(0.05), lineWidth: epaisseur)
+                .frame(width: rayon * 2, height: rayon * 2)
+            Circle()
+                .stroke(.black.opacity(0.45), lineWidth: 5)
+                .blur(radius: 4)
+                .frame(width: (rayon - epaisseur / 2) * 2 + 4, height: (rayon - epaisseur / 2) * 2 + 4)
+
+            ForEach(parts) { p in
+                let choisie = p.id == selection
+                let estompee = selection != nil && !choisie
+                ArcDonut(debut: p.debut, fin: p.fin)
+                    .stroke(p.couleur.opacity(estompee ? 0.35 : 1), style: StrokeStyle(lineWidth: epaisseur, lineCap: .butt))
+                    .frame(width: rayon * 2, height: rayon * 2)
+                    // sa lumiere : elle suit la part, de sa couleur, et deborde
+                    .shadow(color: p.couleur.opacity(estompee ? 0.12 : (choisie ? 0.95 : 0.45)), radius: choisie ? 16 : 7)
+                    .shadow(color: p.couleur.opacity(choisie ? 0.5 : 0), radius: choisie ? 34 : 0)
+                    // la part choisie ressort de l'anneau
+                    .scaleEffect(choisie ? 1.07 : 1)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.62), value: choisie)
+                    .animation(.easeOut(duration: 0.25), value: estompee)
+            }
+
+            // le relief : un liseré de lumiere sur le bord exterieur
+            Circle()
+                .strokeBorder(
+                    LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.02), .white.opacity(0.08)], startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.8
+                )
+                .frame(width: rayon * 2 + epaisseur, height: rayon * 2 + epaisseur)
+                .allowsHitTesting(false)
+
             // la tete du trait, lumineuse pendant le remplissage
             if progress > 0.01 && progress < 0.995 {
                 let a = progress * 2 * .pi
-                let p = CGPoint(x: centre.x + cos(a) * rayon, y: centre.y + sin(a) * rayon)
-                ctx.drawLayer { lumiere in
-                    lumiere.addFilter(.blur(radius: 8))
-                    lumiere.fill(Path(ellipseIn: CGRect(x: p.x - 12, y: p.y - 12, width: 24, height: 24)), with: .color(.white.opacity(0.8)))
-                }
+                Circle()
+                    .fill(.white.opacity(0.85))
+                    .frame(width: 22, height: 22)
+                    .blur(radius: 8)
+                    .offset(x: cos(a) * rayon, y: sin(a) * rayon)
+                    .blendMode(.plusLighter)
             }
         }
+        .frame(width: 210, height: 210)
+    }
+}
+
+/// un arc de l'anneau, de `debut` a `fin` (parts du tour, sens horaire a
+/// partir de 3 heures ; l'anneau est tourne pour commencer en haut)
+nonisolated private struct ArcDonut: Shape {
+    var debut: Double
+    var fin: Double
+
+    func path(in r: CGRect) -> Path {
+        var chemin = Path()
+        guard fin > debut else { return chemin }
+        chemin.addArc(
+            center: CGPoint(x: r.midX, y: r.midY), radius: min(r.width, r.height) / 2,
+            startAngle: .radians(debut * 2 * .pi), endAngle: .radians(fin * 2 * .pi), clockwise: false
+        )
+        return chemin
     }
 }

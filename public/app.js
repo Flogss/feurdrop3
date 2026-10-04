@@ -1681,7 +1681,7 @@ function donutSVG(items, { animate, total, label, format, uid }) {
           <stop offset="0.6" stop-color="#9162ff" stop-opacity="0.12"/>
           <stop offset="1" stop-color="#9162ff" stop-opacity="0"/>
         </radialGradient>
-        <filter id="lueur-anneau${uid}" x="-30%" y="-30%" width="160%" height="160%">
+        <filter id="lueur-anneau${uid}" filterUnits="userSpaceOnUse" x="-60" y="-60" width="${taille + 120}" height="${taille + 120}">
           <feGaussianBlur stdDeviation="5" result="flou"/>
           <feMerge><feMergeNode in="flou"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
