@@ -1,4 +1,8 @@
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
 import UserNotifications
 import DropKit
 
@@ -112,7 +116,11 @@ final class PushRegistrar {
     private(set) var deviceToken: String?
 
     func registerIfPossible() {
+        #if canImport(UIKit)
         UIApplication.shared.registerForRemoteNotifications()
+        #else
+        NSApplication.shared.registerForRemoteNotifications()
+        #endif
     }
 
     func didRegister(token: Data) {

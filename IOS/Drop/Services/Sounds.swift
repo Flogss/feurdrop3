@@ -17,7 +17,9 @@ enum Sounds {
     /// silencieux et se mele a la musique sans la couper.
     static func chaChing() {
         if lecteur == nil, let url = Bundle.main.url(forResource: "cha-ching", withExtension: "caf") {
+            #if os(iOS)
             try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+            #endif
             lecteur = try? AVAudioPlayer(contentsOf: url)
             lecteur?.prepareToPlay()
         }

@@ -156,7 +156,7 @@ struct StockCard: View {
         .surfaceCard()
         .alert("Stock \(saisie?.label ?? "")", isPresented: Binding(get: { saisie != nil }, set: { if !$0 { saisie = nil } })) {
             TextField("Quantité", text: $quantite)
-                .keyboardType(.numberPad)
+                .clavier(.nombre)
             Button("Ajouter") { valide(signe: 1) }
             Button("Retirer", role: .destructive) { valide(signe: -1) }
             Button("Annuler", role: .cancel) { quantite = "" }

@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 import BackgroundTasks
 import DropKit
@@ -23,3 +24,5 @@ enum BackgroundRefresh {
         await BackgroundListener.verifie()
     }
 }
+
+#endif

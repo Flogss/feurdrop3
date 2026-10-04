@@ -33,6 +33,9 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
 @Observable
 final class AppModel {
     static let defaultServer = URL(string: "https://feurdrop3-production.up.railway.app")!
+    /// l'unique instance (la fenetre, la barre des menus et la veille du Mac la
+    /// partagent)
+    static let shared = AppModel()
 
     private(set) var api: DropAPI
     var serverURL: URL {
@@ -43,6 +46,10 @@ final class AppModel {
     }
 
     var tab: AppTab = .dashboard
+    #if os(macOS)
+    /// la page affichee dans la fenetre du Mac (barre laterale)
+    var pageMac: MacPage = .dashboard
+    #endif
     /// le dernier rafraichissement a-t-il joint le serveur ?
     var isOnline = true
     let toasts = ToastCenter()
@@ -72,6 +79,24 @@ final class AppModel {
 
     /// Ce que l'onglet visible relit toutes les 5 secondes.
     func refreshVisible() async {
+        #if os(macOS)
+        switch pageMac {
+        case .dashboard: await dashboard.refresh()
+        case .printing:
+            async let colis: Void = dashboard.refresh()
+            await printing.refresh()
+            await colis
+        case .stats: await stats.refresh(animated: false)
+        case .tracking:
+            async let colis: Void = dashboard.refresh()
+            await tracking.refresh()
+            await colis
+        case .locker:
+            async let colis: Void = dashboard.refresh()
+            await locker.refresh()
+            await colis
+        }
+        #else
         switch tab {
         case .dashboard: await dashboard.refresh()
         case .printing:
@@ -81,6 +106,7 @@ final class AppModel {
             await colis
         case .stats: await stats.refresh(animated: false)
         }
+        #endif
     }
 
     // MARK: Retours

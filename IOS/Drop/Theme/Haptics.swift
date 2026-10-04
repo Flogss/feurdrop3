@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 import UIKit
 
 /// Le retour tactile, la ou il aide : un onglet choisi, une action terminee,
@@ -31,3 +32,22 @@ enum Haptics {
     /// un chiffre qui monte : un leger coup sec a chaque palier
     static func rigid(_ intensite: CGFloat = 0.5) { rigidGenerator.impactOccurred(intensity: intensite) }
 }
+
+#else
+import AppKit
+
+/// Sur Mac : le retour haptique du trackpad (Force Touch), aux memes moments.
+@MainActor
+enum Haptics {
+    private static func joue(_ motif: NSHapticFeedbackManager.FeedbackPattern) {
+        NSHapticFeedbackManager.defaultPerformer.perform(motif, performanceTime: .now)
+    }
+    static func selection() { joue(.alignment) }
+    static func success() { joue(.levelChange) }
+    static func error() { joue(.generic) }
+    static func warning() { joue(.generic) }
+    static func tick() { joue(.alignment) }
+    static func soft() { joue(.alignment) }
+    static func rigid(_ intensite: CGFloat = 0.5) { joue(.levelChange) }
+}
+#endif

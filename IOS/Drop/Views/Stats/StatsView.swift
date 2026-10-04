@@ -7,6 +7,10 @@ struct StatsView: View {
     @Environment(AppModel.self) private var app
     @State private var plageJours = "—"
     @State private var plageSemaines = "—"
+    /// au-dela d'un seuil (Mac, grande fenetre), chiffres sur une ligne et
+    /// graphiques cote a cote
+    @State private var largeur: CGFloat = 0
+    private var large: Bool { largeur >= 860 }
 
     private var model: StatsModel { app.stats }
 
@@ -17,26 +21,15 @@ struct StatsView: View {
                     PageHeader("Stats")
                     if model.loaded {
                         metriques
-                        carteGraphe("Revenus par jour", plage: plageJours) {
-                            if model.days.isEmpty {
-                                EmptyStateView(symbol: "chart.xyaxis.line", title: "Pas encore de données")
-                            } else {
-                                RevenueCurveChart(days: model.days, reveal: model.reveal, range: $plageJours)
+                        grapheJours
+                        if large {
+                            HStack(alignment: .top, spacing: 14) {
+                                grapheSemaines
+                                grapheExpediteurs
                             }
-                        }
-                        carteGraphe("Revenus par semaine", plage: plageSemaines) {
-                            if model.weeks.isEmpty {
-                                EmptyStateView(symbol: "chart.bar", title: "Pas encore de données")
-                            } else {
-                                WeeklyBarsChart(weeks: model.weeks, reveal: model.reveal, range: $plageSemaines)
-                            }
-                        }
-                        carteGraphe("Gains par expéditeur", plage: model.senderShares.isEmpty ? "" : "Touche une part") {
-                            if model.senderShares.isEmpty {
-                                EmptyStateView(symbol: "chart.pie", title: "Pas encore de gains")
-                            } else {
-                                DonutChart(slices: model.senderShares, reveal: model.reveal)
-                            }
+                        } else {
+                            grapheSemaines
+                            grapheExpediteurs
                         }
                     } else {
                         SkeletonRow(height: 130)
@@ -44,30 +37,82 @@ struct StatsView: View {
                         SkeletonRow(height: 280)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, large ? 24 : 16)
                 .padding(.bottom, 24)
+                .frame(maxWidth: 1400)
+                .frame(maxWidth: .infinity)
                 .tabArrival(.stats)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { largeur = $0 }
             .navigationTitle("Stats")
-            .toolbarVisibility(.hidden, for: .navigationBar)
+            .barreDeNavigationMasquee()
             .refreshable { await model.refresh(animated: true) }
-            .containerBackground(for: .navigation) { AmbientBackground() }
+            .fondVivant()
         }
     }
 
     // MARK: Chiffres cles
 
+    @ViewBuilder
     private var metriques: some View {
-        VStack(spacing: 12) {
-            meilleureJournee
-            HStack(spacing: 12) {
-                carte("Moyenne par jour", valeur: model.dailyAverage, retard: 0.26) {
-                    Text(model.days.isEmpty ? "Pas encore de données" : "sur \(Format.count(model.days.count, "jour", "jours"))")
+        if large {
+            HStack(alignment: .top, spacing: 12) {
+                meilleureJournee
+                moyenne
+                cetteSemaine
+            }
+        } else {
+            VStack(spacing: 12) {
+                meilleureJournee
+                HStack(spacing: 12) {
+                    moyenne
+                    cetteSemaine
                 }
-                carte("Cette semaine", valeur: model.thisWeek?.value ?? 0, retard: 0.34) {
-                    semaine
-                }
+            }
+        }
+    }
+
+    private var moyenne: some View {
+        carte("Moyenne par jour", valeur: model.dailyAverage, retard: 0.26) {
+            Text(model.days.isEmpty ? "Pas encore de données" : "sur \(Format.count(model.days.count, "jour", "jours"))")
+        }
+    }
+
+    private var cetteSemaine: some View {
+        carte("Cette semaine", valeur: model.thisWeek?.value ?? 0, retard: 0.34) {
+            semaine
+        }
+    }
+
+    // MARK: Graphiques
+
+    private var grapheJours: some View {
+        carteGraphe("Revenus par jour", plage: plageJours) {
+            if model.days.isEmpty {
+                EmptyStateView(symbol: "chart.xyaxis.line", title: "Pas encore de données")
+            } else {
+                RevenueCurveChart(days: model.days, reveal: model.reveal, range: $plageJours)
+            }
+        }
+    }
+
+    private var grapheSemaines: some View {
+        carteGraphe("Revenus par semaine", plage: plageSemaines) {
+            if model.weeks.isEmpty {
+                EmptyStateView(symbol: "chart.bar", title: "Pas encore de données")
+            } else {
+                WeeklyBarsChart(weeks: model.weeks, reveal: model.reveal, range: $plageSemaines)
+            }
+        }
+    }
+
+    private var grapheExpediteurs: some View {
+        carteGraphe("Gains par expéditeur", plage: model.senderShares.isEmpty ? "" : "Touche une part") {
+            if model.senderShares.isEmpty {
+                EmptyStateView(symbol: "chart.pie", title: "Pas encore de gains")
+            } else {
+                DonutChart(slices: model.senderShares, reveal: model.reveal)
             }
         }
     }

@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import DropKit
 
 /// Le mode locker : les codes-barres des speciaux, dans l'ordre des numeros
@@ -11,7 +10,7 @@ final class LockerModel {
     private(set) var pairs: [LockerPair] = []
     private(set) var loaded = false
     private(set) var loadError: String?
-    private(set) var images: [Int: UIImage] = [:]
+    private(set) var images: [Int: PlatformImage] = [:]
     @ObservationIgnored private var enCours: Set<Int> = []
 
     init(app: AppModel) {
@@ -58,10 +57,10 @@ final class LockerModel {
         guard pair.code, images[pair.id] == nil, !enCours.contains(pair.id) else { return }
         enCours.insert(pair.id)
         defer { enCours.remove(pair.id) }
-        guard let data = try? await app.api.lockerCodeImage(pairID: pair.id), let brute = UIImage(data: data) else { return }
+        guard let data = try? await app.api.lockerCodeImage(pairID: pair.id), let brute = PlatformImage(data: data) else { return }
         // decodee hors du fil principal : le balayage du locker ne saccade pas
         // a l'arrivee d'un code
-        images[pair.id] = await brute.byPreparingForDisplay() ?? brute
+        images[pair.id] = await Platform.prepared(brute)
     }
 
     /// "Deposé" (ou "Fait" pour un code seul) : la paire quitte la liste.

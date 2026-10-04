@@ -53,15 +53,14 @@ struct PrintView: View {
                     categories(model.printed, scope: .printed, titre: "Déjà imprimées")
                 }
             }
-            .listStyle(.insetGrouped)
+            .listeGroupee(espacement: 18)
             .scrollContentBackground(.hidden)
-            .listSectionSpacing(18)
             .contentMargins(.top, 0, for: .scrollContent)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("Imprimé")
-            .toolbarVisibility(.hidden, for: .navigationBar)
+            .barreDeNavigationMasquee()
             .refreshable { await model.refresh() }
-            .containerBackground(for: .navigation) { AmbientBackground() }
+            .fondVivant()
             .sheet(item: $edition) { colis in
                 ParcelEditSheet(parcel: colis)
             }

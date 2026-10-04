@@ -13,7 +13,12 @@ struct SettingsView: View {
     @State private var adresse = ""
     @AppStorage(ParcelWatch.newParcelsKey) private var notifColis = true
     @AppStorage(ParcelWatch.tourKey) private var notifTournee = true
+    #if os(iOS)
     @AppStorage(BackgroundListener.enabledKey) private var ecoute = true
+    #else
+    // sur Mac, la veille tourne toujours (l'app reste ouverte)
+    private let ecoute = true
+    #endif
 
     private var model: SettingsModel { app.settings }
 
@@ -71,6 +76,7 @@ struct SettingsView: View {
                 Toggle(isOn: $notifTournee) {
                     Label("Tournée", systemImage: "box.truck.fill")
                 }
+                #if os(iOS)
                 Toggle(isOn: $ecoute) {
                     VStack(alignment: .leading, spacing: 2) {
                         Label("Écoute en arrière-plan", systemImage: "antenna.radiowaves.left.and.right")
@@ -80,6 +86,7 @@ struct SettingsView: View {
                             .contentTransition(.interpolate)
                     }
                 }
+                #endif
                 Button {
                     Task { await model.testNotification() }
                 } label: {
@@ -89,7 +96,7 @@ struct SettingsView: View {
                 Label("Refusées", systemImage: "bell.slash.fill")
                     .foregroundStyle(Theme.warn)
                 Button("Ouvrir les Réglages d'iOS", systemImage: "gear") {
-                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    Platform.openNotificationSettings()
                 }
             default:
                 Button {
@@ -112,6 +119,9 @@ struct SettingsView: View {
             return "Un cha-ching dès que des colis arrivent, même app fermée."
         }
         var texte = "Chaque notification fait cha-ching. "
+        if Platform.isMac {
+            return texte + "Drop surveille les nouveaux colis toutes les 10 s tant qu'il est ouvert, même fenêtre fermée (il reste dans la barre des menus)."
+        }
         texte += ecoute
             ? "L'écoute garde l'app éveillée une fois quittée et consomme un peu de batterie. Elle s'arrête si tu fermes l'app de force (balayée vers le haut)."
             : "Sans l'écoute, iOS réveille l'app quand il veut (de 15 min à quelques heures)."
@@ -240,8 +250,7 @@ struct SettingsView: View {
     private var serveur: some View {
         Section {
             TextField("https://…", text: $adresse)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
+                .clavier(.url)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .onSubmit(appliqueAdresse)

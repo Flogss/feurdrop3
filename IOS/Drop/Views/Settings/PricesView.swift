@@ -33,7 +33,7 @@ struct PricesView: View {
         .navigationTitle("Prix")
         .searchable(text: $recherche, prompt: "Rechercher un expéditeur")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .primaryAction) {
                 Button("Ajouter", systemImage: "plus") { ajout = true }
             }
         }
@@ -92,7 +92,7 @@ private struct PriceInput: View {
             }
             HStack(spacing: 2) {
                 TextField("0", text: $texte)
-                    .keyboardType(.decimalPad)
+                    .clavier(.decimal)
                     .focused($focus)
                     .font(.subheadline.weight(.semibold).monospacedDigit())
                 Text("€").font(.caption).foregroundStyle(Theme.text3)
@@ -162,7 +162,7 @@ struct AddSenderSheet: View {
             Form {
                 Section("Nom") {
                     TextField("@pseudo ou nom", text: $nom)
-                        .textInputAutocapitalization(.never)
+                        .sansMajuscules()
                         .autocorrectionDisabled()
                         .focused($focusNom)
                 }
@@ -174,7 +174,7 @@ struct AddSenderSheet: View {
             }
             .scrollContentBackground(.hidden)
             .navigationTitle("Nouvel expéditeur")
-            .navigationBarTitleDisplayMode(.inline)
+            .titreCompact()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Annuler", systemImage: "xmark") { dismiss() }
@@ -197,7 +197,7 @@ struct AddSenderSheet: View {
             Text(titre)
             Spacer()
             TextField("0", text: texte)
-                .keyboardType(.decimalPad)
+                .clavier(.decimal)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 90)
             Text("€").foregroundStyle(Theme.text3)

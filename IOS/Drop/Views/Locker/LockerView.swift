@@ -62,9 +62,16 @@ struct LockerView: View {
         .navigationTitle("Mode locker")
         .refreshable { await model.refresh() }
         .task { await model.refresh() }
+        #if os(iOS)
         .fullScreenCover(item: $ouvert) { depart in
             LockerViewer(startIndex: depart.index)
         }
+        #else
+        .sheet(item: $ouvert) { depart in
+            LockerViewer(startIndex: depart.index)
+                .frame(minWidth: 520, minHeight: 760)
+        }
+        #endif
     }
 
     private var colonnes: [GridItem] { [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)] }
@@ -88,7 +95,7 @@ private struct PairCard: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(pair.code ? Color.white : Color.white.opacity(0.05))
                 if let image = app.locker.images[pair.id] {
-                    Image(uiImage: image)
+                    Image(platformImage: image)
                         .resizable()
                         .interpolation(.none)
                         .scaledToFit()

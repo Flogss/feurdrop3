@@ -83,7 +83,7 @@ final class DashboardModel {
         }
         app.lastSeen.save(LastSeenSnapshot(pending: s.pendingCount, earned: s.droppedValue, today: s.todayValue, day: LastSeenStore.dayKey()))
         // sous les yeux : tout est vu, les notifications repartiront d'ici
-        ParcelWatch.seen(s)
+        if Platform.isFrontmost { ParcelWatch.seen(s) }
     }
 
     /// La memoire de l'appareil decide d'ou partent les compteurs.

@@ -1,3 +1,4 @@
+#if os(iOS)
 import AVFoundation
 import DropKit
 
@@ -79,3 +80,5 @@ final class BackgroundListener {
         await ParcelWatch.check(api: DropAPI(baseURL: adresse))
     }
 }
+
+#endif

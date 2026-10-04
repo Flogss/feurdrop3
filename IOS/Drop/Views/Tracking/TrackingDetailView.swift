@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import DropKit
 
 /// Les numeros qui ont recu un meme libelle. On copie une ligne (numero, date,
@@ -64,7 +63,7 @@ struct TrackingDetailView: View {
         .scrollContentBackground(.hidden)
         .navigationTitle(label.milestone.label)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("Copier tout", systemImage: "doc.on.doc") {
                         copier(rows.map(\.shareLine).joined(separator: "\n"), message: Format.count(rows.count, "ligne copiée", "lignes copiées"))
@@ -94,7 +93,7 @@ struct TrackingDetailView: View {
     }
 
     private func copier(_ texte: String, message: String) {
-        UIPasteboard.general.string = texte
+        Platform.copy(texte)
         copie += 1
         app.toasts.show(message)
     }

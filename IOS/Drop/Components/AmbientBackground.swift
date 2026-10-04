@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import CoreMotion
+#endif
 
 /// Le fond vivant, derriere tout : une nappe de degrades violets qui ondule
 /// lentement (MeshGradient), des particules tres discretes qui montent en
@@ -70,7 +72,8 @@ struct AmbientBackground: View {
     }
 }
 
-/// L'inclinaison du telephone, lissee, pour une parallaxe de quelques points.
+/// L'inclinaison du telephone (ou, sur Mac, la position du pointeur), lissee,
+/// pour une parallaxe de quelques points.
 @Observable
 final class MotionParallax {
     /// un seul capteur pour toute l'app (Apple le recommande)
@@ -78,6 +81,39 @@ final class MotionParallax {
 
     var x: Double = 0
     var y: Double = 0
+
+    #if os(macOS)
+    @ObservationIgnored private var cibleX: Double = 0
+    @ObservationIgnored private var cibleY: Double = 0
+    @ObservationIgnored private var minuteur: Timer?
+
+    func start() {
+        guard minuteur == nil else { return }
+        // le fond glisse doucement vers la position du pointeur
+        minuteur = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let nx = self.x * 0.88 + self.cibleX * 0.12
+                let ny = self.y * 0.88 + self.cibleY * 0.12
+                if abs(nx - self.x) > 0.0005 || abs(ny - self.y) > 0.0005 {
+                    self.x = nx
+                    self.y = ny
+                }
+            }
+        }
+    }
+
+    /// position du pointeur dans la fenetre (0...1 sur chaque axe)
+    func suit(_ fraction: CGPoint) {
+        cibleX = max(-1, min(1, (fraction.x - 0.5) * 2))
+        cibleY = max(-1, min(1, (fraction.y - 0.5) * 2))
+    }
+
+    func stop() {
+        minuteur?.invalidate()
+        minuteur = nil
+    }
+    #else
     @ObservationIgnored private let manager = CMMotionManager()
 
     func start() {
@@ -94,4 +130,5 @@ final class MotionParallax {
     func stop() {
         manager.stopDeviceMotionUpdates()
     }
+    #endif
 }

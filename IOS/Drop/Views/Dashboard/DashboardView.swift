@@ -16,8 +16,12 @@ struct DashboardView: View {
     let booted: Bool
     @Environment(AppModel.self) private var app
     @State private var path: [Route] = []
+    /// largeur disponible : au-dela d'un seuil (Mac, grande fenetre), les
+    /// cartes se rangent sur deux colonnes
+    @State private var largeur: CGFloat = 0
 
     private var model: DashboardModel { app.dashboard }
+    private var large: Bool { largeur >= 860 }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -27,39 +31,41 @@ struct DashboardView: View {
                         .entrance(booted, index: 0)
 
                     if booted, let stats = model.stats {
-                        HeroCard(stats: stats)
-                            .entrance(booted, index: 1)
-                        if !stats.tour.isActive, let last = stats.tour.last {
-                            TourSummaryCard(summary: last)
-                                .transition(.asymmetric(
-                                    insertion: .scale(scale: 0.9, anchor: .top).combined(with: .opacity).combined(with: AnyTransition(.blurReplace)),
-                                    removal: .scale(scale: 0.92).combined(with: .opacity)
-                                ))
+                        if large {
+                            // grande fenetre : le sac et les chiffres a gauche, ce
+                            // qu'il faut poster et les expediteurs a droite
+                            HStack(alignment: .top, spacing: 16) {
+                                VStack(spacing: 14) { colonnePrincipale(stats) }
+                                    .frame(maxWidth: .infinity)
+                                VStack(spacing: 14) { colonneSecondaire(stats) }
+                                    .frame(maxWidth: .infinity)
+                            }
+                        } else {
+                            colonnePrincipale(stats)
+                            colonneSecondaire(stats)
                         }
-                        MetricsRow(stats: stats)
-                            .entrance(booted, index: 2)
-                        StockCard()
-                            .entrance(booted, index: 3)
-                        CarriersCard(carriers: stats.byCarrier)
-                            .entrance(booted, index: 4)
-                        SendersCard(senders: stats.bySender)
-                            .entrance(booted, index: 5)
                     } else {
                         DashboardSkeleton()
                     }
 
-                    ToolsCard()
-                        .entrance(booted, index: 6)
+                    // sur Mac, ces raccourcis sont dans la barre laterale
+                    if !Platform.isMac {
+                        ToolsCard()
+                            .entrance(booted, index: 6)
+                    }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, large ? 24 : 16)
                 .padding(.bottom, 24)
+                .frame(maxWidth: 1400)
+                .frame(maxWidth: .infinity)
                 .tabArrival(.dashboard)
                 .animation(Theme.spring, value: model.stats?.tour)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { largeur = $0 }
             .refreshable { await model.refresh() }
-            .toolbarVisibility(.hidden, for: .navigationBar)
-            .containerBackground(for: .navigation) { AmbientBackground() }
+            .barreDeNavigationMasquee()
+            .fondVivant()
             .navigationDestination(for: Route.self) { route in
                 destination(route)
             }
@@ -74,6 +80,31 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
+    private func colonnePrincipale(_ stats: Stats) -> some View {
+        HeroCard(stats: stats)
+            .entrance(booted, index: 1)
+        if !stats.tour.isActive, let last = stats.tour.last {
+            TourSummaryCard(summary: last)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.9, anchor: .top).combined(with: .opacity).combined(with: AnyTransition(.blurReplace)),
+                    removal: .scale(scale: 0.92).combined(with: .opacity)
+                ))
+        }
+        MetricsRow(stats: stats)
+            .entrance(booted, index: 2)
+        StockCard()
+            .entrance(booted, index: 3)
+    }
+
+    @ViewBuilder
+    private func colonneSecondaire(_ stats: Stats) -> some View {
+        CarriersCard(carriers: stats.byCarrier)
+            .entrance(booted, index: 4)
+        SendersCard(senders: stats.bySender)
+            .entrance(booted, index: 5)
+    }
+
+    @ViewBuilder
     private func destination(_ route: Route) -> some View {
         Group {
             switch route {
@@ -85,7 +116,7 @@ struct DashboardView: View {
             case .locker: LockerView()
             }
         }
-        .containerBackground(for: .navigation) { AmbientBackground() }
+        .fondVivant()
     }
 }
 
@@ -98,11 +129,22 @@ private struct DashboardHeader: View {
             GlassEffectContainer(spacing: 0) {
             HStack(spacing: 10) {
                 LivePill(online: app.isOnline)
+                Group {
+                #if os(macOS)
+                SettingsLink {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 44, height: 44)
+                }
+                #else
                 NavigationLink(value: Route.settings) {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.text)
                         .frame(width: 44, height: 44)
+                }
+                #endif
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)

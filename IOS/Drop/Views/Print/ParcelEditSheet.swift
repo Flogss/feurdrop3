@@ -40,7 +40,7 @@ struct ParcelEditSheet: View {
                 Section("Prix") {
                     HStack {
                         TextField("0,00", text: $prix)
-                            .keyboardType(.decimalPad)
+                            .clavier(.decimal)
                             .focused($focus, equals: .prix)
                             .font(.title3.weight(.semibold).monospacedDigit())
                         Text("€").foregroundStyle(Theme.text3)
@@ -67,7 +67,7 @@ struct ParcelEditSheet: View {
                             .tag(Optional(t.code))
                         }
                     }
-                    .pickerStyle(.navigationLink)
+                    .choixEnPage()
                 } footer: {
                     Text("Corriger un transporteur l'apprend au bot, comme /transporteur.")
                 }
@@ -80,7 +80,7 @@ struct ParcelEditSheet: View {
             }
             .scrollContentBackground(.hidden)
             .navigationTitle("Modifier le colis")
-            .navigationBarTitleDisplayMode(.inline)
+            .titreCompact()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Annuler", systemImage: "xmark") { dismiss() }

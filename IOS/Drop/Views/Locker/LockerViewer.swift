@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 import DropKit
 
 /// Devant le locker : on prend un colis, on lit le "#3" imprime sur son
@@ -60,29 +62,37 @@ struct LockerViewer: View {
         }
         .safeAreaInset(edge: .top) { haut }
         .safeAreaInset(edge: .bottom) { bas }
+        #if os(iOS)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
+        #endif
         .sensoryFeedback(.selection, trigger: index)
         .sensoryFeedback(.success, trigger: flash)
         .onAppear {
             index = min(startIndex, max(paires.count - 1, 0))
+            #if os(iOS)
             UIApplication.shared.isIdleTimerDisabled = true
             if let ecran = ecran {
                 luminositeAvant = ecran.brightness
                 ecran.brightness = 1
             }
+            #endif
         }
         .onDisappear {
+            #if os(iOS)
             UIApplication.shared.isIdleTimerDisabled = false
             ecran?.brightness = luminositeAvant
+            #endif
             Task { await app.locker.refresh() }
         }
         .onChange(of: index) { arme = false }
     }
 
+    #if os(iOS)
     private var ecran: UIScreen? {
         (UIApplication.shared.connectedScenes.first { $0 is UIWindowScene } as? UIWindowScene)?.screen
     }
+    #endif
 
     private var courant: LockerPair? {
         guard let index, paires.indices.contains(index) else { return paires.first }
@@ -234,7 +244,7 @@ private struct CodePage: View {
                     let longueur = tourner ? geo.size.height - 24 : geo.size.width - 24
                     let epaisseur = tourner ? geo.size.width - 24 : geo.size.height - 24
                     let w = min(longueur, epaisseur * ratio)
-                    Image(uiImage: image)
+                    Image(platformImage: image)
                         .resizable()
                         .interpolation(.none)
                         .frame(width: w, height: w / ratio)
