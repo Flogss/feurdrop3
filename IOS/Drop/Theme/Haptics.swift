@@ -31,6 +31,10 @@ enum Haptics {
 
     /// un chiffre qui monte : un leger coup sec a chaque palier
     static func rigid(_ intensite: CGFloat = 0.5) { rigidGenerator.impactOccurred(intensity: intensite) }
+
+    /// l'impact de la meteorite, au lancement
+    static func impact() { heavyGenerator.impactOccurred(intensity: 1) }
+    private static let heavyGenerator = UIImpactFeedbackGenerator(style: .heavy)
 }
 
 #else
@@ -49,5 +53,6 @@ enum Haptics {
     static func tick() { joue(.alignment) }
     static func soft() { joue(.alignment) }
     static func rigid(_ intensite: CGFloat = 0.5) { joue(.levelChange) }
+    static func impact() { joue(.levelChange) }
 }
 #endif

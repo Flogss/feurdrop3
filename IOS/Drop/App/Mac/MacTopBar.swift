@@ -11,6 +11,9 @@ struct MacTopBar: View {
     static let hauteur: CGFloat = 74
 
     @Binding var selection: MacPage
+    /// le logo est arrive du lancement (avant, c'est celui de la meteorite)
+    var marquePosee = true
+    var surCadreMarque: (CGRect) -> Void = { _ in }
     @Environment(AppModel.self) private var app
 
     var body: some View {
@@ -23,7 +26,7 @@ struct MacTopBar: View {
             MacTabBar(selection: $selection, badges: [.printing: app.dashboard.stats?.aImprimer ?? 0])
 
             HStack(spacing: 0) {
-                Marque()
+                Marque(posee: marquePosee, surCadre: surCadreMarque)
                     .padding(.leading, 86) // les trois boutons de la fenetre
                 Spacer()
                 GlassEffectContainer(spacing: 0) {
@@ -77,17 +80,16 @@ struct MacTopBar: View {
     }
 }
 
-/// La marque : le logo violet et "DROP.ctrl", comme sur le site.
+/// La marque : le logo violet et "DROP.ctrl", comme sur le site. Au
+/// lancement, le logo forme par la meteorite vient s'y poser.
 private struct Marque: View {
+    var posee = true
+    var surCadre: (CGRect) -> Void = { _ in }
     @State private var reflet = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "arrow.down.to.line.compact")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .background(Theme.accentGradient, in: .rect(cornerRadius: 10))
+            MarqueDrop(cote: 34)
                 .overlay {
                     // un reflet passe sur le logo, de temps en temps
                     LinearGradient(colors: [.clear, .white.opacity(0.5), .clear], startPoint: .leading, endPoint: .trailing)
@@ -96,8 +98,19 @@ private struct Marque: View {
                         .offset(x: reflet ? 34 : -34)
                         .clipShape(.rect(cornerRadius: 10))
                 }
-                .clipShape(.rect(cornerRadius: 10))
+                .clipShape(.rect(cornerRadius: 34 * ContourMarque.arrondi, style: .continuous))
                 .shadow(color: Theme.violet.opacity(0.75), radius: 10, y: 4)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { surCadre($0) }
+                // il se pose : un petit rebond et un eclat
+                .keyframeAnimator(initialValue: 1.0, trigger: posee) { vue, e in
+                    vue.scaleEffect(e).brightness((e - 1) * 1.5)
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        SpringKeyframe(1.16, duration: 0.14, spring: .snappy)
+                        SpringKeyframe(1.0, duration: 0.5, spring: .bouncy)
+                    }
+                }
+                .opacity(posee ? 1 : 0)
             Text("\(Text("DROP").font(.system(size: 17, weight: .heavy, design: .rounded)).foregroundStyle(.white))\(Text(".ctrl").font(.system(size: 15, weight: .medium, design: .monospaced)).foregroundStyle(Theme.text3))")
         }
         .onAppear {

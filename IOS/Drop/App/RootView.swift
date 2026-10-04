@@ -13,6 +13,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.scenePhase) private var scenePhase
     @State private var booted = false
+    @State private var lancement = true
     @State private var arrivee = TabArrivalState()
 
     var body: some View {
@@ -37,9 +38,11 @@ struct RootView: View {
                     StatsView()
                 }
             }
-            .opacity(booted ? 1 : 0)
+            // l'interface est prete sous la sequence de lancement ; l'onde la
+            // decouvre, et elle se pose (profondeur : un peu grande et floue,
+            // puis nette) pendant que ses cartes entrent
             .scaleEffect(booted ? 1 : 1.04)
-            .blur(radius: booted ? 0 : 12)
+            .blur(radius: booted ? 0 : 10)
         }
         .environment(\.tabArrival, arrivee)
         .sensoryFeedback(.selection, trigger: app.tab)
@@ -51,9 +54,8 @@ struct RootView: View {
                 .padding(.top, 4)
         }
         .overlay {
-            if !booted {
-                BootView()
-                    .transition(.asymmetric(insertion: .identity, removal: .opacity.combined(with: .scale(scale: 1.3))))
+            if lancement {
+                LaunchSequence(cible: nil, onRevelation: revele, onFin: { lancement = false })
             }
         }
         .task { await demarre() }
@@ -69,20 +71,18 @@ struct RootView: View {
 
     // MARK: Sequence de lancement
 
-    /// Le logo s'allume, les premiers chiffres arrivent (ou au plus tard apres
-    /// un court instant), puis le contenu entre en cascade.
+    /// Les premiers chiffres se chargent pendant la sequence de lancement
+    /// (la meteorite) ; c'est elle qui ouvre l'interface (`revele`).
     private func demarre() async {
-        async let chiffres: Void = app.dashboard.refresh()
-        try? await Task.sleep(for: .milliseconds(900))
-        let limite = Date.now.addingTimeInterval(1.6)
-        while !app.dashboard.loaded && Date.now < limite {
-            try? await Task.sleep(for: .milliseconds(80))
-        }
-        withAnimation(.spring(response: 0.7, dampingFraction: 0.86)) { booted = true }
-        Haptics.soft()
-        if app.tab == .dashboard { app.dashboard.playLaunchAnnouncement() }
-        await chiffres
+        await app.dashboard.refresh()
         if !app.dashboard.loaded { app.isColdStart = false }
+    }
+
+    /// L'onde de la meteorite ouvre l'interface : elle se pose, ses cartes
+    /// entrent en cascade et les compteurs montent.
+    private func revele() {
+        withAnimation(.spring(response: 0.9, dampingFraction: 0.86)) { booted = true }
+        if app.tab == .dashboard { app.dashboard.playLaunchAnnouncement() }
     }
 
     private struct TacheRafraichissement: Equatable {
@@ -192,41 +192,5 @@ private struct TabArrival: ViewModifier {
         guard jouee != etat.compte else { return }
         jouee = etat.compte
         visible = true
-    }
-}
-
-/// L'ecran de lancement : la marque se leve dans un halo violet.
-private struct BootView: View {
-    @State private var allume = false
-
-    var body: some View {
-        ZStack {
-            VStack(spacing: 18) {
-                ZStack {
-                    Circle()
-                        .fill(Theme.violet.opacity(0.55))
-                        .frame(width: 150, height: 150)
-                        .blur(radius: 50)
-                        .scaleEffect(allume ? 1.25 : 0.4)
-                    Image(systemName: "shippingbox.fill")
-                        .font(.system(size: 46, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 96, height: 96)
-                        .glassEffect(.regular.tint(Theme.violet.opacity(0.75)), in: .rect(cornerRadius: 28))
-                        .symbolEffect(.bounce.up, options: .nonRepeating, value: allume)
-                        .scaleEffect(allume ? 1 : 0.6)
-                        .shadow(color: Theme.violet.opacity(0.9), radius: allume ? 30 : 0)
-                }
-                Text("Drop")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.numberGradient)
-                    .opacity(allume ? 1 : 0)
-                    .offset(y: allume ? 0 : 12)
-                    .blur(radius: allume ? 0 : 6)
-            }
-        }
-        .onAppear {
-            withAnimation(.spring(response: 0.8, dampingFraction: 0.7)) { allume = true }
-        }
     }
 }

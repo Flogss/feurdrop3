@@ -67,6 +67,10 @@ struct MacRootView: View {
     @Environment(AppModel.self) private var app
     @State private var booted = false
     @State private var sens: CGFloat = 1
+    /// la meteorite du lancement, puis le logo qui rejoint la marque
+    @State private var lancement = true
+    @State private var cadreMarque: CGRect?
+    @State private var marquePosee = false
 
     var body: some View {
         @Bindable var app = app
@@ -79,13 +83,16 @@ struct MacRootView: View {
                     .transition(.pageMac(sens: sens))
             }
             .padding(.top, MacTopBar.hauteur)
-            .opacity(booted ? 1 : 0)
-            .blur(radius: booted ? 0 : 14)
-            .scaleEffect(booted ? 1 : 0.985)
+            // prete sous la sequence de lancement ; l'onde la decouvre et elle
+            // se pose (un peu grande et floue, puis nette)
+            .blur(radius: booted ? 0 : 12)
+            .scaleEffect(booted ? 1 : 1.03)
 
-            MacTopBar(selection: Binding(get: { app.pageMac }, set: { va(vers: $0) }))
-                .offset(y: booted ? 0 : -24)
-                .opacity(booted ? 1 : 0)
+            MacTopBar(
+                selection: Binding(get: { app.pageMac }, set: { va(vers: $0) }),
+                marquePosee: marquePosee,
+                surCadreMarque: { cadreMarque = $0 }
+            )
         }
         .ignoresSafeArea(.container, edges: .top)
         .controlSize(.large)
@@ -95,6 +102,19 @@ struct MacRootView: View {
         .overlay(alignment: .top) {
             ToastOverlay(center: app.toasts)
                 .padding(.top, MacTopBar.hauteur + 6)
+        }
+        .overlay {
+            if lancement {
+                LaunchSequence(
+                    cible: cadreMarque,
+                    onRevelation: revele,
+                    onLogoPose: { marquePosee = true },
+                    onFin: {
+                        marquePosee = true
+                        lancement = false
+                    }
+                )
+            }
         }
         // le fond suit le pointeur, comme il suit l'inclinaison du telephone
         .onContinuousHover(coordinateSpace: .local) { phase in
@@ -165,19 +185,19 @@ struct MacRootView: View {
             .frame(maxWidth: .infinity)
     }
 
-    /// Le lancement : la barre descend, les premiers chiffres arrivent, puis la
-    /// page se precise et les compteurs partent de zero, comme sur l'iPhone.
+    /// Les premiers chiffres se chargent pendant la sequence de lancement ;
+    /// c'est son onde qui ouvre l'interface (`revele`).
     private func demarre() async {
         MotionParallax.shared.start()
-        async let chiffres: Void = app.dashboard.refresh()
-        try? await Task.sleep(for: .milliseconds(450))
-        let limite = Date.now.addingTimeInterval(1.6)
-        while !app.dashboard.loaded && Date.now < limite {
-            try? await Task.sleep(for: .milliseconds(80))
-        }
-        withAnimation(.spring(response: 0.8, dampingFraction: 0.84)) { booted = true }
-        await chiffres
+        await app.dashboard.refresh()
         if !app.dashboard.loaded { app.isColdStart = false }
+    }
+
+    /// L'onde de la meteorite ouvre la fenetre : la page se pose, les cartes
+    /// entrent en cascade, les compteurs partent de zero.
+    private func revele() {
+        withAnimation(.spring(response: 0.9, dampingFraction: 0.86)) { booted = true }
+        if app.pageMac == .dashboard { app.dashboard.playLaunchAnnouncement() }
     }
 
     /// La page affichee se relit toutes les 5 secondes tant que la fenetre est
