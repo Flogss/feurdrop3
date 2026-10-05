@@ -302,6 +302,10 @@ function startBot() {
     const attachment = colisAttachment(msg);
     if (!attachment) return;
 
+    // mode fusion (/fusion) : le fichier est mis de cote pour le PDF fusionne,
+    // il ne compte pas et n'est pas republie
+    if (ajouteAFusion(bot, msg, attachment)) return;
+
     const forcedType = resolveForcedType(msg);
     if (forcedType === null) return; // groupe suivi mais topic non concerne
 
@@ -336,7 +340,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF",
         {},
         30000
       );
@@ -402,6 +406,9 @@ function startBot() {
   bot.onText(/^\/del(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, true)));
   bot.onText(/^\/clear(@\w+)?$/i, command((msg) => handleRemoveColis(bot, msg, false)));
 
+  bot.onText(/^\/fusion(@\w+)?$/i, command((msg) => handleFusion(bot, msg)));
+  bot.onText(/^\/stopfusion(@\w+)?$/i, command((msg) => handleStopFusion(bot, msg)));
+
   bot.onText(/^\/regles(@\w+)?$/i, command((msg) => handleRulesCommand(bot, msg)));
   bot.onText(
     /^\/regles_reset(@\w+)?$/i,
@@ -448,6 +455,8 @@ async function registerCommands(bot) {
     { command: "note", description: "Annoter le colis : il sort en premier (en reponse)" },
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
+    { command: "fusion", description: "Mode fusion : les fichiers envoyes ne comptent pas" },
+    { command: "stopfusion", description: "Fin du mode fusion : recevoir le PDF fusionne" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
     { command: "special", description: "Dans Special (en reponse). /special image 3, /special pdf 3, /special seul" },
     { command: "normal", description: "Remettre le colis dans Normaux (en reponse)" },
@@ -1889,6 +1898,162 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
   } catch (err) {
     bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {});
   }
+}
+
+// --- Mode fusion ---------------------------------------------------------------
+// /fusion : les fichiers envoyes ensuite dans ce chat (ou ce topic) ne sont pas
+// des colis -- rien n'est compte, rien n'est republie -- ils sont mis de cote.
+// /stopfusion : le bot les fusionne en un seul PDF, au format etiquette comme
+// /imprime, et le renvoie. L'etat est garde en base : un redemarrage du bot en
+// pleine fusion ne perd aucun fichier.
+
+const minuteursFusion = new Map(); // cle -> minuteur de mise a jour du message
+
+function cleFusion(msg) {
+  return `fusion:${batchKey(msg.chat.id, msg.message_thread_id)}`;
+}
+
+function lisFusion(msg) {
+  const brut = getSetting(cleFusion(msg), "");
+  if (!brut) return null;
+  try {
+    return JSON.parse(brut);
+  } catch {
+    return null;
+  }
+}
+
+function ecrisFusion(msg, etat) {
+  setSetting(cleFusion(msg), etat ? JSON.stringify(etat) : "");
+}
+
+// les deux seules sources legitimes, comme pour les colis : le prive et le
+// groupe configure
+function fusionPermise(msg) {
+  return msg.chat.type === "private" || msg.chat.id === AUTO_GROUP_CHAT_ID;
+}
+
+const fichiers = (n) => `${n} fichier${n > 1 ? "s" : ""}`;
+
+function texteFusion(n) {
+  return (
+    `🔀 Mode fusion\n` +
+    `${n === 0 ? "Envoie tes colis" : `${fichiers(n)} recu${n > 1 ? "s" : ""}`} : ils ne comptent pas.\n` +
+    `/stopfusion pour recevoir le PDF fusionne.`
+  );
+}
+
+async function handleFusion(bot, msg) {
+  if (!fusionPermise(msg)) return;
+  const deja = lisFusion(msg);
+  if (deja) {
+    replyEphemeral(bot, msg, `Deja en mode fusion (${fichiers(deja.fichiers.length)}). /stopfusion pour recevoir le PDF.`, {}, 8000);
+    return;
+  }
+  // l'etat d'abord : un fichier envoye juste apres la commande est deja pris
+  ecrisFusion(msg, { debut: Date.now(), fichiers: [], messageId: null });
+  const envoye = await bot.sendMessage(msg.chat.id, texteFusion(0), threadOpts(msg)).catch(() => null);
+  const etat = lisFusion(msg);
+  if (etat && envoye) {
+    etat.messageId = envoye.message_id;
+    ecrisFusion(msg, etat);
+    if (etat.fichiers.length > 0) majMessageFusion(bot, msg);
+  } else if (envoye) {
+    // /stopfusion est arrive entre-temps
+    bot.deleteMessage(msg.chat.id, envoye.message_id).catch(() => {});
+  }
+}
+
+// Vrai si le fichier a ete pris par une fusion en cours.
+function ajouteAFusion(bot, msg, attachment) {
+  if (!fusionPermise(msg)) return false;
+  const etat = lisFusion(msg);
+  if (!etat) return false;
+  etat.fichiers.push({ fileId: attachment.fileId, kind: attachment.kind, nom: attachment.fileName, messageId: msg.message_id });
+  ecrisFusion(msg, etat);
+  // ✍ et non 👍 : on voit tout de suite qu'il n'est pas compte
+  queueReaction(bot, msg.chat.id, msg.message_id, "✍", "👌");
+  majMessageFusion(bot, msg);
+  return true;
+}
+
+// Le compteur du message de fusion, mis a jour une fois la rafale passee (un
+// album arrive en plusieurs messages : une seule edition pour tous).
+function majMessageFusion(bot, msg) {
+  const cle = cleFusion(msg);
+  clearTimeout(minuteursFusion.get(cle));
+  minuteursFusion.set(
+    cle,
+    setTimeout(() => {
+      minuteursFusion.delete(cle);
+      const etat = lisFusion(msg);
+      if (!etat?.messageId) return;
+      bot
+        .editMessageText(texteFusion(etat.fichiers.length), { chat_id: msg.chat.id, message_id: etat.messageId })
+        .catch(() => {});
+    }, 800)
+  );
+}
+
+async function handleStopFusion(bot, msg) {
+  if (!fusionPermise(msg)) return;
+  const etat = lisFusion(msg);
+  if (!etat) {
+    replyEphemeral(bot, msg, "Pas de fusion en cours. /fusion pour en commencer une.", {}, 8000);
+    return;
+  }
+  // fin du mode : les fichiers suivants redeviennent des colis
+  ecrisFusion(msg, null);
+  clearTimeout(minuteursFusion.get(cleFusion(msg)));
+  minuteursFusion.delete(cleFusion(msg));
+  if (etat.messageId) bot.deleteMessage(msg.chat.id, etat.messageId).catch(() => {});
+
+  // dans l'ordre d'envoi
+  const recus = [...etat.fichiers].sort((a, b) => a.messageId - b.messageId);
+  if (recus.length === 0) {
+    replyEphemeral(bot, msg, "Mode fusion arrete : aucun fichier recu.", {}, 8000);
+    return;
+  }
+
+  const progression = await startProgress(bot, msg.chat.id, recus.length, {
+    titre: "🔀 Fusion des colis",
+    unite: "recuperes",
+    threadId: msg.message_thread_id || null,
+  });
+  const lignes = recus.map((f, i) => ({
+    id: i + 1,
+    file_id: f.fileId,
+    file_kind: f.kind,
+    file_name: f.nom || `fichier ${i + 1}`,
+    type: "fusion",
+  }));
+  const { labels, missing } = await downloadLabels(bot, lignes, () => progression.step());
+  const { pdf, pages, failed } = await mergeLabels(labels);
+  progression.remove();
+
+  if (!pdf) {
+    bot
+      .sendMessage(msg.chat.id, `Fusion impossible : aucun des ${fichiers(recus.length)} n'a pu etre lu.`, threadOpts(msg))
+      .catch(() => {});
+    return;
+  }
+
+  const fusionnes = labels.length - failed.length;
+  const caption =
+    `🔀 ${fichiers(fusionnes)} fusionne${fusionnes > 1 ? "s" : ""} · ${pages} page${pages > 1 ? "s" : ""}\n` +
+    `Ils ne comptent pas.` +
+    (missing.length > 0 ? `\n⚠️ ${fichiers(missing.length)} introuvable${missing.length > 1 ? "s" : ""} sur Telegram.` : "") +
+    (failed.length > 0 ? `\n⚠️ ${fichiers(failed.length)} illisible${failed.length > 1 ? "s" : ""}.` : "");
+  // l'heure de Paris dans le nom (le serveur est en UTC) : fusion-2026-10-05-16h31.pdf
+  const morceaux = Object.fromEntries(
+    new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      .formatToParts(new Date())
+      .map((m) => [m.type, m.value])
+  );
+  const jour = `${morceaux.year}-${morceaux.month}-${morceaux.day}-${morceaux.hour}h${morceaux.minute}`;
+  await bot
+    .sendDocument(msg.chat.id, pdf, { caption, ...threadOpts(msg) }, { filename: `fusion-${jour}.pdf`, contentType: "application/pdf" })
+    .catch((err) => bot.sendMessage(msg.chat.id, `Envoi impossible : ${err.message}`, threadOpts(msg)).catch(() => {}));
 }
 
 // Recupere les fichiers aupres de Telegram. Un fichier introuvable (trop
