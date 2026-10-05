@@ -269,6 +269,17 @@ async function agir(bouton, action, { succes, eclats = false } = {}) {
   }
 }
 
+// Un drop groupe ne solde que les colis deja imprimes : la reponse dit combien
+// sont restes en attente faute d'impression.
+function messageDrop(r, suffixe = "") {
+  const reste = r.restants ? pluriel(r.restants, "colis pas encore imprimé reste", "colis pas encore imprimés restent") : "";
+  if (!r.count) {
+    toast(r.restants ? `Rien de dropé : ${reste}` : "Aucun colis à dropper", "info");
+    return null;
+  }
+  return `${pluriel(r.count, "colis dropé", "colis dropés")}${suffixe}${reste ? ` · ${reste}` : ""}`;
+}
+
 // --- Feuille de confirmation ---------------------------------------------------
 // Remplace confirm(), qui bloque tout et jure avec le reste sur iPhone.
 // Renvoie une promesse : true si on confirme. Au telephone, on peut aussi la
@@ -1618,16 +1629,17 @@ $("tour-btn").addEventListener("click", async (e) => {
 
 // drop = true : le sac est drope. false : on referme sans rien dropper.
 async function endTour(drop, bouton) {
-  const { count, value } = bagSummary;
   await agir(
     bouton,
     async () => {
-      await postJSON(drop ? "/api/tour/finish" : "/api/tour/end");
+      const r = await postJSON(drop ? "/api/tour/finish" : "/api/tour/end");
       renderCache.clear();
       await refreshAll();
+      return r;
     },
     {
-      succes: drop ? `${pluriel(count, "colis dropé", "colis dropés")} · ${euro(value)}` : "Tournée annulée",
+      // seuls les colis imprimes partent : le reste attend la prochaine fois
+      succes: drop ? (r) => messageDrop(r, ` · ${euro(r.value)}`) : "Tournée annulée",
       eclats: drop ? { nombre: 22, force: 1.4 } : false,
     }
   );
@@ -1835,6 +1847,128 @@ function renderDonut(bySender, animate, riche) {
     .sort((a, b) => b.value - a.value);
   renderDonutInto($("donut-sender"), items, { animate, label: "total", format: euroCompact, riche });
 }
+
+// --- Historique ------------------------------------------------------------------
+// Tout en bas du dashboard : ce qui est arrive aux colis (recus, dropes,
+// imprimes, retires, modifies), du plus recent au plus ancien, groupe par jour.
+// Rafraichi avec le reste du dashboard ; une nouvelle ligne arrive animee.
+const journalEtat = { filtre: "", entrees: [], suite: false, dernierId: 0, charge: false };
+
+const ICONES_JOURNAL = {
+  recu: "i-logo",
+  ajout: "i-plus",
+  drop: "i-send",
+  impression: "i-printer",
+  retrait: "i-trash",
+  modif: "i-edit",
+  note: "i-note",
+  stock: "i-package",
+  tournee: "i-truck",
+  paiement: "i-check",
+  expediteur: "i-star",
+  reglage: "i-settings",
+  fusion: "i-copy",
+};
+const SOURCES_JOURNAL = { telegram: "Telegram", site: "Site", app: "App", imprimante: "Impression auto" };
+
+const dateServeur = (s) => new Date(`${String(s).replace(" ", "T")}Z`);
+const jourCle = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+function libelleJour(d) {
+  const aujourdhuiD = new Date();
+  const hier = new Date(aujourdhuiD);
+  hier.setDate(hier.getDate() - 1);
+  if (jourCle(d) === jourCle(aujourdhuiD)) return "Aujourd'hui";
+  if (jourCle(d) === jourCle(hier)) return "Hier";
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function ligneJournal(e, nouvelle) {
+  const d = dateServeur(e.at);
+  const annule = e.kind === "drop" && /^Drop annulé/.test(e.texte);
+  const icone = annule ? "i-refresh" : ICONES_JOURNAL[e.kind] || "i-info";
+  const valeur = e.valeur != null && e.valeur !== 0 ? `<span class="journal-valeur">${euro(e.valeur)}</span>` : "";
+  const heure = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return `
+    <div class="journal-ligne k-${escapeAttr(e.kind)}${annule ? " annule" : ""}${nouvelle ? " is-new" : ""}" data-id="${e.id}">
+      <span class="journal-icone"><svg class="icon"><use href="#${icone}"/></svg></span>
+      <div class="journal-texte">
+        <span class="journal-titre">${escapeHtml(e.texte)}</span>
+        ${e.detail ? `<span class="journal-detail">${escapeHtml(e.detail)}</span>` : ""}
+      </div>
+      <div class="journal-droite">
+        ${valeur}
+        <span class="journal-meta">${heure}${e.source ? ` · ${escapeHtml(SOURCES_JOURNAL[e.source] || e.source)}` : ""}</span>
+      </div>
+    </div>`;
+}
+
+function rendJournal(nouveaux = new Set()) {
+  const liste = $("journal-liste");
+  if (!liste) return;
+  if (journalEtat.entrees.length === 0) {
+    liste.innerHTML = `<div class="journal-vide">${journalEtat.charge ? "Rien pour l'instant." : "Chargement…"}</div>`;
+  } else {
+    let jour = null;
+    let html = "";
+    for (const e of journalEtat.entrees) {
+      const d = dateServeur(e.at);
+      if (jourCle(d) !== jour) {
+        jour = jourCle(d);
+        html += `<div class="journal-jour">${escapeHtml(libelleJour(d))}</div>`;
+      }
+      html += ligneJournal(e, nouveaux.has(e.id));
+    }
+    liste.innerHTML = html;
+  }
+  $("journal-plus").hidden = !journalEtat.suite;
+}
+
+// La premiere page, ou ce qui est arrive depuis : rien n'est reecrit tant que
+// le journal n'a pas bouge.
+async function loadJournal() {
+  const filtre = journalEtat.filtre;
+  const r = await fetchJSON(`/api/journal?limite=30${filtre ? `&filtre=${filtre}` : ""}`);
+  if (filtre !== journalEtat.filtre) return; // un autre filtre a ete choisi entre-temps
+  const premier = r.entrees[0]?.id || 0;
+  if (journalEtat.charge && premier === journalEtat.dernierId && journalEtat.entrees.length >= r.entrees.length) return;
+  const connus = new Set(journalEtat.entrees.map((e) => e.id));
+  const nouveaux = journalEtat.charge ? new Set(r.entrees.filter((e) => !connus.has(e.id)).map((e) => e.id)) : new Set();
+  // les lignes deja chargees au-dela de la premiere page restent
+  const suiteChargee = journalEtat.entrees.filter((e) => !r.entrees.some((n) => n.id === e.id) && e.id < (r.entrees.at(-1)?.id || 0));
+  journalEtat.entrees = [...r.entrees, ...suiteChargee];
+  journalEtat.suite = suiteChargee.length ? journalEtat.suite : r.suite;
+  journalEtat.dernierId = premier;
+  journalEtat.charge = true;
+  rendJournal(nouveaux);
+}
+
+$("journal-plus").addEventListener("click", async (e) => {
+  const bouton = e.currentTarget;
+  const avant = journalEtat.entrees.at(-1)?.id;
+  if (!avant) return;
+  await agir(bouton, async () => {
+    const filtre = journalEtat.filtre;
+    const r = await fetchJSON(`/api/journal?limite=40&avant=${avant}${filtre ? `&filtre=${filtre}` : ""}`);
+    journalEtat.entrees = [...journalEtat.entrees, ...r.entrees];
+    journalEtat.suite = r.suite;
+    rendJournal(new Set(r.entrees.map((x) => x.id)));
+  });
+});
+
+document.querySelector(".journal-filtres").addEventListener("click", (e) => {
+  const bouton = e.target.closest(".journal-filtre");
+  if (!bouton || bouton.classList.contains("active")) return;
+  document.querySelectorAll(".journal-filtre").forEach((b) => {
+    const actif = b === bouton;
+    b.classList.toggle("active", actif);
+    b.setAttribute("aria-selected", String(actif));
+  });
+  haptique();
+  Object.assign(journalEtat, { filtre: bouton.dataset.filtre, entrees: [], suite: false, dernierId: 0, charge: false });
+  rendJournal();
+  loadJournal().catch(() => {});
+});
 
 // --- Reglages : dettes, prix, fusions -------------------------------------------
 
@@ -2723,7 +2857,7 @@ window.addEventListener("focus", () => markSeen(true));
 // affiche. Les rafraichissements de fond n'animent jamais les graphiques : la
 // revelation des Stats ne se joue qu'en arrivant sur l'onglet.
 const CHARGEMENTS_PAR_VUE = {
-  dashboard: () => [loadStats(false), loadStock(), loadSpecialCount()],
+  dashboard: () => [loadStats(false), loadStock(), loadSpecialCount(), loadJournal()],
   // les chiffres d'abord : ils disent si les revenus ont pu changer
   stats: () => [loadStats(false).then(() => loadRevenueStats(false))],
   colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates()],
@@ -2800,7 +2934,7 @@ document.addEventListener("click", async (e) => {
         await refreshAll();
         return r;
       },
-      { succes: (r) => `${pluriel(r.count, "colis dropé", "colis dropés")} pour ${d.dropSender}`, eclats: true }
+      { succes: (r) => messageDrop(r, ` pour ${d.dropSender}`), eclats: true }
     );
   }
 
@@ -2813,7 +2947,7 @@ document.addEventListener("click", async (e) => {
         await refreshAll();
         return r;
       },
-      { succes: (r) => `${pluriel(r.count, "colis dropé", "colis dropés")} · ${nom}`, eclats: true }
+      { succes: (r) => messageDrop(r, ` · ${nom}`), eclats: true }
     );
   }
 
@@ -2860,7 +2994,7 @@ document.addEventListener("click", async (e) => {
     // les LIT partent sur une autre imprimante, souvent un autre jour
     const ok = await confirmer({
       titre: "Tout dropper sauf les LIT ?",
-      message: "Tous les colis en attente seront marqués dropés, sauf les LIT.",
+      message: "Les colis déjà imprimés seront marqués dropés, sauf les LIT. Ceux pas encore imprimés restent en attente.",
       action: "Dropper",
     });
     if (!ok) return;
@@ -2872,13 +3006,7 @@ document.addEventListener("click", async (e) => {
         return r;
       },
       {
-        succes: (r) => {
-          if (r.count === 0) {
-            toast("Aucun colis à dropper en dehors des LIT.", "info");
-            return null;
-          }
-          return pluriel(r.count, "colis dropé", "colis dropés");
-        },
+        succes: (r) => messageDrop(r),
         eclats: { nombre: 16 },
       }
     );
@@ -2888,7 +3016,7 @@ document.addEventListener("click", async (e) => {
     const { count, value } = bagSummary;
     const ok = await confirmer({
       titre: "Tout marquer comme dropé ?",
-      message: `${pluriel(count, "colis en attente", "colis en attente")} · ${euro(value)}.`,
+      message: `${pluriel(count, "colis en attente", "colis en attente")} · ${euro(value)}. Seuls ceux déjà imprimés seront dropés.`,
       action: "Tout dropper",
     });
     if (!ok) return;
@@ -2899,7 +3027,7 @@ document.addEventListener("click", async (e) => {
         await refreshAll();
         return r;
       },
-      { succes: (r) => pluriel(r.count, "colis dropé", "colis dropés"), eclats: { nombre: 20, force: 1.3 } }
+      { succes: (r) => messageDrop(r), eclats: { nombre: 20, force: 1.3 } }
     );
   }
 });

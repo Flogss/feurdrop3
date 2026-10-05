@@ -131,9 +131,13 @@ public enum StockKind: String, Codable, Sendable, CaseIterable, Identifiable {
     public var label: String { self == .normal ? "Normal" : "BJ" }
 }
 
-/// Reponse des drops groupes (par expediteur, transporteur, tout...).
+/// Reponse des drops groupes (par expediteur, transporteur, tout, fin de
+/// tournee). Un drop groupe ne solde que les colis deja imprimes : `restants`
+/// dit combien sont restes en attente faute d'impression.
 public struct DropResult: Codable, Sendable, Equatable {
     public var count: Int
+    public var value: Double?
+    public var restants: Int?
     public var stocks: Stock?
 }
 

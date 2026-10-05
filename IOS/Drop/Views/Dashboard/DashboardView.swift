@@ -53,6 +53,10 @@ struct DashboardView: View {
                         ToolsCard()
                             .entrance(booted, index: 6)
                     }
+
+                    // tout en bas : l'historique de ce qui arrive aux colis
+                    HistoriqueCard()
+                        .entrance(booted, index: 7)
                 }
                 .padding(.horizontal, large ? 24 : 16)
                 .padding(.bottom, 24)

@@ -63,6 +63,7 @@ final class AppModel {
     @ObservationIgnored lazy var settings = SettingsModel(app: self)
     @ObservationIgnored lazy var locker = LockerModel(app: self)
     @ObservationIgnored lazy var tracking = TrackingModel(app: self)
+    @ObservationIgnored lazy var journal = JournalModel(app: self)
 
     init() {
         let enregistre = UserDefaults.standard.string(forKey: "drop.serveur").flatMap(URL.init(string:))

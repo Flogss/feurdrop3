@@ -44,9 +44,9 @@ public struct DropAPI: Sendable {
         _ = try await client.raw(.post, "/api/tour/start")
     }
 
-    /// retour de tournee : ce qu'on avait emporte est drope
-    public func finishTour() async throws {
-        _ = try await client.raw(.post, "/api/tour/finish")
+    /// retour de tournee : ce qu'on avait emporte (et imprime) est drope
+    public func finishTour() async throws -> DropResult {
+        try await client.send(.post, "/api/tour/finish")
     }
 
     /// annulation : on referme sans rien dropper
@@ -75,6 +75,20 @@ public struct DropAPI: Sendable {
 
     public func dropCarrier(_ code: String) async throws -> DropResult {
         try await client.send(.post, "/api/colis/drop-carrier/\(segment(code))")
+    }
+
+    /// annule un drop : le colis repasse en attente
+    public func undrop(_ id: Int) async throws {
+        _ = try await client.raw(.post, "/api/colis/\(id)/undrop")
+    }
+
+    // MARK: - Historique
+
+    public func journal(avant: Int? = nil, filtre: FiltreJournal = .tout, limite: Int = 30) async throws -> PageJournal {
+        var query = [URLQueryItem(name: "limite", value: String(limite))]
+        if let avant { query.append(URLQueryItem(name: "avant", value: String(avant))) }
+        if filtre != .tout { query.append(URLQueryItem(name: "filtre", value: filtre.rawValue)) }
+        return try await client.send(.get, "/api/journal", query: query)
     }
 
     public func quickAdd(sender: String) async throws {

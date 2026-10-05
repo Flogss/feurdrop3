@@ -314,6 +314,22 @@
             <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
           </button>
         </nav>
+
+        <!-- L'historique : tout ce qui arrive aux colis, du plus recent au plus ancien. -->
+        <article class="card journal-card" id="journal">
+          <header class="card-head">
+            <h2>Historique</h2>
+            <div class="journal-filtres" role="tablist" aria-label="Filtrer l'historique">
+              <button class="journal-filtre active" data-filtre="" type="button" role="tab" aria-selected="true">Tout</button>
+              <button class="journal-filtre" data-filtre="recu" type="button" role="tab" aria-selected="false">Reçus</button>
+              <button class="journal-filtre" data-filtre="drop" type="button" role="tab" aria-selected="false">Drops</button>
+              <button class="journal-filtre" data-filtre="impression" type="button" role="tab" aria-selected="false">Impressions</button>
+              <button class="journal-filtre" data-filtre="autres" type="button" role="tab" aria-selected="false">Autres</button>
+            </div>
+          </header>
+          <div class="journal-liste" id="journal-liste" aria-live="polite"></div>
+          <button class="btn btn-sm btn-ghost journal-plus" id="journal-plus" type="button" hidden>Voir plus</button>
+        </article>
       </div>
     </section>
 

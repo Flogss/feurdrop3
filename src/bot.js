@@ -42,6 +42,9 @@ const {
   setStatsMessageId,
   getSetting,
   setSetting,
+  journalise,
+  undropColis,
+  restoreStock,
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
@@ -628,7 +631,7 @@ function describeShape(shape) {
 // mot-cle servent aux fichiers suivants. "Non reconnu" (null) efface le
 // transporteur sans rien apprendre.
 function corrigeTransporteur(id, code) {
-  const colis = setColisCarrier(id, code || null);
+  const colis = setColisCarrier(id, code || null, { journal: true });
   if (!colis) return null;
   if (!code) return { colis, appris: "" };
   const { learned, reclassified } = learnFrom([colis], code);
@@ -645,7 +648,7 @@ function applyCarrier(target, code) {
       if (!updated) return "Colis introuvable ou deja drope.";
       return `Colis #${updated.id} (${updated.sender_name}) passe en BJ (${updated.price.toFixed(2)} EUR).`;
     }
-    const updated = setColisCarrier(target.id, code);
+    const updated = setColisCarrier(target.id, code, { journal: true });
     if (!updated) return "Colis introuvable.";
     const { learned, reclassified } = learnFrom([updated], code);
     return (
@@ -743,7 +746,9 @@ function retireCodeSpecial(bot, msg, paire, alsoDeleteFile) {
 //   imprimee   : Drop -- une liasse imprimee ne part pas forcement d'un bloc,
 //                on doit pouvoir solder les colis un par un a mesure qu'on
 //                les poste
-//   dropee     : une simple mention, plus rien a faire
+//   dropee     : "Drope" -- un nouvel appui annule le drop (colis remis en
+//                attente, de retour dans la file d'impression s'il n'avait pas
+//                ete imprime)
 function fileButtons(colisId, { printed = false, dropped = false, note = null, special = null } = {}) {
   const lignes = [];
   // un PDF de special porte le numero de sa paire : c'est ce qui le relie a
@@ -762,7 +767,7 @@ function fileButtons(colisId, { printed = false, dropped = false, note = null, s
     lignes.push([{ text: `📝 ${tronque(note, 40)}`, callback_data: `c:m:${colisId}` }]);
   }
   if (dropped) {
-    lignes.push([{ text: "✅ Drope", callback_data: `c:k:${colisId}` }]);
+    lignes.push([{ text: "✅ Drope · annuler", callback_data: `c:k:${colisId}` }]);
   } else if (printed) {
     lignes.push([{ text: "📮 Drop", callback_data: `c:x:${colisId}` }]);
   } else {
@@ -877,7 +882,9 @@ function refreshFileButtons(bot, colis, { priorite = "normale" } = {}) {
 // remet "Drope" sous les fichiers concernes. En voie basse : un "tout drope"
 // sur cinquante colis ne doit pas retarder un fichier qui arrive au meme
 // moment.
-evenements.on("dropes", (ids) => {
+// dropes, ou remis en attente (drop annule depuis le site ou l'app) : les
+// boutons sous les fichiers suivent l'etat en base
+const majBoutonsDe = (ids) => {
   if (!botInstance) return;
   for (const id of ids) {
     const colis = getColisById(id);
@@ -885,7 +892,9 @@ evenements.on("dropes", (ids) => {
     if (!colis || colis.chat_id !== AUTO_GROUP_CHAT_ID || !colis.message_id) continue;
     refreshFileButtons(botInstance, colis, { priorite: "basse" });
   }
-});
+};
+evenements.on("dropes", majBoutonsDe);
+evenements.on("remis", majBoutonsDe);
 
 // --- File des envois en tete-a-tete ------------------------------------------
 // Dix PDF laches d'un coup arrivaient en dix aiguillages simultanes : Telegram
@@ -1295,7 +1304,24 @@ async function handleFileButton(bot, query) {
     return repondre(colis.status === "dropped" ? "Deja drope." : "Imprimee. Appuie sur Drop une fois postee.");
   }
 
-  if (action === "k") return repondre("Ce colis est deja drope.");
+  // re-appui sur "Drope" : le drop est annule, le colis repart en attente (et
+  // sa pochette revient au stock). Un colis deja paye reste drope.
+  if (action === "k") {
+    const annule = undropColis(id);
+    if (annule?.paye) return repondre("Ce colis est deja paye : il reste drope.", true);
+    if (annule) {
+      restoreStock(annule);
+      refreshGroupStats();
+    }
+    const apres = getColisById(id);
+    await poseBoutons(apres);
+    if (!annule) return repondre("Ce colis n'est plus drope.");
+    return repondre(
+      apres.printed_at
+        ? `Drop annule : colis #${id} remis en attente.`
+        : `Drop annule : colis #${id} remis en attente, de retour dans la file d'impression.`
+    );
+  }
 
   if (action === "s") {
     const paire = paireDuColis(id);
@@ -2039,6 +2065,10 @@ async function handleStopFusion(bot, msg) {
   }
 
   const fusionnes = labels.length - failed.length;
+  journalise("fusion", `${fichiers(fusionnes)} fusionné${fusionnes > 1 ? "s" : ""} (/fusion)`, {
+    detail: "hors suivi : ne comptent pas",
+    nombre: fusionnes,
+  });
   const caption =
     `🔀 ${fichiers(fusionnes)} fusionne${fusionnes > 1 ? "s" : ""} · ${pages} page${pages > 1 ? "s" : ""}\n` +
     `Ils ne comptent pas.` +

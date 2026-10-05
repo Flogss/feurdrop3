@@ -49,6 +49,11 @@ const {
   countLitPrintable,
   markPrinted,
   getPrintToken,
+  journalise,
+  avecSource,
+  getJournal,
+  undropColis,
+  restoreStock,
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart, notifyTourEnd, euro } = require("../push");
 const { refreshGroupStats, buildLabelsPdf } = require("../bot");
@@ -61,6 +66,21 @@ const { refreshGroupStats, buildLabelsPdf } = require("../bot");
 const SMIC_HOURLY = Number(process.env.SMIC_HOURLY || 9.4);
 
 const router = express.Router();
+
+// D'ou vient chaque action, pour le journal : l'agent d'impression, l'app
+// (iPhone, Mac : leurs requetes se presentent comme CFNetwork), ou le site.
+function sourceDe(req) {
+  if (req.path.startsWith("/print/")) return "imprimante";
+  return /CFNetwork|Darwin|DropKit/i.test(req.get("user-agent") || "") ? "app" : "site";
+}
+router.use((req, res, next) => avecSource(sourceDe(req), next));
+
+// --- Journal ------------------------------------------------------------------
+// L'historique affiche en bas du dashboard, du plus recent au plus ancien.
+// ?avant=<id> pour la suite, ?filtre=recu|drop|impression|autres.
+router.get("/journal", (req, res) => {
+  res.json(getJournal({ avant: req.query.avant, limite: req.query.limite, filtre: req.query.filtre }));
+});
 
 // Toute modification de colis ou de tarifs faite depuis le site change le
 // nombre / la valeur en attente : on met a jour l'image postee dans le groupe
@@ -149,6 +169,14 @@ router.get("/stats", (req, res) => {
 // --- Tournee ----------------------------------------------------------------
 router.post("/tour/start", (req, res) => {
   const startedAt = startTour();
+  const sac = db
+    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND created_at <= ?")
+    .get(startedAt);
+  journalise("tournee", "Départ en tournée", {
+    detail: `${sac.count} colis dans le sac`,
+    valeur: sac.value,
+    nombre: sac.count,
+  });
   notifyTourStart();
   res.json({ ok: true, startedAt });
 });
@@ -157,16 +185,11 @@ router.post("/tour/start", (req, res) => {
 // et la tournee se referme (les colis recus pendant redeviennent droppables).
 router.post("/tour/finish", (req, res) => {
   const startedAt = getTourStart();
-  const bag = db
-    .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'${
-        startedAt ? " AND created_at <= ?" : ""
-      }`
-    )
-    .get(...(startedAt ? [startedAt] : []));
-
-  const dropped = dropAll();
+  // seulement ce qui etait pret a partir (imprime) : le reste du sac reste en
+  // attente pour la prochaine fois
+  const dropped = dropAll({ finDeTournee: true });
   const count = dropped.count;
+  const bag = { count, value: dropped.value };
   consumeStock(dropped);
   const endedAt = serverNow();
   endTour();
@@ -198,9 +221,23 @@ router.post("/tour/finish", (req, res) => {
     };
     saveLastTour(summary);
   }
+  const duree = !summary
+    ? null
+    : summary.seconds < 3600
+      ? `${Math.max(1, Math.round(summary.seconds / 60))} min`
+      : `${Math.floor(summary.seconds / 3600)} h ${String(Math.floor((summary.seconds % 3600) / 60)).padStart(2, "0")}`;
+  journalise("tournee", "Tournée terminée", {
+    detail: [
+      `${count} colis dropé${count > 1 ? "s" : ""}`,
+      duree,
+      dropped.restants ? `${dropped.restants} pas encore imprimé${dropped.restants > 1 ? "s" : ""}, resté${dropped.restants > 1 ? "s" : ""} en attente` : null,
+    ].filter(Boolean).join(" · "),
+    valeur: bag.value,
+    nombre: count,
+  });
   if (count > 0) notifyTourEnd({ count, value: bag.value, seconds: summary?.seconds || 0, smicHourly: SMIC_HOURLY });
 
-  res.json({ ok: true, count, value: bag.value, startedAt, endedAt, summary, stocks: getStocks() });
+  res.json({ ok: true, count, value: bag.value, restants: dropped.restants, startedAt, endedAt, summary, stocks: getStocks() });
 });
 
 // Fermeture du resume de tournee affiche sur le dashboard.
@@ -213,6 +250,7 @@ router.post("/tour/dismiss-summary", (req, res) => {
 // ou rien poste).
 router.post("/tour/end", (req, res) => {
   endTour();
+  journalise("tournee", "Tournée annulée", { detail: "rien n'a été dropé" });
   res.json({ ok: true, startedAt: null });
 });
 
@@ -293,6 +331,14 @@ router.post("/colis/:id/drop", (req, res) => {
   res.json({ ok: true, stocks: consumeStock(dropped) });
 });
 
+// Annule un drop : le colis repasse en attente (et sa pochette revient au stock).
+router.post("/colis/:id/undrop", (req, res) => {
+  const annule = undropColis(req.params.id);
+  if (!annule) return res.status(404).json({ error: "Colis introuvable ou pas drope" });
+  if (annule.paye) return res.status(409).json({ error: "Colis deja paye : il reste drope" });
+  res.json({ ok: true, stocks: restoreStock(annule) });
+});
+
 router.post("/colis/:id/type", (req, res) => {
   const type = req.body.type === "lit" ? "lit" : "normal";
   const updated = setColisType(req.params.id, type);
@@ -302,22 +348,22 @@ router.post("/colis/:id/type", (req, res) => {
 
 router.post("/colis/drop-all", (req, res) => {
   const dropped = dropAll();
-  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
+  res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/drop-all-except-lit", (req, res) => {
   const dropped = dropAllExceptLit();
-  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
+  res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/drop-sender/:name", (req, res) => {
   const dropped = dropBySender(req.params.name);
-  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
+  res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/drop-carrier/:carrier", (req, res) => {
   const dropped = dropByCarrier(req.params.carrier);
-  res.json({ ok: true, count: dropped.count, stocks: consumeStock(dropped) });
+  res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
 });
 
 router.post("/colis/quick-add/:sender", (req, res) => {
@@ -339,7 +385,11 @@ router.post("/stock/adjust", (req, res) => {
   const delta = Number(req.body.delta);
   const kind = req.body.kind === "bj" ? "bj" : "normal";
   if (Number.isNaN(delta)) return res.status(400).json({ error: "Quantite invalide" });
-  adjustStock(delta, kind);
+  const total = adjustStock(delta, kind);
+  journalise("stock", `Stock ${kind === "bj" ? "BJ" : "normal"} ${delta > 0 ? "+" : "−"}${Math.abs(delta)}`, {
+    detail: `${total} pochette${Math.abs(total) > 1 ? "s" : ""}`,
+    nombre: delta,
+  });
   res.json(getStocks());
 });
 
@@ -461,6 +511,7 @@ router.post("/senders", (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: "Cet expediteur existe deja" });
   }
+  journalise("expediteur", `Expéditeur ${name} ajouté`, { detail: `${euro(price)} · LIT ${euro(litPrice)} · BJ ${euro(bjPrice)}` });
   res.json(db.prepare("SELECT * FROM senders WHERE name = ?").get(name));
 });
 
@@ -487,7 +538,9 @@ router.put("/senders/:id", (req, res) => {
 });
 
 router.delete("/senders/:id", (req, res) => {
+  const sender = db.prepare("SELECT name FROM senders WHERE id = ?").get(req.params.id);
   db.prepare("DELETE FROM senders WHERE id = ?").run(req.params.id);
+  if (sender) journalise("expediteur", `Expéditeur ${sender.name} supprimé`, { detail: "ses colis restent dans l'historique" });
   res.json({ ok: true });
 });
 

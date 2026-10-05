@@ -80,7 +80,7 @@ struct HeroCard: View {
             Button("Oui, tout est dropé") { Task { await model.endTour(drop: true) } }
             Button("Retour", role: .cancel) {}
         } message: {
-            Text("\(Format.count(stats.pendingCount, "colis sera marqué dropé", "colis seront marqués dropés")) · \(Format.euro(stats.pendingValue)).")
+            Text("Les colis déjà imprimés seront marqués dropés. Ceux pas encore imprimés restent en attente pour la prochaine tournée.")
         }
         .confirmationDialog("Annuler la tournée ?", isPresented: $confirmeAnnulation, titleVisibility: .visible) {
             Button("Annuler la tournée", role: .destructive) { Task { await model.endTour(drop: false) } }

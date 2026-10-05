@@ -338,13 +338,13 @@ struct SendersCard: View {
             Button("Tout dropper") { Task { await app.dashboard.dropAll() } }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("\(Format.count(stats?.pendingCount ?? 0, "colis en attente", "colis en attente")) · \(Format.euro(stats?.pendingValue ?? 0)).")
+            Text("\(Format.count(stats?.pendingCount ?? 0, "colis en attente", "colis en attente")) · \(Format.euro(stats?.pendingValue ?? 0)). Seuls ceux déjà imprimés seront dropés.")
         }
         .confirmationDialog("Tout dropper sauf les LIT ?", isPresented: $confirmeSaufLit, titleVisibility: .visible) {
             Button("Dropper") { Task { await app.dashboard.dropAllExceptLit() } }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("Tous les colis en attente seront marqués dropés, sauf les LIT.")
+            Text("Les colis déjà imprimés seront marqués dropés, sauf les LIT. Ceux pas encore imprimés restent en attente.")
         }
     }
 }

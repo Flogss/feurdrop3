@@ -1,7 +1,9 @@
 const path = require("path");
 const fs = require("fs");
+const { AsyncLocalStorage } = require("node:async_hooks");
 const { DatabaseSync } = require("node:sqlite");
 const { EventEmitter } = require("events");
+const { carrierLabel } = require("./carrier");
 
 // Un DB_PATH relatif pointe vers le systeme de fichiers du conteneur, qui est
 // recree a chaque deploiement : si un volume est monte, il gagne toujours.
@@ -207,6 +209,154 @@ if (!senderColumns.includes("bj_price")) {
   }
 }
 
+// --- Journal -----------------------------------------------------------------
+// Tout ce qui arrive aux colis, dans l'ordre : recus, dropes, imprimes, retires,
+// changes de type, de prix ou de transporteur, notes, stock, tournees,
+// paiements, expediteurs. Affiche tout en bas du dashboard (site et app).
+// Ecrit ici, au plus pres des donnees : quel que soit le chemin (bot, site,
+// app, impression auto), rien n'y echappe.
+const journalExistait = db
+  .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'journal'")
+  .get();
+db.exec(`
+  CREATE TABLE IF NOT EXISTS journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL DEFAULT (datetime('now')),
+    kind TEXT NOT NULL,
+    texte TEXT NOT NULL,
+    detail TEXT,
+    valeur REAL,
+    nombre INTEGER,
+    source TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_journal_kind ON journal(kind);
+`);
+
+// D'ou vient l'action : le site, l'app, l'impression automatique (fixe par
+// une couche de l'API), sinon le bot Telegram.
+const contexteJournal = new AsyncLocalStorage();
+function avecSource(source, fn) {
+  return contexteJournal.run({ source }, fn);
+}
+function sourceCourante() {
+  return contexteJournal.getStore()?.source || "telegram";
+}
+
+const TYPES_JOURNAL = { normal: "Normaux", lit: "LIT", bj: "Boîte jaune", special: "Spécial" };
+const colisJournal = (c) => [c.sender_name, c.type === "bj" ? "BJ" : c.carrier ? carrierLabel(c.carrier) : null].filter(Boolean).join(" · ");
+
+const euroJournal = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+const euroTexte = (v) => euroJournal.format(Number(v) || 0).replace(/\u202f/g, "\u00a0");
+const plurielJournal = (n, un, plusieurs) => `${n} ${n > 1 ? plusieurs : un}`;
+
+function journalise(kind, texte, { detail = null, valeur = null, nombre = null } = {}) {
+  try {
+    db.prepare("INSERT INTO journal (kind, texte, detail, valeur, nombre, source) VALUES (?, ?, ?, ?, ?, ?)").run(
+      kind,
+      texte,
+      detail,
+      valeur,
+      nombre,
+      sourceCourante()
+    );
+  } catch (err) {
+    // le journal ne doit jamais empecher une action d'aboutir
+    console.error("[journal]", err.message);
+  }
+}
+
+// Un lot de fichiers d'un meme expediteur arrive en rafale : une seule ligne
+// "5 colis recus" plutot que cinq lignes, tant qu'ils se suivent de pres.
+function journaliseRecu(colis) {
+  const derniere = db
+    .prepare(
+      `SELECT * FROM journal WHERE id = (SELECT MAX(id) FROM journal)
+       AND kind = 'recu' AND detail = ? AND source = ? AND at >= datetime('now', '-3 minutes')`
+    )
+    .get(colis.sender_name, sourceCourante());
+  if (derniere) {
+    const n = (derniere.nombre || 1) + 1;
+    db.prepare("UPDATE journal SET nombre = ?, valeur = ?, texte = ?, at = datetime('now') WHERE id = ?").run(
+      n,
+      (derniere.valeur || 0) + colis.price,
+      `${n} colis reçus`,
+      derniere.id
+    );
+    return;
+  }
+  journalise("recu", "Colis reçu", { detail: colis.sender_name, valeur: colis.price, nombre: 1 });
+}
+
+// Une page du journal, du plus recent au plus ancien. `avant` : l'identifiant
+// de la derniere ligne deja affichee (pour la suite).
+const FILTRES_JOURNAL = {
+  recu: "kind IN ('recu', 'ajout')",
+  // une fin de tournee est un drop : elle y figure aussi
+  drop: "(kind = 'drop' OR (kind = 'tournee' AND texte = 'Tournée terminée'))",
+  impression: "kind = 'impression'",
+  autres: "kind NOT IN ('recu', 'ajout', 'drop', 'impression') AND NOT (kind = 'tournee' AND texte = 'Tournée terminée')",
+};
+
+function getJournal({ avant = null, limite = 40, filtre = null } = {}) {
+  const conditions = [];
+  const params = [];
+  if (avant) {
+    conditions.push("id < ?");
+    params.push(Number(avant));
+  }
+  if (FILTRES_JOURNAL[filtre]) conditions.push(FILTRES_JOURNAL[filtre]);
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const n = Math.min(Math.max(Number(limite) || 40, 1), 200);
+  const lignes = db
+    .prepare(`SELECT id, at, kind, texte, detail, valeur, nombre, source FROM journal ${where} ORDER BY id DESC LIMIT ?`)
+    .all(...params, n + 1);
+  return { entrees: lignes.slice(0, n), suite: lignes.length > n };
+}
+
+// Premiere mise en place : le journal repart des 30 derniers jours deja en
+// base (arrivees par lot, drops, fournees imprimees, tournees, paiements),
+// pour ne pas commencer vide.
+if (!journalExistait) {
+  const depuis = "datetime('now', '-30 days')";
+  db.exec(`
+    INSERT INTO journal (at, kind, texte, detail, valeur, nombre, source)
+    SELECT at, kind, texte, detail, valeur, nombre, source FROM (
+      SELECT MAX(created_at) AS at, 'recu' AS kind,
+             CASE WHEN COUNT(*) > 1 THEN COUNT(*) || ' colis reçus' ELSE 'Colis reçu' END AS texte,
+             sender_name AS detail, SUM(price) AS valeur, COUNT(*) AS nombre, 'telegram' AS source
+      FROM colis WHERE created_at >= ${depuis}
+      GROUP BY sender_name, COALESCE(batch_id, id)
+      UNION ALL
+      SELECT dropped_at, 'drop',
+             CASE WHEN COUNT(*) > 1 THEN COUNT(*) || ' colis dropés' ELSE 'Colis dropé' END,
+             CASE WHEN COUNT(DISTINCT sender_name) = 1 THEN MAX(sender_name)
+                  ELSE COUNT(DISTINCT sender_name) || ' expéditeurs' END,
+             SUM(price), COUNT(*), NULL
+      FROM colis WHERE status = 'dropped' AND dropped_at >= ${depuis}
+      GROUP BY dropped_at
+      UNION ALL
+      SELECT MAX(printed_at), 'impression',
+             CASE WHEN COUNT(*) > 1 THEN COUNT(*) || ' étiquettes imprimées' ELSE 'Étiquette imprimée' END,
+             CASE WHEN MAX(printed_by) IS NOT NULL THEN 'par ' || MAX(printed_by) END,
+             NULL, COUNT(*), NULL
+      FROM colis WHERE print_job IS NOT NULL AND printed_at >= ${depuis}
+      GROUP BY print_job
+      UNION ALL
+      SELECT ended_at, 'tournee', 'Tournée terminée',
+             colis_count || ' colis · ' || CASE WHEN seconds < 3600 THEN MAX(1, seconds / 60) || ' min'
+               ELSE (seconds / 3600) || ' h ' || printf('%02d', (seconds % 3600) / 60) END,
+             value, colis_count, NULL
+      FROM tours WHERE ended_at >= ${depuis}
+      UNION ALL
+      SELECT paid_at, 'paiement', 'Paiement enregistré', sender_name, SUM(price), COUNT(*), NULL
+      FROM colis WHERE paid = 1 AND paid_at >= ${depuis}
+      GROUP BY sender_name, paid_at
+    ) ORDER BY at, kind
+  `);
+  const n = db.prepare("SELECT COUNT(*) AS c FROM journal").get().c;
+  if (n) console.log(`[journal] ${n} evenements des 30 derniers jours repris`);
+}
+
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
   return row ? row.value : fallback;
@@ -321,6 +471,11 @@ function updateSenderPrices(id, { price, litPrice, bjPrice }) {
   applyTo.run(nextPrice, "normal", current.name);
   applyTo.run(nextLitPrice, "lit", current.name);
   applyTo.run(nextBjPrice, "bj", current.name);
+  if (nextPrice !== current.price || nextLitPrice !== current.lit_price || nextBjPrice !== current.bj_price) {
+    journalise("expediteur", `Tarifs de ${current.name}`, {
+      detail: `${euroTexte(nextPrice)} · LIT ${euroTexte(nextLitPrice)} · BJ ${euroTexte(nextBjPrice)}`,
+    });
+  }
 
   return db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
 }
@@ -344,6 +499,7 @@ function addColis(
     fileKind,
     sourceChatId = null,
     sourceMessageId = null,
+    journal = true,
   } = {}
 ) {
   const sender = getOrCreateSender(senderName);
@@ -370,7 +526,7 @@ function addColis(
       sourceChatId,
       sourceMessageId
     );
-  return {
+  const colis = {
     id: info.lastInsertRowid,
     sender_name: sender.name,
     price,
@@ -378,6 +534,8 @@ function addColis(
     carrier,
     status: "pending",
   };
+  if (journal) journaliseRecu(colis);
+  return colis;
 }
 
 // --- Regles de transporteur apprises ---------------------------------------
@@ -615,6 +773,7 @@ function endTourIfEmpty() {
     .get(start).c;
   if (left > 0) return false;
   endTour();
+  journalise("tournee", "Sac vide : tournée refermée");
   return true;
 }
 
@@ -635,45 +794,72 @@ function getCarrierSummary() {
 // rappel a ne pas oublier dans chaque route.
 const evenements = new EventEmitter();
 
-// Toutes les operations de drop renvoient { count, bj } : le stock normal et
-// le stock BJ se decrementent separement.
-function dropWhere(extraSql, extraParams = []) {
+// Un drop groupe (tout, tout sauf les LIT, un transporteur, un expediteur, la
+// fin de tournee) ne solde que ce qui est pret a partir : les etiquettes deja
+// imprimees, et les colis sans fichier (comptes a la main : rien a imprimer).
+// Une etiquette qui n'est jamais sortie de l'imprimante ne peut pas etre dans
+// le sac : elle reste en attente, et la reponse dit combien (`restants`).
+const PRET_SQL = "(printed_at IS NOT NULL OR file_id IS NULL)";
+
+// Toutes les operations de drop renvoient { count, bj, value, restants } : le
+// stock normal et le stock BJ se decrementent separement.
+function dropWhere(extraSql, extraParams = [], { libelle = "", finDeTournee = false } = {}) {
   const { clause, params } = tourScope();
-  const where = `status = 'pending'${extraSql}${clause}`;
+  const tous = `status = 'pending'${extraSql}${clause}`;
+  const where = `${tous} AND ${PRET_SQL}`;
   const args = [...extraParams, ...params];
 
   // les identifiants avant la mise a jour : apres, plus rien ne les distingue
-  // des colis dropes avant. Les deux lectures se suivent sans rien entre elles.
+  // des colis dropes avant. Les lectures se suivent sans rien entre elles.
   const ids = db.prepare(`SELECT id FROM colis WHERE ${where}`).all(...args).map((r) => r.id);
   const bj = db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${where} AND type = 'bj'`).get(...args).c;
+  const value = db.prepare(`SELECT COALESCE(SUM(price), 0) AS v FROM colis WHERE ${where}`).get(...args).v;
+  const restants = db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE ${tous} AND NOT ${PRET_SQL}`).get(...args).c;
   const info = db
     .prepare(`UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE ${where}`)
     .run(...args);
 
-  endTourIfEmpty();
+  const resteTexte = restants
+    ? plurielJournal(restants, "colis pas encore imprimé reste", "colis pas encore imprimés restent")
+    : null;
+  if (!finDeTournee) {
+    if (info.changes > 0) {
+      journalise("drop", info.changes > 1 ? `${info.changes} colis dropés` : "Colis dropé", {
+        detail: [libelle, resteTexte].filter(Boolean).join(" · ") || null,
+        valeur: value,
+        nombre: info.changes,
+      });
+    } else if (restants > 0) {
+      journalise("drop", "Rien de dropé", { detail: [libelle, resteTexte].filter(Boolean).join(" · ") });
+    }
+    endTourIfEmpty();
+  }
   if (ids.length) evenements.emit("dropes", ids);
-  return { count: info.changes, bj };
+  return { count: info.changes, bj, value, restants };
 }
 
 function dropByCarrier(carrier) {
-  if (carrier === "BJ") return dropWhere(" AND type = 'bj'");
-  if (carrier === "Inconnu") return dropWhere(" AND type != 'bj' AND carrier IS NULL");
-  return dropWhere(" AND type != 'bj' AND carrier = ?", [carrier]);
+  const libelle = carrier === "Inconnu" ? "Transporteur inconnu" : carrierLabel(carrier);
+  if (carrier === "BJ") return dropWhere(" AND type = 'bj'", [], { libelle: "Boîte jaune" });
+  if (carrier === "Inconnu") return dropWhere(" AND type != 'bj' AND carrier IS NULL", [], { libelle });
+  return dropWhere(" AND type != 'bj' AND carrier = ?", [carrier], { libelle });
 }
 
-// Drop de tous les colis du sac (ou de tout ce qui est en attente hors tournee).
-function dropAll() {
-  return dropWhere("");
+// Drop de tous les colis du sac (ou de tout ce qui est en attente hors
+// tournee). `finDeTournee` : la route de fin de tournee ecrit elle-meme son
+// resume au journal et referme la tournee.
+function dropAll({ finDeTournee = false } = {}) {
+  return dropWhere("", [], { libelle: "Tout", finDeTournee });
 }
 
 // Les LIT partent sur une autre imprimante et souvent un autre jour : pouvoir
 // solder le reste sans les emporter evite de les marquer dropes avant l'heure.
 function dropAllExceptLit() {
-  return dropWhere(" AND type != 'lit'");
+  return dropWhere(" AND type != 'lit'", [], { libelle: "Tout sauf les LIT" });
 }
 
 function dropBySender(name) {
-  return dropWhere(" AND sender_name = ?", [name]);
+  return dropWhere(" AND sender_name = ?", [name], { libelle: name });
 }
 
 // Drop d'un seul colis, depuis la liste du site.
@@ -681,9 +867,32 @@ function dropColis(id) {
   const colis = db.prepare("SELECT * FROM colis WHERE id = ? AND status = 'pending'").get(id);
   if (!colis) return null;
   db.prepare("UPDATE colis SET status = 'dropped', dropped_at = datetime('now') WHERE id = ?").run(id);
+  journalise("drop", "Colis dropé", { detail: colisJournal(colis), valeur: colis.price, nombre: 1 });
   endTourIfEmpty();
   evenements.emit("dropes", [colis.id]);
   return { count: 1, bj: colis.type === "bj" ? 1 : 0 };
+}
+
+// Annule le drop d'un colis (re-appui sur "Drope" sous son fichier) : il
+// repasse en attente comme s'il n'etait jamais parti, et revient dans la file
+// d'impression s'il n'avait pas ete imprime. Un colis deja paye reste drope :
+// son argent est deja compte. Renvoie { count, bj } pour rendre le stock.
+function undropColis(id) {
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ? AND status = 'dropped'").get(id);
+  if (!colis) return null;
+  if (colis.paid) return { paye: true };
+  db.prepare("UPDATE colis SET status = 'pending', dropped_at = NULL WHERE id = ?").run(id);
+  journalise("drop", "Drop annulé : colis remis en attente", { detail: colisJournal(colis), nombre: 1 });
+  evenements.emit("remis", [colis.id]);
+  return { count: 1, bj: colis.type === "bj" ? 1 : 0 };
+}
+
+// Rend au stock les pochettes d'un drop annule.
+function restoreStock({ count = 0, bj = 0 } = {}) {
+  const normal = count - bj;
+  if (normal > 0) adjustStock(normal, "normal");
+  if (bj > 0) adjustStock(bj, "bj");
+  return getStocks();
 }
 
 // Les images de "special" ont le statut "free" : elles ne comptent nulle part,
@@ -741,6 +950,9 @@ function setColisType(id, type) {
   db.prepare(
     "UPDATE colis SET type = ?, price = ?, status = ?, price_locked = 0 WHERE id = ?"
   ).run(type, price, status, id);
+  if (colis.type !== type) {
+    journalise("modif", `Colis passé en ${TYPES_JOURNAL[type] || type}`, { detail: colisJournal(colis), valeur: price, nombre: 1 });
+  }
   return { ...colis, type, price, status };
 }
 
@@ -751,17 +963,25 @@ function setColisMessage(id, chatId, messageId) {
   return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
 }
 
-function setColisCarrier(id, carrier) {
+// `journal` : un transporteur choisi a la main (commande, bouton) ; une
+// reconnaissance automatique ne remplit pas l'historique.
+function setColisCarrier(id, carrier, { journal = false } = {}) {
   db.prepare("UPDATE colis SET carrier = ? WHERE id = ?").run(carrier, id);
-  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  if (journal && colis) {
+    journalise("modif", carrier ? `Transporteur : ${carrierLabel(carrier)}` : "Transporteur retiré", { detail: colis.sender_name, nombre: 1 });
+  }
+  return colis;
 }
 
 // Applique un transporteur a tout un lot (commande /transporteur sans reponse
 // a un colis precis).
 function setBatchCarrier(batchId, carrier) {
-  return db
+  const n = db
     .prepare("UPDATE colis SET carrier = ? WHERE batch_id = ? AND status = 'pending'")
     .run(carrier, batchId).changes;
+  if (n) journalise("modif", `${plurielJournal(n, "colis", "colis")} → ${carrierLabel(carrier)}`, { nombre: n });
+  return n;
 }
 
 // --- Impression automatique -------------------------------------------------
@@ -777,15 +997,24 @@ function isAutoPrintEnabled() {
 // En activant, on considere tout ce qui est deja en attente comme deja
 // imprime : sinon la premiere execution sortirait tout le stock d'un coup.
 function setAutoPrintEnabled(enabled) {
-  if (enabled && !isAutoPrintEnabled()) markPendingAsPrinted();
+  const avant = isAutoPrintEnabled();
+  if (enabled && !avant) markPendingAsPrinted();
   setSetting("auto_print", enabled ? "1" : "0");
+  if (avant !== Boolean(enabled)) journalise("reglage", enabled ? "Impression auto activée" : "Impression auto désactivée");
   return isAutoPrintEnabled();
 }
 
 function markPendingAsPrinted() {
-  return db
+  const n = db
     .prepare(`UPDATE colis SET printed_at = datetime('now') WHERE ${AUTOPRINT_SQL}`)
     .run().changes;
+  if (n) {
+    journalise("impression", `${plurielJournal(n, "étiquette considérée", "étiquettes considérées")} comme imprimée${n > 1 ? "s" : ""}`, {
+      detail: "à l'activation de l'impression auto",
+      nombre: n,
+    });
+  }
+  return n;
 }
 
 // Triees par transporteur : meme en impression continue, la pile reste
@@ -815,6 +1044,19 @@ function markPrinted(ids, by = null) {
     `UPDATE colis SET printed_at = datetime('now'), printed_by = ?, print_job = ?
      WHERE id IN (${placeholders})`
   ).run(by, job, ...ids);
+  // ce que contient la fournee : "Mondial Relay ×6, UPS ×3"
+  const groupes = db
+    .prepare(
+      `SELECT CASE WHEN type = 'lit' THEN 'LIT' ELSE ${PRINT_GROUP_SQL} END AS g, COUNT(*) AS c
+       FROM colis WHERE id IN (${placeholders}) GROUP BY g ORDER BY c DESC`
+    )
+    .all(...ids)
+    .map((r) => `${r.g === "LIT" ? "LIT" : carrierLabel(r.g)} ×${r.c}`)
+    .join(", ");
+  journalise("impression", ids.length > 1 ? `${ids.length} étiquettes imprimées` : "Étiquette imprimée", {
+    detail: [by ? `par ${by}` : null, groupes].filter(Boolean).join(" · "),
+    nombre: ids.length,
+  });
   return job;
 }
 
@@ -867,6 +1109,7 @@ function deleteColis(id) {
   const colis = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
   if (!colis) return null;
   db.prepare("DELETE FROM colis WHERE id = ?").run(id);
+  journalise("retrait", "Colis retiré du suivi", { detail: colisJournal(colis), valeur: colis.price, nombre: 1 });
   return colis;
 }
 
@@ -884,13 +1127,16 @@ function setColisPrice(id, price) {
     .prepare("UPDATE colis SET price = ?, price_locked = 1 WHERE id = ? AND status = 'pending'")
     .run(price, id);
   if (info.changes === 0) return null;
-  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  journalise("modif", `Prix forcé à ${euroTexte(price)}`, { detail: colisJournal(colis), nombre: 1 });
+  return colis;
 }
 
 function setBatchPrice(batchId, price) {
   const info = db
     .prepare("UPDATE colis SET price = ?, price_locked = 1 WHERE batch_id = ? AND status = 'pending'")
     .run(price, batchId);
+  if (info.changes) journalise("modif", `${plurielJournal(info.changes, "colis", "colis")} à ${euroTexte(price)}`, { nombre: info.changes });
   return info.changes;
 }
 
@@ -902,24 +1148,31 @@ function setColisNote(id, note) {
   const propre = (note || "").trim() || null;
   const info = db.prepare("UPDATE colis SET note = ? WHERE id = ?").run(propre, id);
   if (info.changes === 0) return null;
-  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  journalise("note", propre ? `Note « ${propre.slice(0, 80)} »` : "Note effacée", { detail: colisJournal(colis), nombre: 1 });
+  return colis;
 }
 
 function setBatchNote(batchId, note) {
   const propre = (note || "").trim() || null;
-  return db.prepare("UPDATE colis SET note = ? WHERE batch_id = ?").run(propre, batchId).changes;
+  const n = db.prepare("UPDATE colis SET note = ? WHERE batch_id = ?").run(propre, batchId).changes;
+  if (n) journalise("note", propre ? `Note « ${propre.slice(0, 80)} »` : "Notes effacées", { detail: plurielJournal(n, "colis", "colis"), nombre: n });
+  return n;
 }
 
 function quickAddColis(senderName) {
-  return addColis(senderName);
+  const colis = addColis(senderName, { journal: false });
+  journalise("ajout", "+1 colis à la main", { detail: colis.sender_name, valeur: colis.price, nombre: 1 });
+  return colis;
 }
 
 function quickRemoveColis(senderName) {
   const colis = db
-    .prepare("SELECT id FROM colis WHERE sender_name = ? AND status = 'pending' ORDER BY id DESC LIMIT 1")
+    .prepare("SELECT id, price, sender_name FROM colis WHERE sender_name = ? AND status = 'pending' ORDER BY id DESC LIMIT 1")
     .get(senderName);
   if (!colis) return false;
   db.prepare("DELETE FROM colis WHERE id = ?").run(colis.id);
+  journalise("retrait", "−1 colis à la main", { detail: colis.sender_name, valeur: colis.price, nombre: 1 });
   return true;
 }
 
@@ -1030,6 +1283,10 @@ function getDebtsBySender() {
 }
 
 function markSenderPaid(senderName) {
+  const du = db
+    .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(price), 0) AS v FROM colis WHERE sender_name = ? AND status = 'dropped' AND paid = 0")
+    .get(senderName);
+  if (du.c) journalise("paiement", "Paiement enregistré", { detail: `${senderName} · ${plurielJournal(du.c, "colis", "colis")}`, valeur: du.v, nombre: du.c });
   const info = db
     .prepare("UPDATE colis SET paid = 1, paid_at = datetime('now') WHERE sender_name = ? AND status = 'dropped' AND paid = 0")
     .run(senderName);
@@ -1075,6 +1332,7 @@ function mergeSendersIntoOther(senderIds) {
   const total = getTotalRevenue();
   const other = getOrCreateSender("Autre");
   let merged = 0;
+  const noms = [];
 
   for (const id of senderIds) {
     const sender = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
@@ -1088,6 +1346,13 @@ function mergeSendersIntoOther(senderIds) {
     db.prepare("UPDATE colis SET sender_name = ? WHERE sender_name = ?").run(other.name, sender.name);
     db.prepare("DELETE FROM senders WHERE id = ?").run(sender.id);
     merged += 1;
+    noms.push(sender.name);
+  }
+  if (merged) {
+    journalise("expediteur", `${plurielJournal(merged, "expéditeur regroupé", "expéditeurs regroupés")} dans « Autre »`, {
+      detail: noms.join(", ").slice(0, 200),
+      nombre: merged,
+    });
   }
   return merged;
 }
@@ -1108,6 +1373,7 @@ function mergeSenderInto(sourceId, targetId) {
     .prepare("UPDATE colis SET sender_name = ? WHERE sender_name = ?")
     .run(target.name, source.name).changes;
   db.prepare("DELETE FROM senders WHERE id = ?").run(source.id);
+  journalise("expediteur", `${source.name} fusionné dans ${target.name}`, { detail: plurielJournal(moved, "colis déplacé", "colis déplacés"), nombre: moved });
   return { moved, source: source.name, target: target.name };
 }
 
@@ -1195,12 +1461,18 @@ function setBatchType(batchId, type) {
     update.run(type, price, c.id);
     count += 1;
   }
+  if (count) journalise("modif", `${plurielJournal(count, "colis passé", "colis passés")} en ${TYPES_JOURNAL[type] || type}`, { nombre: count });
   return count;
 }
 
 module.exports = {
   db,
   evenements,
+  journalise,
+  avecSource,
+  getJournal,
+  undropColis,
+  restoreStock,
   getOrCreateSender,
   updateSenderPrices,
   addColis,

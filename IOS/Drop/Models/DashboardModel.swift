@@ -49,7 +49,9 @@ final class DashboardModel {
             app.reachedServer()
             applique(nouvelles)
             appliqueStock(stockServeur)
+            async let historique: Void = app.journal.refresh()
             await app.locker.refreshCount()
+            await historique
             markSeenIfNeeded()
         } catch {
             app.report(error)
@@ -174,15 +176,16 @@ final class DashboardModel {
     }
 
     /// `drop` : le sac est poste. Sinon on referme sans rien dropper.
+    /// `drop` : le sac est poste -- seuls les colis imprimes partent, le
+    /// reste attend la prochaine tournee. Sinon on referme sans rien dropper.
     func endTour(drop: Bool) async {
-        let n = stats?.pendingCount ?? 0
-        let v = stats?.pendingValue ?? 0
-        await run("tour") {
-            if drop { try await app.api.finishTour() } else { try await app.api.cancelTour() }
-        } succes: {
-            drop ? "\(Format.count(n, "colis dropé", "colis dropés")) · \(Format.euro(v))" : "Tournée annulée"
+        if drop {
+            await runDrop("tour") { try await app.api.finishTour() } message: { r in
+                Self.message(r, suffixe: " · \(Format.euro(r.value ?? 0))")
+            }
+        } else {
+            await run("tour") { try await app.api.cancelTour() } succes: { "Tournée annulée" }
         }
-        if drop { celebration += 1 }
     }
 
     func dismissTourSummary() async {
@@ -192,26 +195,31 @@ final class DashboardModel {
 
     // MARK: Drops
 
+    // Un drop groupe ne solde que les colis deja imprimes : le message dit
+    // combien sont restes en attente faute d'impression.
+
     func dropAll() async {
-        await runDrop("tout") { try await app.api.dropAll() } message: { Format.count($0.count, "colis dropé", "colis dropés") }
+        await runDrop("tout") { try await app.api.dropAll() } message: { Self.message($0) }
     }
 
     func dropAllExceptLit() async {
-        await runDrop("sauf-lit") { try await app.api.dropAllExceptLit() } message: { r in
-            r.count == 0 ? nil : Format.count(r.count, "colis dropé", "colis dropés")
-        }
+        await runDrop("sauf-lit") { try await app.api.dropAllExceptLit() } message: { Self.message($0) }
     }
 
     func dropSender(_ nom: String) async {
-        await runDrop("exp:" + nom) { try await app.api.dropSender(nom) } message: {
-            "\(Format.count($0.count, "colis dropé", "colis dropés")) pour \(nom)"
-        }
+        await runDrop("exp:" + nom) { try await app.api.dropSender(nom) } message: { Self.message($0, suffixe: " pour \(nom)") }
     }
 
     func dropCarrier(_ code: String) async {
-        await runDrop("tr:" + code) { try await app.api.dropCarrier(code) } message: {
-            "\(Format.count($0.count, "colis dropé", "colis dropés")) · \(Carrier.label(code))"
-        }
+        await runDrop("tr:" + code) { try await app.api.dropCarrier(code) } message: { Self.message($0, suffixe: " · \(Carrier.label(code))") }
+    }
+
+    /// "8 colis dropés · Mondial Relay · 3 pas encore imprimés restent" ; nil
+    /// quand rien n'est parti
+    private static func message(_ r: DropResult, suffixe: String = "") -> String? {
+        guard r.count > 0 else { return nil }
+        let reste = (r.restants ?? 0) > 0 ? " · " + Format.count(r.restants ?? 0, "colis pas encore imprimé reste", "colis pas encore imprimés restent") : ""
+        return Format.count(r.count, "colis dropé", "colis dropés") + suffixe + reste
     }
 
     /// +1 / -1 colis a la main pour un expediteur
@@ -254,8 +262,10 @@ final class DashboardModel {
         if let texte = message(r) {
             app.toasts.show(texte)
             celebration += 1
+        } else if let reste = r.restants, reste > 0 {
+            app.toasts.show("Rien de dropé : " + Format.count(reste, "colis pas encore imprimé", "colis pas encore imprimés"), style: .info)
         } else {
-            app.toasts.show("Aucun colis à dropper en dehors des LIT.", style: .info)
+            app.toasts.show("Aucun colis à dropper", style: .info)
         }
         await refresh()
     }
