@@ -24,18 +24,39 @@ function delaiDemande(err) {
   return trouve ? Number(trouve[1]) : null;
 }
 
+// Une erreur passagere : Telegram indisponible un instant (502, 503, 504,
+// 500) ou le reseau coupe (connexion reinitialisee, delai depasse, DNS).
+// Elle se resout en reessayant -- contrairement a un 400 (message introuvable,
+// requete invalide) ou un 403 (bot retire du groupe).
+function erreurPassagere(err) {
+  const code = err?.response?.statusCode ?? err?.response?.status;
+  if (code >= 500 && code < 600) return true;
+  const texte = `${err?.code || ""} ${err?.message || ""}`;
+  return /EFATAL|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|network|fetch failed|Bad Gateway|Service Unavailable|Gateway Time-?out|Internal Server Error/i.test(
+    texte
+  );
+}
+
+// Le delai avant de reessayer une erreur passagere : 1 s, 2 s, 4 s, 8 s, 15 s
+// (THROTTLE_ATTENTES_MS="10,20,40" pour les tests).
+const ATTENTES_PASSAGERES = (process.env.THROTTLE_ATTENTES_MS || "1000,2000,4000,8000,15000")
+  .split(",")
+  .map(Number)
+  .filter((n) => Number.isFinite(n) && n >= 0);
+
 /**
  * Cree une file d'ecritures serialisees.
  * @param {object} options
  * @param {number} options.intervalMs ecart minimum entre deux appels
- * @param {number} options.retries nombre de 429 tolerees avant d'abandonner
+ * @param {number} options.retries nombre de 429 tolerees avant d'abandonner (Telegram
+ *   dit combien attendre : on attend, et on ne lache qu'apres beaucoup d'essais)
  * @param {number} options.envoisParMinute plafond des envois (0 : pas de plafond)
  * @param {number} options.fenetreMs duree de la fenetre glissante (une minute)
  * @param {(secondes: number) => void} options.onWait appele avant chaque pause 429
  */
 function createWriteQueue({
   intervalMs = 1100,
-  retries = 5,
+  retries = 12,
   envoisParMinute = 0,
   fenetreMs = 60000,
   onWait = null,
@@ -69,6 +90,7 @@ function createWriteQueue({
   let enCours = false;
 
   async function execute({ action, envoi }) {
+    let passageres = 0;
     for (let essai = 0; ; essai++) {
       if (envoi) await attendsCreneau();
       const attente = derniere + intervalMs - Date.now();
@@ -80,10 +102,20 @@ function createWriteQueue({
       } catch (err) {
         const secondes = delaiDemande(err);
         derniere = Date.now();
-        // une erreur qui n'est pas un 429 ne se resout pas en attendant
-        if (secondes === null || essai >= retries) throw err;
-        if (onWait) onWait(secondes);
-        await sleep(secondes * 1000 + Math.min(250, intervalMs));
+        if (secondes !== null) {
+          // 429 : Telegram dit combien attendre ; on attend, plusieurs fois
+          // s'il le faut (une rafale de 429 de 25 a 40 s arrive vraiment)
+          if (essai >= retries) throw err;
+          if (onWait) onWait(secondes);
+          await sleep(secondes * 1000 + Math.min(250, intervalMs));
+          continue;
+        }
+        // 502, coupure reseau : on reessaie un peu plus tard. Le reste (400,
+        // 403...) ne se resout pas en attendant.
+        if (!erreurPassagere(err) || passageres >= ATTENTES_PASSAGERES.length) throw err;
+        if (onWait) onWait(ATTENTES_PASSAGERES[passageres] / 1000, err);
+        await sleep(ATTENTES_PASSAGERES[passageres]);
+        passageres += 1;
       }
     }
   }
@@ -113,4 +145,24 @@ function createWriteQueue({
   return enqueue;
 }
 
-module.exports = { createWriteQueue, delaiDemande };
+// Reessaie une lecture (telechargement d'un fichier...) sur un 429 ou une
+// erreur passagere, avec les memes attentes que la file.
+async function avecReessais(action, { essais = 5 } = {}) {
+  let passageres = 0;
+  for (let essai = 0; ; essai++) {
+    try {
+      return await action();
+    } catch (err) {
+      const secondes = delaiDemande(err);
+      if (secondes !== null && essai < essais) {
+        await sleep(secondes * 1000 + 200);
+        continue;
+      }
+      if (!erreurPassagere(err) || passageres >= Math.min(essais, ATTENTES_PASSAGERES.length)) throw err;
+      await sleep(ATTENTES_PASSAGERES[passageres]);
+      passageres += 1;
+    }
+  }
+}
+
+module.exports = { createWriteQueue, delaiDemande, erreurPassagere, avecReessais };

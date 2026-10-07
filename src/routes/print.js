@@ -28,18 +28,23 @@ const {
 // corriger, mais c'est un type de colis : il n'a rien a faire dans le menu.
 const TRANSPORTEURS = CARRIERS.filter((c) => c.code !== "BJ").map((c) => ({ code: c.code, label: c.label }));
 
-// Impression depuis le site. Meme chaine que /imprime sur Telegram -- memes
-// etiquettes, meme mise en page, meme marquage -- mais le PDF s'ouvre dans un
-// onglet, ou le navigateur sait l'imprimer.
+// Impression depuis le site et l'app. Meme chaine que /imprime sur Telegram --
+// memes etiquettes, meme mise en page -- mais le PDF s'ouvre dans un onglet
+// (site) ou dans la fenetre d'impression du systeme (app).
 //
-// Le PDF n'est pas servi par un GET qui imprimerait au passage : un
-// rafraichissement de page aurait alors marque les etiquettes une deuxieme
-// fois. On construit par POST, on garde le resultat quelques minutes, et
-// l'onglet vient le chercher par son numero.
+// Une etiquette n'est marquee "imprimee" que lorsqu'elle l'a vraiment ete :
+//   - site : quand l'onglet ouvre le PDF (le premier chargement du PDF) --
+//     un onglet bloque, jamais ouvert, ou un PDF expire ne marque rien ;
+//   - app : quand la fenetre d'impression d'iOS ou de macOS confirme que
+//     l'impression est partie (POST /job/:id/imprime). Une impression
+//     annulee ne marque rien.
+// Avant, tout etait marque des la construction du PDF : une etiquette dont
+// le PDF ne s'ouvrait pas, ou dont l'impression etait annulee, quittait la
+// liste "a imprimer" sans etre jamais sortie -- elle etait oubliee.
 
 const router = express.Router();
 
-const jobs = new Map(); // id -> { pdf, name, at }
+const jobs = new Map(); // id -> { pdf, name, at, ids, marque }
 const JOB_TTL_MS = 15 * 60 * 1000;
 
 function purge() {
@@ -146,37 +151,67 @@ router.post("/build", async (req, res) => {
     purge();
     const id = Math.random().toString(36).slice(2, 10);
     const nom = categorie === "*" ? "toutes" : String(categorie).toLowerCase();
-    jobs.set(id, { pdf: built.pdf, name: `etiquettes-${nom}.pdf`, at: Date.now() });
-
-    // les etiquettes sorties ne doivent plus ressortir, ici comme sur Telegram
-    markPrinted(built.printedIds, "dashboard");
-    const bot = getBot();
-    if (bot) markButtonsPrinted(bot, built.printedIds);
-    refreshGroupStats();
+    // rien n'est marque ici : voir l'en-tete du fichier
+    jobs.set(id, { pdf: built.pdf, name: `etiquettes-${nom}.pdf`, at: Date.now(), ids: built.printedIds, marque: false });
 
     res.json({
       jobId: id,
       url: `/api/print/job/${id}.pdf`,
       count: built.printedIds.length,
+      // les colis du PDF : l'app les renvoie pour confirmer l'impression
+      ids: built.printedIds,
       pages: built.pages ?? null,
       roll,
       lengthMm: built.lengthMm ?? null,
+      // ce qui n'a pas pu entrer dans le PDF reste "a imprimer" : on le dit
       missing: (built.missing || []).length,
       failed: (built.failed || []).length,
+      absents: [...(built.missing || []), ...(built.failed || [])].map((x) => ({ label: x.label, reason: x.reason })),
     });
   } catch (err) {
     fail(res, err, 500);
   }
 });
 
+// Marque une fournee comme imprimee (une seule fois par PDF) : plus de
+// ressortie, ici comme sur Telegram, et "Deja imprime" sous les fichiers.
+function marqueFournee(ids, par) {
+  if (!ids.length) return 0;
+  markPrinted(ids, par);
+  const bot = getBot();
+  if (bot) markButtonsPrinted(bot, ids);
+  refreshGroupStats();
+  return ids.length;
+}
+
 // L'onglet ouvert par le navigateur vient chercher le PDF ici. `inline` pour
-// qu'il s'affiche dans la visionneuse au lieu d'etre telecharge.
+// qu'il s'affiche dans la visionneuse au lieu d'etre telecharge. Le premier
+// chargement marque les etiquettes (un rafraichissement ne remarque rien) ;
+// `?marquer=0` : l'app telecharge le PDF et confirmera apres l'impression.
 router.get("/job/:id.pdf", (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).send("PDF expire : relance l'impression.");
+  if (req.query.marquer !== "0" && !job.marque) {
+    job.marque = true;
+    marqueFournee(job.ids, "dashboard");
+  }
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="${job.name}"`);
   res.send(job.pdf);
+});
+
+// L'app : la fenetre d'impression a confirme. Les identifiants viennent de la
+// fournee (ou, si le serveur a redemarre entre-temps, de la requete : ce sont
+// ceux que la construction avait renvoyes).
+router.post("/job/:id/imprime", (req, res) => {
+  const job = jobs.get(req.params.id);
+  const ids = job
+    ? job.ids
+    : Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (job?.marque) return res.json({ ok: true, marked: 0, deja: true });
+  if (job) job.marque = true;
+  const par = typeof req.body?.par === "string" && req.body.par.trim() ? req.body.par.trim().slice(0, 40) : "app";
+  res.json({ ok: true, marked: marqueFournee(ids, par) });
 });
 
 // --- Modifier un colis -------------------------------------------------------

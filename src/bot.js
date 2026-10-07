@@ -45,12 +45,18 @@ const {
   journalise,
   undropColis,
   restoreStock,
+  inscritArrivee,
+  getArrivee,
+  arriveeLiee,
+  arriveeFaite,
+  arriveeRatee,
+  arriveesEnAttente,
 } = require("./db");
 const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
-const { createWriteQueue, delaiDemande } = require("./throttle");
+const { createWriteQueue, delaiDemande, avecReessais } = require("./throttle");
 const {
   apparieColis,
   apparieCode,
@@ -224,7 +230,8 @@ const ecritureGroupe = createWriteQueue({
   intervalMs: Number(process.env.GROUP_WRITE_INTERVAL_MS || 350),
   envoisParMinute: Number(process.env.GROUP_SENDS_PER_MIN || 20),
   fenetreMs: Number(process.env.GROUP_SENDS_WINDOW_MS || 60000),
-  onWait: (secondes) => console.warn(`[bot] 429 : pause de ${secondes}s avant de reessayer`),
+  onWait: (secondes, err) =>
+    console.warn(err ? `[bot] ${err.message} : nouvel essai dans ${secondes}s` : `[bot] 429 : pause de ${secondes}s avant de reessayer`),
 });
 
 // Les reactions partent une par une : un lot de 20 fichiers ferait sinon
@@ -319,7 +326,12 @@ function startBot() {
     //     qui le republie, pour qu'il ait ses boutons comme les autres.
     // Un par un, dans l'ordre d'arrivee : c'est aussi l'ordre qui appaire un
     // code-barre de special avec son PDF.
-    enfileFichier(bot, msg, attachment, batches);
+    // Inscrit en base AVANT tout traitement (voir "Arrivees" dans db.js) : un
+    // redemarrage ne perd plus rien, et un message que Telegram livre deux
+    // fois n'est traite qu'une fois.
+    const arriveeId = inscritArrivee(msg.chat.id, msg.message_id, msg);
+    if (!arriveeId) return;
+    enfileFichier(bot, msg, attachment, batches, arriveeId);
   };
 
   bot.on("message", handleIncoming);
@@ -429,6 +441,26 @@ function startBot() {
   });
 
   registerCommands(bot);
+
+  // ce qui restait a traiter au dernier arret (mise a jour en plein envoi) :
+  // repris dans l'ordre d'arrivee
+  const restantes = arriveesEnAttente();
+  if (restantes.length) console.log(`[bot] ${restantes.length} fichier(s) recu(s) avant l'arret : repris`);
+  for (const a of restantes) {
+    let msg;
+    try {
+      msg = JSON.parse(a.message);
+    } catch {
+      arriveeRatee(a.id, "message illisible", { definitif: true });
+      continue;
+    }
+    const attachment = colisAttachment(msg);
+    if (!attachment) {
+      arriveeFaite(a.id);
+      continue;
+    }
+    enfileFichier(bot, msg, attachment, batches, a.id);
+  }
 
   console.log("[bot] demarre (polling)");
   return bot;
@@ -903,7 +935,7 @@ evenements.on("remis", majBoutonsDe);
 // est -- le total monte au fur et a mesure que les fichiers continuent d'entrer.
 const filesPrivees = new Map(); // chatId -> { attente, total, faits, echecs, ... } : une file par chat
 
-function enfileFichier(bot, msg, attachment, batches) {
+function enfileFichier(bot, msg, attachment, batches, arriveeId = null) {
   const chatId = msg.chat.id;
   let file = filesPrivees.get(chatId);
   if (!file) {
@@ -922,7 +954,7 @@ function enfileFichier(bot, msg, attachment, batches) {
     filesPrivees.set(chatId, file);
   }
 
-  file.attente.push({ msg, attachment });
+  file.attente.push({ msg, attachment, arriveeId });
   file.total += 1;
 
   if (!file.actif) {
@@ -935,15 +967,9 @@ function enfileFichier(bot, msg, attachment, batches) {
 
 async function videFilePrivee(bot, chatId, file, batches) {
   while (file.attente.length > 0) {
-    const { msg, attachment } = file.attente.shift();
-    try {
-      const colis = await routeToTopic(bot, msg, attachment, batches);
-      if (colis) file.faits += 1;
-      else file.echecs += 1;
-    } catch (err) {
-      file.echecs += 1;
-      console.error("[bot] aiguillage :", err.message);
-    }
+    const issue = await traiteArrivee(bot, file.attente.shift(), batches);
+    if (issue === "echec") file.echecs += 1;
+    else file.faits += 1;
     await majProgression(bot, chatId, file);
   }
 
@@ -955,6 +981,62 @@ async function videFilePrivee(bot, chatId, file, batches) {
   for (const id of boutonsEnFinDeFile) refreshFileButtons(bot, getColisById(id));
   boutonsEnFinDeFile.clear();
   await termineProgression(bot, chatId, file);
+}
+
+// Un fichier rate est reessaye plus tard, de plus en plus espace (10 s, 30 s,
+// 1 min... jusqu'a ~1 h 40 en tout), puis signale clairement. Il n'est jamais
+// abandonne en silence.
+const REPRISES_MS = (process.env.FILE_REPRISES_MS || "10000,30000,60000,120000,300000,600000,1200000,1800000")
+  .split(",")
+  .map(Number)
+  .filter((n) => Number.isFinite(n) && n >= 0);
+
+// Traite un fichier inscrit jusqu'au bout. "fait" : compte (et republie) ;
+// "plus-tard" : compte, mais la republication dans le groupe sera reessayee
+// (ou rien n'a pu etre enregistre encore : reessaye aussi) ; "echec" : abandonne
+// apres toutes les reprises, l'utilisateur est prevenu.
+async function traiteArrivee(bot, item, batches) {
+  const { msg, attachment, arriveeId } = item;
+  const arrivee = arriveeId ? getArrivee(arriveeId) : null;
+  // deja traite (reprise en double) : rien a refaire
+  if (arrivee && arrivee.statut !== "attente") return "fait";
+
+  let resultat;
+  try {
+    resultat = (await routeToTopic(bot, msg, attachment, batches, arrivee)) || {};
+  } catch (err) {
+    console.error("[bot] aiguillage :", err.message);
+    resultat = { erreur: err };
+  }
+  if (!resultat.erreur) {
+    if (arriveeId) arriveeFaite(arriveeId);
+    return "fait";
+  }
+  if (!arriveeId) return "echec";
+
+  const apres = arriveeRatee(arriveeId, resultat.erreur.message);
+  if (apres.essais > REPRISES_MS.length) {
+    arriveeRatee(arriveeId, resultat.erreur.message, { definitif: true });
+    previensEchec(bot, msg, attachment, apres, resultat.erreur);
+    return "echec";
+  }
+  const delai = REPRISES_MS[apres.essais - 1];
+  console.warn(`[bot] ${attachment.fileName || "fichier"} : ${resultat.erreur.message} -- nouvel essai dans ${delai / 1000}s`);
+  setTimeout(() => enfileFichier(bot, msg, attachment, batches, arriveeId), delai);
+  return "plus-tard";
+}
+
+// Le dernier essai a echoue : on le dit, en precisant si le colis est tout de
+// meme compte (il l'est des qu'il a ete cree -- il apparait alors sur le site
+// et s'imprime normalement, il ne lui manque que sa copie dans le groupe).
+function previensEchec(bot, msg, attachment, arrivee, erreur) {
+  const nom = attachment.fileName || "un fichier";
+  const compte = Boolean(arrivee.colis_id && getColisById(arrivee.colis_id)) || Boolean(arrivee.paire_id);
+  const texte = compte
+    ? `⚠️ ${nom} : bien enregistre, mais je n'arrive pas a le republier dans le groupe (${erreur.message}). Il est sur le site et s'imprime normalement.`
+    : `⚠️ ${nom} n'a pas pu etre enregistre (${erreur.message}). Renvoie-le moi.`;
+  console.error(`[bot] abandon apres ${arrivee.essais} essais : ${nom} -- ${erreur.message}`);
+  bot.sendMessage(msg.chat.id, texte, threadOpts(msg)).catch(() => {});
 }
 
 // Vrai tant qu'une file traite encore des fichiers : le recapitulatif du lot
@@ -1031,7 +1113,11 @@ function legendeDe(msg) {
 //     est efface.
 // Dans les deux cas le fichier est copie a l'identique : ni le nom, ni la
 // legende, ni le contenu ne changent.
-async function routeToTopic(bot, msg, attachment, batches) {
+// Renvoie { colis } quand c'est fait, { colis, erreur } quand le colis est
+// compte mais que sa republication est a reessayer, { erreur } quand rien n'a
+// pu etre enregistre. `arrivee` : l'inscription du fichier -- une reprise
+// reutilise le colis cree au premier essai au lieu d'en creer un second.
+async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
   const direct = msg.chat.type !== "private";
   const type = direct
     ? resolveForcedType(msg)
@@ -1040,12 +1126,21 @@ async function routeToTopic(bot, msg, attachment, batches) {
   // le code qui ouvre le locker, pas un colis : voir republieCode. La legende
   // dit lequel des deux c'est ; sans indice, image = code, PDF = colis.
   if (direct && type === "special" && roleSpecial(attachment.kind, msg.caption) === "code") {
-    return republieCode(bot, msg, attachment);
+    return republieCode(bot, msg, attachment, arrivee);
   }
 
   const topic = TOPIC_BY_TYPE[type];
   const senderName = extractSenderName(msg);
   const legende = legendeDe(msg);
+
+  // une reprise : le colis existe deja
+  if (arrivee?.colis_id) {
+    const deja = getColisById(arrivee.colis_id);
+    // retire entre-temps (/del, site) ou deja republie : plus rien a faire
+    if (!deja || (deja.chat_id === AUTO_GROUP_CHAT_ID && deja.message_id)) return { colis: deja };
+    return republieColis(bot, msg, deja, topic, { direct, reprise: true });
+  }
+
   const carrier = detectCarrier(attachment.fileName, legende, getCarrierRules());
 
   // Le colis est cree AVANT la republication pour que ses boutons partent avec
@@ -1068,11 +1163,42 @@ async function routeToTopic(bot, msg, attachment, batches) {
     sourceChatId: direct ? null : msg.chat.id,
     sourceMessageId: direct ? null : msg.message_id,
   });
+  // aussitot lie a son inscription : une reprise ne le recreera pas
+  if (arrivee) arriveeLiee(arrivee.id, { colisId: colis.id });
 
   // un PDF de special rejoint son code-barre (ou l'attend) avant d'etre
   // republie : son numero part avec lui, sous le fichier
-  const appairage = type === "special" ? apparieColis(colis.id, senderName) : null;
+  if (type === "special") apparieColis(colis.id, senderName);
 
+  // Le colis est compte des maintenant, que la republication reussisse ou non :
+  // le fichier est bien arrive. Avant, un echec de la copie (un 502 de
+  // Telegram, une coupure) supprimait le colis -- c'etait la perte.
+  ajouteAuLot(batches, key, batch, colis, senderName);
+  const issue = await republieColis(bot, msg, colis, topic, { direct, reprise: false });
+
+  // transporteur inconnu : point d'interrogation sur le fichier republie, apres
+  // une derniere tentative a la fin du lot (la legende de l'album peut arriver
+  // apres). Pas pour un special : il part au locker avec son code, son
+  // transporteur ne change rien -- et chaque reaction est une ecriture de plus
+  // dans le groupe, que Telegram compte.
+  if (!issue.erreur && !carrier && type !== "bj" && type !== "special") {
+    batch.unresolved.push({
+      colisId: colis.id,
+      fileName: attachment.fileName,
+      caption: msg.caption,
+      mediaGroupId: msg.media_group_id,
+      chatId: AUTO_GROUP_CHAT_ID,
+      messageId: getColisById(colis.id)?.message_id,
+    });
+  }
+  return issue;
+}
+
+// Republie le fichier d'un colis dans son topic, avec ses boutons. Si la copie
+// echoue : poste directement dans le groupe, le colis reste sur l'original
+// (c'est deja le bon topic) ; envoye en prive, il reste compte sur le fichier
+// d'origine et la copie sera reessayee (traiteArrivee).
+async function republieColis(bot, msg, colis, topic, { direct, reprise }) {
   const clavier = aDesBoutons(colis) ? boutonsDe(getColisById(colis.id)) : null;
   let copie;
   try {
@@ -1085,46 +1211,17 @@ async function routeToTopic(bot, msg, attachment, batches) {
     );
   } catch (err) {
     console.error("[bot] republication impossible :", err.message);
-    if (direct) {
-      // l'original est toujours la : on le compte tel quel, sans boutons,
-      // plutot que de perdre le colis
-      setColisMessage(colis.id, msg.chat.id, msg.message_id);
-      ajouteAuLot(batches, key, batch, colis, senderName);
-      return colis;
-    }
-    // le fichier n'est jamais arrive : le colis ne doit pas rester dans les
-    // comptes, sinon le recapitulatif annonce des colis qu'on n'a pas
-    deleteColis(colis.id);
-    await bot
-      .sendMessage(msg.chat.id, `Republication impossible (${attachment.fileName || "fichier"}) : ${err.message}`)
-      .catch(() => {});
-    return null;
+    setColisMessage(colis.id, msg.chat.id, msg.message_id);
+    if (direct) return { colis };
+    return { colis, erreur: err };
   }
 
   setColisMessage(colis.id, AUTO_GROUP_CHAT_ID, copie.message_id);
   if (clavier) retiensBoutons(AUTO_GROUP_CHAT_ID, copie.message_id, clavier);
-
   if (direct) planifieEffacement(msg, copie.message_id, { colisId: colis.id });
-
-  ajouteAuLot(batches, key, batch, colis, senderName);
-  // transporteur inconnu : point d'interrogation sur le fichier republie, apres
-  // une derniere tentative a la fin du lot (la legende de l'album peut arriver
-  // apres). Pas pour un special : il part au locker avec son code, son
-  // transporteur ne change rien -- et chaque reaction est une ecriture de plus
-  // dans le groupe, que Telegram compte.
-  if (!carrier && type !== "bj" && type !== "special") {
-    batch.unresolved.push({
-      colisId: colis.id,
-      fileName: attachment.fileName,
-      caption: msg.caption,
-      mediaGroupId: msg.media_group_id,
-      chatId: AUTO_GROUP_CHAT_ID,
-      messageId: getColisById(colis.id)?.message_id,
-    });
-  }
-
   if (!direct) queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
-  return colis;
+  if (reprise) console.log(`[bot] colis #${colis.id} republie au nouvel essai`);
+  return { colis };
 }
 
 // Les fichiers postes a la main sont effaces une fois leur copie en place --
@@ -1179,8 +1276,16 @@ async function effaceOriginaux(bot, chatId) {
 // colis. Ce n'est pas un colis -- comme apres un /clear : pas de prix, pas de
 // drop, pas d'impression -- mais elle est numerotee avec son PDF (voir
 // specials.js), et le numero s'affiche sous les deux.
-async function republieCode(bot, msg, attachment) {
-  const { paire, completee } = apparieCode(attachment.fileId, extractSenderName(msg), attachment.kind);
+async function republieCode(bot, msg, attachment, arrivee = null) {
+  // une reprise : la paire existe deja (creee au premier essai)
+  let paire = arrivee?.paire_id ? getPaire(arrivee.paire_id) : null;
+  let completee = false;
+  if (arrivee?.paire_id && !paire) return {}; // retiree entre-temps
+  if (paire && paire.code_chat_id === AUTO_GROUP_CHAT_ID && paire.code_message_id) return { paire };
+  if (!paire) {
+    ({ paire, completee } = apparieCode(attachment.fileId, extractSenderName(msg), attachment.kind));
+    if (arrivee) arriveeLiee(arrivee.id, { paireId: paire.id });
+  }
 
   let copie;
   try {
@@ -1192,18 +1297,19 @@ async function republieCode(bot, msg, attachment) {
       { envoi: true }
     );
   } catch (err) {
-    // l'original reste en place, sans numero : on ne garde pas une paire
-    // fantome qui bloquerait ce numero
+    // La paire est gardee : le code est bien arrive, et le mode locker
+    // l'affiche par son fichier. Avant, un echec de la copie l'oubliait -- le
+    // code du locker etait perdu. La copie sera reessayee.
     console.error("[bot] code non republie :", err.message);
-    oublieCode(paire.id);
-    return null;
+    setCodeMessage(paire.id, msg.chat.id, msg.message_id);
+    return { paire, erreur: err };
   }
 
   setCodeMessage(paire.id, AUTO_GROUP_CHAT_ID, copie.message_id);
   retiensBoutons(AUTO_GROUP_CHAT_ID, copie.message_id, boutonsCode(paire));
   planifieEffacement(msg, copie.message_id, { paireId: paire.id });
   if (completee && paire.colis_id) boutonsEnFinDeFile.add(paire.colis_id);
-  return paire;
+  return { paire };
 }
 
 // Le bouton d'un code ne porte que son numero. Y afficher "lie / en attente"
@@ -1895,7 +2001,7 @@ async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = 
       : code === "*"
         ? "toutes"
         : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
-  const printedIds = labels.filter((l) => !failed.some((f) => f.label === l.label)).map((l) => l.colisId);
+  const printedIds = labels.filter((l) => !failed.some((f) => f.colisId === l.colisId)).map((l) => l.colisId);
   const caption =
     captionFor(rows, printedIds) +
     (onRoll
@@ -2094,11 +2200,20 @@ async function downloadLabels(bot, rows, onStep) {
 
   for (const row of rows) {
     try {
-      const link = await bot.getFileLink(row.file_id);
-      const res = await fetch(link);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // un 429 ou un 502 de Telegram, une coupure : on reessaie au lieu de
+      // sauter l'etiquette (elle manquait alors a la liasse sans bruit)
+      const bytes = await avecReessais(async () => {
+        const link = await bot.getFileLink(row.file_id);
+        const res = await fetch(link);
+        if (!res.ok) {
+          const err = new Error(`HTTP ${res.status}`);
+          err.response = { statusCode: res.status };
+          throw err;
+        }
+        return new Uint8Array(await res.arrayBuffer());
+      });
       labels.push({
-        bytes: new Uint8Array(await res.arrayBuffer()),
+        bytes,
         kind: row.file_kind === "image" ? "image" : "pdf",
         label: row.file_name || `colis #${row.id}`,
         colisId: row.id,
@@ -2123,7 +2238,7 @@ async function buildLabelsPdf(rows, { roll = false, onStep } = {}) {
   const assembled = roll ? await buildRoll(labels) : await mergeLabels(labels);
   const { pdf, failed } = assembled;
   const printedIds = labels
-    .filter((l) => !failed.some((f) => f.label === l.label))
+    .filter((l) => !failed.some((f) => f.colisId === l.colisId))
     .map((l) => l.colisId);
   return { ...assembled, pdf, printedIds, missing, failed };
 }

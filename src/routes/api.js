@@ -75,6 +75,37 @@ function sourceDe(req) {
 }
 router.use((req, res, next) => avecSource(sourceDe(req), next));
 
+// Une meme operation recue deux fois n'est appliquee qu'une fois. Le site et
+// l'app joignent une cle unique (en-tete Idempotency-Key) a chaque operation
+// qui compte (ajout de colis, stock) : si le reseau coupe APRES que le serveur
+// l'a appliquee, ils peuvent la renvoyer sans risque -- la reponse d'origine
+// est rejouee au lieu d'ajouter un colis ou une pochette de plus.
+const operations = new Map(); // cle -> { at, status, corps }
+const OPERATION_TTL_MS = 30 * 60 * 1000;
+router.use((req, res, next) => {
+  const cle = req.get("idempotency-key");
+  if (!cle || req.method === "GET") return next();
+  const maintenant = Date.now();
+  for (const [k, op] of operations) if (maintenant - op.at > OPERATION_TTL_MS) operations.delete(k);
+  const deja = operations.get(cle);
+  if (deja) {
+    if (deja.enCours) return res.status(409).json({ error: "Opération déjà en cours" });
+    res.set("Idempotent-Replay", "true");
+    return res.status(deja.status).json(deja.corps);
+  }
+  operations.set(cle, { at: maintenant, enCours: true });
+  const envoie = res.json.bind(res);
+  res.json = (corps) => {
+    operations.set(cle, { at: Date.now(), status: res.statusCode, corps });
+    return envoie(corps);
+  };
+  // une reponse qui n'est pas du JSON (erreur imprevue) libere la cle
+  res.on("finish", () => {
+    if (operations.get(cle)?.enCours) operations.delete(cle);
+  });
+  next();
+});
+
 // --- Journal ------------------------------------------------------------------
 // L'historique affiche en bas du dashboard, du plus recent au plus ancien.
 // ?avant=<id> pour la suite, ?filtre=recu|drop|impression|autres.
@@ -366,15 +397,20 @@ router.post("/colis/drop-carrier/:carrier", (req, res) => {
   res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
 });
 
+// +n / -n colis a la main. Plusieurs appuis rapides arrivent en une seule
+// operation (`n`) : chacun compte, aucun n'est perdu.
+const nombreDe = (req) => Math.min(Math.max(parseInt(req.body?.n ?? 1, 10) || 1, 1), 100);
+
 router.post("/colis/quick-add/:sender", (req, res) => {
-  const colis = quickAddColis(req.params.sender);
-  res.json(colis);
+  const n = nombreDe(req);
+  const colis = quickAddColis(req.params.sender, n);
+  res.json({ ...colis, count: n });
 });
 
 router.post("/colis/quick-remove/:sender", (req, res) => {
-  const removed = quickRemoveColis(req.params.sender);
+  const removed = quickRemoveColis(req.params.sender, nombreDe(req));
   if (!removed) return res.status(404).json({ error: "Aucun colis en attente pour cet expediteur" });
-  res.json({ ok: true });
+  res.json({ ok: true, removed });
 });
 
 router.get("/stock", (req, res) => {

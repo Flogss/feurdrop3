@@ -106,11 +106,8 @@ final class PrintModel {
             try data.write(to: fichier, options: .atomic)
             app.reachedServer()
             withAnimation(Theme.bouncy) { lastPDF = LastPDF(job: job, file: fichier) }
-            celebration += 1
-            app.toasts.show("PDF prêt · \(lastPDF?.detail ?? "")")
-            Printer.present(fichier, name: "Étiquettes Drop")
-            await refresh()
-            await app.dashboard.refresh()
+            signaleAbsentes(job)
+            imprime(job, fichier)
         } catch {
             app.toasts.show("Impression impossible : \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)", style: .error)
         }
@@ -118,7 +115,41 @@ final class PrintModel {
 
     func reprint() {
         guard let lastPDF else { return }
-        Printer.present(lastPDF.file, name: "Étiquettes Drop")
+        imprime(lastPDF.job, lastPDF.file)
+    }
+
+    /// La fenetre d'impression ; les etiquettes ne sont marquees imprimees
+    /// qu'une fois l'impression partie. Annulee : elles restent a imprimer.
+    private func imprime(_ job: PrintJob, _ fichier: URL) {
+        Printer.present(fichier, name: "Étiquettes Drop") { [weak self] reussi in
+            guard let self else { return }
+            Task { @MainActor in
+                guard reussi else {
+                    self.app.toasts.show("Impression annulée : les étiquettes restent à imprimer.", style: .info)
+                    return
+                }
+                let par = Platform.isMac ? "Mac" : "iPhone"
+                if await self.app.perform({ try await self.app.api.confirmPrinted(job, par: par) }) != nil {
+                    self.celebration += 1
+                    self.app.toasts.show("Imprimé · \(LastPDF(job: job, file: fichier).detail)")
+                } else {
+                    self.app.toasts.show("Imprimé, mais pas enregistré : relance « Réimprimer » pour le noter.", style: .error)
+                }
+                await self.refresh()
+                await self.app.dashboard.refresh()
+            }
+        }
+    }
+
+    /// ce qui n'a pas pu entrer dans le PDF : on le dit (il reste a imprimer)
+    private func signaleAbsentes(_ job: PrintJob) {
+        let absents = (job.missing ?? 0) + (job.failed ?? 0)
+        guard absents > 0 else { return }
+        let raison = job.absents?.first?.reason.map { " (\($0))" } ?? ""
+        app.toasts.show(
+            "⚠️ \(Format.count(absents, "étiquette n'a pas pu être ajoutée", "étiquettes n'ont pas pu être ajoutées"))\(raison) : elle\(absents > 1 ? "s restent" : " reste") à imprimer.",
+            style: .error
+        )
     }
 
     // MARK: Colis

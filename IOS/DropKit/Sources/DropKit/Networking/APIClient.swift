@@ -57,9 +57,10 @@ public final class APIClient: Sendable {
         query: [URLQueryItem] = [],
         body: (any Encodable & Sendable)? = nil,
         timeout: TimeInterval = 15,
+        operation: Bool = false,
         as: Response.Type = Response.self
     ) async throws -> Response {
-        let data = try await raw(method, path, query: query, body: body, timeout: timeout)
+        let data = try await raw(method, path, query: query, body: body, timeout: timeout, operation: operation)
         do {
             return try decoder.decode(Response.self, from: data)
         } catch let DecodingError.keyNotFound(cle, contexte) {
@@ -72,12 +73,16 @@ public final class APIClient: Sendable {
     }
 
     /// Appel qui rend les octets bruts (PDF, image d'un code-barre).
+    /// `operation` : une ecriture qui compte (ajout de colis, stock) -- elle
+    /// porte une cle unique (Idempotency-Key) et peut donc etre renvoyee apres
+    /// une coupure sans risque d'etre comptee deux fois.
     public func raw(
         _ method: Method,
         _ path: String,
         query: [URLQueryItem] = [],
         body: (any Encodable & Sendable)? = nil,
-        timeout: TimeInterval = 15
+        timeout: TimeInterval = 15,
+        operation: Bool = false
     ) async throws -> Data {
         // le chemin arrive deja encode (voir `segment`) : on le colle tel quel
         let base = baseURL.absoluteString.hasSuffix("/") ? String(baseURL.absoluteString.dropLast()) : baseURL.absoluteString
@@ -97,7 +102,10 @@ public final class APIClient: Sendable {
             requete.httpBody = Data("{}".utf8)
         }
 
-        let essais = method == .get ? 2 : 1
+        if operation { requete.setValue(UUID().uuidString, forHTTPHeaderField: "Idempotency-Key") }
+
+        // une lecture, ou une operation identifiee, se renvoie sans risque
+        let essais = method == .get ? 2 : (operation ? 3 : 1)
         var derniere: APIError = .offline
         for essai in 1...essais {
             do {

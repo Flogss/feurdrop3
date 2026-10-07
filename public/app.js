@@ -91,6 +91,22 @@ const postJSON = (url, corps, options) =>
     { delai: 30000, ...options }
   );
 
+// Une operation qui compte (ajout de colis, stock) porte une cle unique : si le
+// reseau coupe, on la renvoie (jusqu'a 3 fois) sans risque de la compter deux
+// fois -- le serveur reconnait la cle et rejoue sa premiere reponse.
+const cleOperation = () =>
+  globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+const postOperation = (url, corps) =>
+  fetchJSON(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": cleOperation() },
+      body: JSON.stringify(corps || {}),
+    },
+    { delai: 20000, essais: 3 }
+  );
+
 // --- Retour haptique -----------------------------------------------------------
 // Android sait vibrer. L'iPhone non, mais basculer un interrupteur natif le
 // fait tressaillir : on en garde un, invisible, juste pour ca.
@@ -267,6 +283,58 @@ async function agir(bouton, action, { succes, eclats = false } = {}) {
     toast(err.message || "Action impossible", "error");
     return undefined;
   }
+}
+
+// +1 / -1 colis a la main : CHAQUE appui compte. Avant, un appui fait pendant
+// l'envoi du precedent etait ignore (verrou "anti double clic") : taper cinq
+// fois vite pouvait n'ajouter qu'un ou deux colis. Les appuis d'un expediteur
+// partent maintenant un envoi a la fois, ceux faits pendant un envoi sont
+// cumules et partent ensemble juste apres (+3 en une operation).
+const colisMain = new Map(); // nom -> { ajouts, retraits, boucle }
+
+function colisALaMain(nom, sens, bouton) {
+  let e = colisMain.get(nom);
+  if (!e) colisMain.set(nom, (e = { ajouts: 0, retraits: 0, boucle: null }));
+  if (sens > 0) e.ajouts += 1;
+  else e.retraits += 1;
+  if (!e.boucle) e.boucle = envoieColisMain(nom, e, bouton);
+  return e.boucle;
+}
+
+async function envoieColisMain(nom, e, bouton) {
+  const chemin = (sens) => `/api/colis/${sens > 0 ? "quick-add" : "quick-remove"}/${encodeURIComponent(nom)}`;
+  while (e.ajouts || e.retraits) {
+    if (e.ajouts) {
+      const n = e.ajouts;
+      e.ajouts = 0;
+      try {
+        await postOperation(chemin(1), { n });
+        toast(`+${pluriel(n, "colis", "colis")} · ${nom}`);
+      } catch (err) {
+        if (bouton?.isConnected) secoue(bouton);
+        toast(
+          err instanceof ErreurReseau
+            ? `Connexion instable pendant l'ajout pour ${nom} : compte revérifié`
+            : `${pluriel(n, "colis non ajouté", "colis non ajoutés")} pour ${nom} : ${err.message}`,
+          "error"
+        );
+      }
+    }
+    if (e.retraits) {
+      const n = e.retraits;
+      e.retraits = 0;
+      try {
+        const r = await postOperation(chemin(-1), { n });
+        toast(`−${pluriel(r.removed ?? n, "colis", "colis")} · ${nom}`);
+      } catch (err) {
+        if (bouton?.isConnected) secoue(bouton);
+        toast(/Aucun colis/.test(err.message) ? `Aucun colis en attente pour ${nom}` : err.message, /Aucun colis/.test(err.message) ? "info" : "error");
+      }
+    }
+    // le compte affiche vient du serveur, quoi qu'il arrive
+    await loadStats(false, true).catch(() => {});
+  }
+  e.boucle = null;
 }
 
 // Un drop groupe ne solde que les colis deja imprimes : la reponse dit combien
@@ -2083,69 +2151,97 @@ const STOCKS = {
   normal: { valeur: "stock-value", boite: "stock-normal", nom: "normal" },
   bj: { valeur: "stock-bj-value", boite: "stock-bj", nom: "BJ" },
 };
-// un appui en cours d'envoi : le rafraichissement de fond ne doit pas ecraser
-// la valeur deja affichee par une valeur serveur en retard
-const stockEnVol = { normal: 0, bj: 0 };
+// Le stock, appui par appui. L'affichage suit le doigt tout de suite ; le
+// serveur recoit les appuis UN envoi a la fois par stock -- ceux faits pendant
+// un envoi sont cumules et partent juste apres. Avant, chaque appui partait de
+// son cote : les reponses revenaient parfois dans le desordre (la plus
+// ancienne ecrasait alors la plus recente) et un echec remettait la valeur
+// d'avant le clic, effacant au passage les autres appuis en route.
+// Affiche = derniere valeur du serveur + ce qui est en cours d'envoi + ce qui
+// attend : il converge toujours vers le serveur.
+const stockEtat = {
+  normal: { confirme: null, envoi: 0, attente: 0, boucle: null },
+  bj: { confirme: null, envoi: 0, attente: 0, boucle: null },
+};
 let stockCharge = false;
 
 async function loadStock() {
   rendStock(await fetchJSON("/api/stock"));
 }
 
+function afficheStock(kind, { premier = false } = {}) {
+  const s = STOCKS[kind];
+  const f = stockEtat[kind];
+  const el = $(s.valeur);
+  const value = (f.confirme ?? 0) + f.envoi + f.attente;
+  const avant = el._valeur;
+  if (value === avant) {
+    // deja affiche : on ne touche a rien
+  } else if (typeof avant === "number" && Math.abs(value - avant) <= 2) {
+    el._valeur = value;
+    roule(el, entier(value), value - avant);
+  } else {
+    el._texte = entier(value);
+    compte(el, value, { depuis: premier && nouvelleSession ? 0 : undefined, delai: premier ? 520 : 0 });
+  }
+  $(s.boite).classList.toggle("is-low", value <= LOW_STOCK_THRESHOLD);
+}
+
+// Une valeur du serveur (rafraichissement, ou reponse d'un envoi) : elle fait
+// foi pour un stock qui n'a rien en route.
 function rendStock(stocks) {
   const premier = !stockCharge;
   stockCharge = true;
-  for (const [kind, s] of Object.entries(STOCKS)) {
-    if (stockEnVol[kind]) continue;
-    const el = $(s.valeur);
-    const value = stocks[kind] || 0;
-    const avant = el._valeur;
-    if (value === avant) {
-      // deja affiche (souvent par l'appui lui-meme) : on ne touche a rien
-    } else if (typeof avant === "number" && Math.abs(value - avant) <= 2) {
-      el._valeur = value;
-      roule(el, entier(value), value - avant);
-    } else {
-      el._texte = entier(value);
-      compte(el, value, { depuis: premier && nouvelleSession ? 0 : undefined, delai: premier ? 520 : 0 });
-    }
-    $(s.boite).classList.toggle("is-low", value <= LOW_STOCK_THRESHOLD);
+  for (const kind of Object.keys(STOCKS)) {
+    const f = stockEtat[kind];
+    if (f.envoi || f.attente) continue;
+    f.confirme = stocks[kind] || 0;
+    afficheStock(kind, { premier });
   }
 }
 
-// Les deux stocks sont independants : dropper un BJ retire du stock BJ, un
-// colis normal du stock normal. L'affichage suit le doigt tout de suite, le
-// serveur confirme derriere ; en cas d'echec, la valeur revient.
-async function adjustStock(delta, kind = "normal") {
-  const s = STOCKS[kind];
-  const el = $(s.valeur);
-  const precedent = typeof el._valeur === "number" ? el._valeur : 0;
-  const local = precedent + delta;
-  el._valeur = local;
-  if (Math.abs(delta) <= 2) roule(el, entier(local), delta);
-  else {
-    el._valeur = precedent;
-    compte(el, local);
-  }
-  $(s.boite).classList.toggle("is-low", local <= LOW_STOCK_THRESHOLD);
+// Ajoute `delta` au stock : affiche tout de suite, envoie quand c'est son tour.
+// Renvoie vrai si TOUS les envois de cette serie ont abouti.
+function adjustStock(delta, kind = "normal") {
+  const f = stockEtat[kind];
+  f.attente += delta;
+  afficheStock(kind);
+  if (!f.boucle) f.boucle = videStock(kind);
+  return f.boucle;
+}
 
-  stockEnVol[kind]++;
-  try {
-    const stocks = await postJSON("/api/stock/adjust", { delta, kind });
-    stockEnVol[kind]--;
-    rendStock(stocks);
-    return true;
-  } catch (err) {
-    stockEnVol[kind]--;
-    // l'action optimiste a echoue : on revient a ce qu'on avait
-    el._valeur = local;
-    roule(el, entier(precedent), -delta);
-    el._valeur = precedent;
-    $(s.boite).classList.toggle("is-low", precedent <= LOW_STOCK_THRESHOLD);
-    secoue($(s.boite));
-    toast(err.message, "error");
-    return false;
+async function videStock(kind) {
+  const f = stockEtat[kind];
+  let ok = true;
+  while (f.attente !== 0) {
+    f.envoi = f.attente;
+    f.attente = 0;
+    try {
+      const stocks = await postOperation("/api/stock/adjust", { delta: f.envoi, kind });
+      f.confirme = stocks[kind];
+      f.envoi = 0;
+      // l'autre stock, s'il n'a rien en route, prend la valeur du serveur
+      const autre = kind === "bj" ? "normal" : "bj";
+      const g = stockEtat[autre];
+      if (!g.envoi && !g.attente && typeof stocks[autre] === "number") {
+        g.confirme = stocks[autre];
+        afficheStock(autre);
+      }
+    } catch (err) {
+      // seul CET envoi est mis de cote : les appuis faits depuis restent
+      f.envoi = 0;
+      ok = false;
+      secoue($(STOCKS[kind].boite));
+      // une coupure ne dit pas si le serveur l'a applique : on revérifie
+      toast(err instanceof ErreurReseau ? "Connexion instable : stock revérifié" : `Stock non enregistré : ${err.message}`, "error");
+    }
+    afficheStock(kind);
   }
+  f.boucle = null;
+  // apres un echec, la valeur du serveur fait foi tout de suite (sans
+  // attendre le prochain rafraichissement)
+  if (!ok) await loadStock().catch(() => {});
+  return ok;
 }
 
 document.querySelectorAll("[data-stock]").forEach((btn) => {
@@ -2971,23 +3067,8 @@ document.addEventListener("click", async (e) => {
   }
 
   if (d.quickAdd || d.quickRemove) {
-    // un double appui ne doit pas ajouter deux colis
-    if (cible.dataset.verrou) return;
-    cible.dataset.verrou = "1";
-    const nom = d.quickAdd || d.quickRemove;
-    const ajout = Boolean(d.quickAdd);
     haptique();
-    try {
-      await postJSON(`/api/colis/${ajout ? "quick-add" : "quick-remove"}/${encodeURIComponent(nom)}`);
-      toast(`${ajout ? "+1" : "−1"} colis · ${nom}`);
-    } catch (err) {
-      secoue(cible);
-      if (!ajout) toast(`Aucun colis en attente pour ${nom}`, "info");
-      else toast(err.message, "error");
-    } finally {
-      delete cible.dataset.verrou;
-    }
-    return refreshAll().catch(() => {});
+    return colisALaMain(d.quickAdd || d.quickRemove, d.quickAdd ? 1 : -1, cible);
   }
 
   if (cible.classList.contains("drop-except-lit-btn")) {
@@ -4305,7 +4386,21 @@ async function lancerImpression(bouton, corps) {
   if (surIPhone) toast(`PDF prêt · ${detail} · Ouvrir`, "success", 9000, { lien: res.url });
   else toast(`PDF prêt · ${detail}`);
 
+  // ce qui n'a pas pu entrer dans le PDF : on le dit (il reste a imprimer)
+  const absentes = (res.missing || 0) + (res.failed || 0);
+  if (absentes > 0) {
+    const raison = res.absents?.[0]?.reason ? ` (${res.absents[0].reason})` : "";
+    toast(
+      `⚠️ ${pluriel(absentes, "étiquette n'a pas pu être ajoutée", "étiquettes n'ont pas pu être ajoutées")}${raison} : ${absentes > 1 ? "elles restent" : "elle reste"} à imprimer.`,
+      "error",
+      9000
+    );
+  }
+
+  // Les etiquettes sont marquees imprimees quand le PDF s'ouvre (pas avant) :
+  // la liste se met a jour une fois l'onglet charge.
   await loadImprime();
+  setTimeout(() => loadImprime().catch(() => {}), 2500);
 }
 
 $("imp-all").addEventListener("click", (e) => lancerImpression(e.currentTarget, { categorie: "*", scope: "new" }));

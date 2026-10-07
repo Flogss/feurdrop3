@@ -248,9 +248,11 @@ async function buildRoll(labels) {
 
   for (const item of labels) {
     try {
-      prepared.push(...(await prepareLabel(out, item)));
+      const morceaux = await prepareLabel(out, item);
+      if (!morceaux.length) throw new Error("aucune page dans le fichier");
+      prepared.push(...morceaux);
     } catch (err) {
-      failed.push({ label: item.label, reason: err.message });
+      failed.push({ label: item.label, colisId: item.colisId, reason: err.message });
     }
   }
 

@@ -209,6 +209,70 @@ if (!senderColumns.includes("bj_price")) {
   }
 }
 
+// --- Arrivees -----------------------------------------------------------------
+// Chaque fichier recu par le bot est inscrit ici AVANT d'etre traite, et n'en
+// sort qu'une fois traite. Avant, la file des fichiers a traiter ne vivait
+// qu'en memoire : un redemarrage du serveur (chaque mise a jour) pendant un
+// envoi de trente fichiers perdait ceux qui attendaient encore, alors que
+// Telegram les considerait comme livres. Au demarrage, ce qui reste est repris
+// dans l'ordre. Un meme message livre deux fois par Telegram n'est inscrit
+// qu'une fois (cle chat + message). `colis_id` / `paire_id` : ce que le
+// traitement a deja cree -- une reprise le reutilise au lieu d'en creer un
+// second.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS arrivees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    statut TEXT NOT NULL DEFAULT 'attente',
+    colis_id INTEGER,
+    paire_id INTEGER,
+    essais INTEGER NOT NULL DEFAULT 0,
+    erreur TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    UNIQUE (chat_id, message_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_arrivees_statut ON arrivees(statut);
+`);
+
+/** Inscrit un fichier recu ; renvoie son numero, ou null s'il l'etait deja. */
+function inscritArrivee(chatId, messageId, message) {
+  const info = db
+    .prepare("INSERT OR IGNORE INTO arrivees (chat_id, message_id, message) VALUES (?, ?, ?)")
+    .run(chatId, messageId, JSON.stringify(message));
+  return info.changes ? Number(info.lastInsertRowid) : null;
+}
+
+function getArrivee(id) {
+  return db.prepare("SELECT * FROM arrivees WHERE id = ?").get(id);
+}
+
+function arriveeLiee(id, { colisId, paireId } = {}) {
+  if (colisId) db.prepare("UPDATE arrivees SET colis_id = ?, updated_at = datetime('now') WHERE id = ?").run(colisId, id);
+  if (paireId) db.prepare("UPDATE arrivees SET paire_id = ?, updated_at = datetime('now') WHERE id = ?").run(paireId, id);
+}
+
+function arriveeFaite(id) {
+  db.prepare("UPDATE arrivees SET statut = 'fait', erreur = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+}
+
+/** Un essai rate : le compte monte ; `definitif` la sort de la file. */
+function arriveeRatee(id, erreur, { definitif = false } = {}) {
+  db.prepare(
+    `UPDATE arrivees SET essais = essais + 1, erreur = ?, statut = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(String(erreur || "").slice(0, 300), definitif ? "echec" : "attente", id);
+  return getArrivee(id);
+}
+
+function arriveesEnAttente() {
+  return db.prepare("SELECT * FROM arrivees WHERE statut = 'attente' ORDER BY id").all();
+}
+
+// les arrivees traitees ne servent plus apres quelques jours
+db.prepare("DELETE FROM arrivees WHERE statut != 'attente' AND created_at < datetime('now', '-7 days')").run();
+
 // --- Journal -----------------------------------------------------------------
 // Tout ce qui arrive aux colis, dans l'ordre : recus, dropes, imprimes, retires,
 // changes de type, de prix ou de transporteur, notes, stock, tournees,
@@ -1160,20 +1224,33 @@ function setBatchNote(batchId, note) {
   return n;
 }
 
-function quickAddColis(senderName) {
-  const colis = addColis(senderName, { journal: false });
-  journalise("ajout", "+1 colis à la main", { detail: colis.sender_name, valeur: colis.price, nombre: 1 });
+// +n colis a la main, en une fois (plusieurs appuis rapides)
+function quickAddColis(senderName, n = 1) {
+  let colis = null;
+  let valeur = 0;
+  for (let i = 0; i < n; i++) {
+    colis = addColis(senderName, { journal: false });
+    valeur += colis.price;
+  }
+  journalise("ajout", `+${n} colis à la main`, { detail: colis.sender_name, valeur, nombre: n });
   return colis;
 }
 
-function quickRemoveColis(senderName) {
-  const colis = db
-    .prepare("SELECT id, price, sender_name FROM colis WHERE sender_name = ? AND status = 'pending' ORDER BY id DESC LIMIT 1")
-    .get(senderName);
-  if (!colis) return false;
-  db.prepare("DELETE FROM colis WHERE id = ?").run(colis.id);
-  journalise("retrait", "−1 colis à la main", { detail: colis.sender_name, valeur: colis.price, nombre: 1 });
-  return true;
+// -n colis a la main : les plus recents de l'expediteur. Renvoie combien ont
+// ete retires (0 : aucun en attente).
+function quickRemoveColis(senderName, n = 1) {
+  const lignes = db
+    .prepare("SELECT id, price, sender_name FROM colis WHERE sender_name = ? AND status = 'pending' ORDER BY id DESC LIMIT ?")
+    .all(senderName, n);
+  if (!lignes.length) return 0;
+  const supprime = db.prepare("DELETE FROM colis WHERE id = ?");
+  for (const l of lignes) supprime.run(l.id);
+  journalise("retrait", `−${lignes.length} colis à la main`, {
+    detail: senderName,
+    valeur: lignes.reduce((s, l) => s + l.price, 0),
+    nombre: lignes.length,
+  });
+  return lignes.length;
 }
 
 // Lundi (UTC) de la semaine contenant `dateStr` (ou aujourd'hui si omis).
@@ -1468,6 +1545,12 @@ function setBatchType(batchId, type) {
 module.exports = {
   db,
   evenements,
+  inscritArrivee,
+  getArrivee,
+  arriveeLiee,
+  arriveeFaite,
+  arriveeRatee,
+  arriveesEnAttente,
   journalise,
   avecSource,
   getJournal,

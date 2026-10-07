@@ -25,7 +25,7 @@ public struct DropAPI: Sendable {
 
     public func adjustStock(_ delta: Int, kind: StockKind) async throws -> Stock {
         struct Corps: Encodable, Sendable { let delta: Int; let kind: String }
-        return try await client.send(.post, "/api/stock/adjust", body: Corps(delta: delta, kind: kind.rawValue))
+        return try await client.send(.post, "/api/stock/adjust", body: Corps(delta: delta, kind: kind.rawValue), operation: true)
     }
 
     /// Le "+N" des notifications compte depuis la derniere fois qu'on a regarde.
@@ -91,12 +91,19 @@ public struct DropAPI: Sendable {
         return try await client.send(.get, "/api/journal", query: query)
     }
 
-    public func quickAdd(sender: String) async throws {
-        _ = try await client.raw(.post, "/api/colis/quick-add/\(segment(sender))")
+    /// +n colis a la main (plusieurs appuis en une operation)
+    public func quickAdd(sender: String, n: Int = 1) async throws {
+        struct Corps: Encodable, Sendable { let n: Int }
+        _ = try await client.raw(.post, "/api/colis/quick-add/\(segment(sender))", body: Corps(n: n), operation: true)
     }
 
-    public func quickRemove(sender: String) async throws {
-        _ = try await client.raw(.post, "/api/colis/quick-remove/\(segment(sender))")
+    /// -n colis a la main ; renvoie combien ont ete retires
+    @discardableResult
+    public func quickRemove(sender: String, n: Int = 1) async throws -> Int {
+        struct Corps: Encodable, Sendable { let n: Int }
+        struct Reponse: Decodable, Sendable { let removed: Int? }
+        let r: Reponse = try await client.send(.post, "/api/colis/quick-remove/\(segment(sender))", body: Corps(n: n), operation: true)
+        return r.removed ?? n
     }
 
     // MARK: - Impression
@@ -123,9 +130,17 @@ public struct DropAPI: Sendable {
         try await client.send(.post, "/api/print/build", body: request, timeout: 120)
     }
 
-    /// Le PDF construit, a imprimer (AirPrint) ou partager.
+    /// Le PDF construit, a imprimer (AirPrint) ou partager. `marquer=0` : le
+    /// telechargement ne marque rien, l'app confirme apres l'impression.
     public func labelsPDF(_ job: PrintJob) async throws -> Data {
-        try await client.raw(.get, job.url, timeout: 60)
+        try await client.raw(.get, job.url, query: [URLQueryItem(name: "marquer", value: "0")], timeout: 60)
+    }
+
+    /// La fenetre d'impression a confirme : les etiquettes du PDF sont
+    /// marquees imprimees (une seule fois par PDF).
+    public func confirmPrinted(_ job: PrintJob, par: String) async throws {
+        struct Corps: Encodable, Sendable { let ids: [Int]; let par: String }
+        _ = try await client.raw(.post, "/api/print/job/\(job.jobId)/imprime", body: Corps(ids: job.ids ?? [], par: par))
     }
 
     public func editParcel(_ id: Int, _ patch: ParcelPatch) async throws -> ParcelPatchResult {

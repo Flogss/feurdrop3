@@ -267,14 +267,19 @@ async function mergeLabels(labels) {
   const failed = [];
   let pages = 0;
 
+  // Chaque echec est rattache a SON colis (et non a son nom de fichier :
+  // deux etiquettes s'appellent souvent pareil, "label.pdf"). Un fichier qui
+  // ne donne aucune page est un echec : il ne doit pas etre marque imprime.
   for (const item of labels) {
     try {
-      pages +=
+      const n =
         item.kind === "image"
           ? await addImagePage(out, item.bytes, item.numero)
           : await addPdfPages(out, item.bytes, item.numero);
+      if (!n) throw new Error("aucune page dans le fichier");
+      pages += n;
     } catch (err) {
-      failed.push({ label: item.label, reason: err.message });
+      failed.push({ label: item.label, colisId: item.colisId, reason: err.message });
     }
   }
 

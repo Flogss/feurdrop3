@@ -29,7 +29,15 @@ final class DashboardModel {
     /// les gestes deja partis (un double appui ne doit rien doubler)
     private(set) var busy: Set<String> = []
 
+    // le stock : ce qui est en cours d'envoi, ce qui attend son tour, la
+    // derniere valeur confirmee par le serveur, l'envoi en cours
     @ObservationIgnored private var stockEnVol: [StockKind: Int] = [:]
+    @ObservationIgnored private var stockAttente: [StockKind: Int] = [:]
+    @ObservationIgnored private var stockServeur: Stock?
+    @ObservationIgnored private var boucleStock: [StockKind: Task<Bool, Never>] = [:]
+    // les colis a la main en attente d'envoi, par expediteur
+    @ObservationIgnored private var colisMain: [String: (ajouts: Int, retraits: Int)] = [:]
+    @ObservationIgnored private var boucleColisMain: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var dernierVu: Date = .distantPast
     @ObservationIgnored private var dernierResume: String?
 
@@ -109,13 +117,15 @@ final class DashboardModel {
         }
     }
 
+    /// Une valeur du serveur (rafraichissement) : elle fait foi pour un stock
+    /// qui n'a rien en route ; un stock en cours d'envoi garde sa valeur
+    /// confirmee jusqu'a la reponse de son envoi.
     private func appliqueStock(_ serveur: Stock) {
-        var affiche = stock ?? serveur
-        // un appui en cours d'envoi : la valeur serveur, en retard, ne doit
-        // pas ecraser celle qu'on a deja montree
-        if stockEnVol[.normal, default: 0] == 0 { affiche.normal = serveur.normal }
-        if stockEnVol[.bj, default: 0] == 0 { affiche.bj = serveur.bj }
-        if affiche != stock { stock = affiche }
+        var base = stockServeur ?? serveur
+        if stockEnVol[.normal, default: 0] == 0 && stockAttente[.normal, default: 0] == 0 && boucleStock[.normal] == nil { base.normal = serveur.normal }
+        if stockEnVol[.bj, default: 0] == 0 && stockAttente[.bj, default: 0] == 0 && boucleStock[.bj] == nil { base.bj = serveur.bj }
+        stockServeur = base
+        if stock == nil { stock = base } else { afficheStock() }
     }
 
     /// Appele quand le dashboard apparait au lancement : le son part avec la
@@ -142,26 +152,54 @@ final class DashboardModel {
 
     /// Optimiste : l'affichage bouge tout de suite ; en cas d'echec il revient.
     @discardableResult
+    /// Le stock, appui par appui : l'affichage suit le doigt tout de suite ; le
+    /// serveur recoit les appuis UN envoi a la fois par stock, ceux faits
+    /// pendant un envoi sont cumules et partent juste apres. Avant, chaque
+    /// appui partait de son cote : une reponse en retard ecrasait la plus
+    /// recente, et un echec remettait la valeur d'avant le clic, effacant les
+    /// autres appuis en route. Affiche = serveur + en cours + en attente.
     func adjustStock(_ delta: Int, _ kind: StockKind) async -> Bool {
-        guard delta != 0, var local = stock else { return false }
-        let precedent = kind == .normal ? local.normal : local.bj
-        if kind == .normal { local.normal += delta } else { local.bj += delta }
-        withAnimation(Theme.spring) { stock = local }
-        stockEnVol[kind, default: 0] += 1
-        do {
-            let serveur = try await app.api.adjustStock(delta, kind: kind)
-            app.reachedServer()
-            stockEnVol[kind, default: 1] -= 1
-            appliqueStock(serveur)
-            return true
-        } catch {
-            stockEnVol[kind, default: 1] -= 1
-            var retour = stock ?? local
-            if kind == .normal { retour.normal = precedent } else { retour.bj = precedent }
-            withAnimation(Theme.bouncy) { stock = retour }
-            app.report(error)
-            return false
+        guard delta != 0, stock != nil else { return false }
+        stockAttente[kind, default: 0] += delta
+        afficheStock()
+        if let boucle = boucleStock[kind] { return await boucle.value }
+        let boucle = Task { await videStock(kind) }
+        boucleStock[kind] = boucle
+        return await boucle.value
+    }
+
+    private func videStock(_ kind: StockKind) async -> Bool {
+        var ok = true
+        while stockAttente[kind, default: 0] != 0 {
+            let delta = stockAttente[kind, default: 0]
+            stockAttente[kind] = 0
+            stockEnVol[kind] = delta
+            do {
+                let serveur = try await app.api.adjustStock(delta, kind: kind)
+                app.reachedServer()
+                stockEnVol[kind] = 0
+                stockServeur = serveur
+            } catch {
+                // seul CET envoi est mis de cote : les appuis faits depuis restent
+                stockEnVol[kind] = 0
+                ok = false
+                app.report(error)
+            }
+            afficheStock()
         }
+        boucleStock[kind] = nil
+        // une coupure ne dit pas si le serveur a applique l'envoi : apres un
+        // echec, la valeur du serveur fait foi tout de suite
+        if !ok { await refresh() }
+        return ok
+    }
+
+    /// serveur + ce qui est en route, stock par stock
+    private func afficheStock() {
+        guard var affiche = stockServeur ?? stock else { return }
+        affiche.normal += stockEnVol[.normal, default: 0] + stockAttente[.normal, default: 0]
+        affiche.bj += stockEnVol[.bj, default: 0] + stockAttente[.bj, default: 0]
+        if affiche != stock { withAnimation(Theme.spring) { stock = affiche } }
     }
 
     // MARK: Tournee
@@ -222,23 +260,49 @@ final class DashboardModel {
         return Format.count(r.count, "colis dropé", "colis dropés") + suffixe + reste
     }
 
-    /// +1 / -1 colis a la main pour un expediteur
+    /// +1 / -1 colis a la main pour un expediteur : CHAQUE appui compte.
+    /// Avant, un appui fait pendant l'envoi du precedent etait ignore : taper
+    /// cinq fois vite pouvait n'ajouter qu'un ou deux colis. Les appuis partent
+    /// un envoi a la fois par expediteur ; ceux faits pendant un envoi sont
+    /// cumules et partent ensemble juste apres (+3 en une operation).
     func quick(_ nom: String, add: Bool) async {
-        let cle = (add ? "+" : "-") + nom
-        guard !busy.contains(cle) else { return }
-        busy.insert(cle)
-        defer { busy.remove(cle) }
-        do {
-            if add { try await app.api.quickAdd(sender: nom) } else { try await app.api.quickRemove(sender: nom) }
-            app.toasts.show("\(add ? "+1" : "−1") colis · \(nom)")
-        } catch {
-            if !add, case APIError.server = error {
-                app.toasts.show("Aucun colis en attente pour \(nom)", style: .info)
-            } else {
-                app.report(error)
+        var e = colisMain[nom] ?? (0, 0)
+        if add { e.ajouts += 1 } else { e.retraits += 1 }
+        colisMain[nom] = e
+        if let boucle = boucleColisMain[nom] { return await boucle.value }
+        let boucle = Task { await videColisMain(nom) }
+        boucleColisMain[nom] = boucle
+        await boucle.value
+    }
+
+    private func videColisMain(_ nom: String) async {
+        while let e = colisMain[nom], e.ajouts > 0 || e.retraits > 0 {
+            colisMain[nom] = (0, 0)
+            if e.ajouts > 0 {
+                do {
+                    try await app.api.quickAdd(sender: nom, n: e.ajouts)
+                    app.toasts.show("+\(Format.count(e.ajouts, "colis", "colis")) · \(nom)")
+                } catch {
+                    app.toasts.show("\(Format.count(e.ajouts, "colis non ajouté", "colis non ajoutés")) pour \(nom)", style: .error)
+                    app.report(error)
+                }
             }
+            if e.retraits > 0 {
+                do {
+                    let retires = try await app.api.quickRemove(sender: nom, n: e.retraits)
+                    app.toasts.show("−\(Format.count(retires, "colis", "colis")) · \(nom)")
+                } catch {
+                    if case APIError.server(status: 404, _) = error {
+                        app.toasts.show("Aucun colis en attente pour \(nom)", style: .info)
+                    } else {
+                        app.report(error)
+                    }
+                }
+            }
+            await refresh()
         }
-        await refresh()
+        colisMain[nom] = nil
+        boucleColisMain[nom] = nil
     }
 
     // MARK: Outils

@@ -133,4 +133,13 @@ public struct PrintJob: Codable, Sendable, Equatable {
     public var lengthMm: Double?
     public var missing: Int?
     public var failed: Int?
+    /// les colis du PDF : renvoyes pour confirmer l'impression
+    public var ids: [Int]?
+    /// ce qui n'a pas pu entrer dans le PDF (reste "a imprimer")
+    public var absents: [EtiquetteAbsente]?
+}
+
+public struct EtiquetteAbsente: Codable, Sendable, Equatable {
+    public var label: String?
+    public var reason: String?
 }
