@@ -113,6 +113,36 @@ final class SettingsModel {
         await refresh()
     }
 
+    // MARK: Espaces expediteurs
+
+    func lienPortail(_ sender: Sender) -> URL? {
+        sender.portail?.url(sur: app.serverURL)
+    }
+
+    /// Cree le lien prive d'un expediteur (ou le regenere) et le copie.
+    func creePortail(_ sender: Sender) async {
+        let cle = "portail:\(sender.id)"
+        guard !busy.contains(cle) else { return }
+        busy.insert(cle)
+        defer { busy.remove(cle) }
+        let regenere = sender.portail?.lien != nil
+        guard let maj = await app.perform({ try await app.api.creePortail(senderID: sender.id) }) else { return }
+        withAnimation(Theme.spring) {
+            if let i = senders.firstIndex(where: { $0.id == maj.id }) { senders[i] = maj }
+        }
+        if let lien = lienPortail(maj) { Platform.copy(lien.absoluteString) }
+        app.toasts.show(regenere ? "Nouveau lien copié · l'ancien ne marche plus" : "Espace de \(sender.name) créé · lien copié")
+        celebration += 1
+    }
+
+    func retirePortail(_ sender: Sender) async {
+        guard let maj = await app.perform({ try await app.api.retirePortail(senderID: sender.id) }) else { return }
+        withAnimation(Theme.spring) {
+            if let i = senders.firstIndex(where: { $0.id == maj.id }) { senders[i] = maj }
+        }
+        app.toasts.show("Espace de \(sender.name) désactivé")
+    }
+
     // MARK: Fusions
 
     func merge(source: Sender, into cible: Sender) async {

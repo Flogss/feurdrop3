@@ -848,7 +848,9 @@ main { position: relative; margin-top: 8px; }
     transform var(--t-3) var(--ease-spring),
     filter var(--t-2);
 }
-.btn > * { position: relative; z-index: 1; }
+/* le contenu passe au-dessus de l'onde ; l'onde, elle, reste hors du flux
+   (sinon chaque appui elargissait le bouton de toute sa taille) */
+.btn > :not(.ripple) { position: relative; z-index: 1; }
 .btn .icon { width: 18px; height: 18px; }
 .btn:active:not(:disabled) { transform: scale(0.95); transition-duration: 70ms; }
 .btn:disabled { opacity: 0.38; cursor: not-allowed; }
@@ -2157,6 +2159,15 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
 
 /* Ligne "prix par expediteur" : le nom sur sa propre ligne, puis les trois
    tarifs etiquetes en dessous (sinon le nom devenait illisible). */
+/* Espaces expediteurs : le nom, puis ses actions ; trop etroit, elles passent
+   dessous, alignees a droite */
+.portail-hint { margin: -2px 0 10px; }
+.portail-row { flex-wrap: wrap; row-gap: 8px; }
+.portail-row .lrow-main { min-width: 140px; }
+.portail-row.is-actif .lrow-sub { color: rgb(var(--teal-rgb)); }
+.portail-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.portail-actions .btn-icon { color: var(--text-3); }
+
 .sender-price { display: block; padding-top: 14px; padding-bottom: 14px; }
 .sender-price-head { display: flex; align-items: center; gap: 12px; }
 .sender-price-head .lrow-title { flex: 1; min-width: 0; }

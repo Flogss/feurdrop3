@@ -8,6 +8,22 @@ public struct Sender: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var litPrice: Double
     public var bjPrice: Double
     public var createdAt: String?
+    /// son espace prive (absent d'un serveur plus ancien)
+    public var portail: PortailExpediteur?
+}
+
+/// L'espace prive d'un expediteur : `lien` s'il en a un actif (sur le
+/// domaine du portail ; un simple chemin sur un serveur local). "Autre"
+/// (plusieurs expediteurs) n'en a jamais.
+public struct PortailExpediteur: Codable, Sendable, Equatable, Hashable {
+    public var possible: Bool
+    public var lien: String?
+    public var creeLe: String?
+
+    public func url(sur serveur: URL) -> URL? {
+        guard let lien else { return nil }
+        return URL(string: lien, relativeTo: serveur)?.absoluteURL
+    }
 }
 
 /// Les trois tarifs, tels que `PUT /api/senders/:id` les attend.

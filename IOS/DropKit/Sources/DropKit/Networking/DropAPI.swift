@@ -172,6 +172,18 @@ public struct DropAPI: Sendable {
         return serie.weeks
     }
 
+    // MARK: - Espaces expediteurs
+
+    /// Cree le lien prive d'un expediteur, ou le regenere (l'ancien cesse de
+    /// marcher).
+    public func creePortail(senderID: Int) async throws -> Sender {
+        try await client.send(.post, "/api/senders/\(senderID)/portail")
+    }
+
+    public func retirePortail(senderID: Int) async throws -> Sender {
+        try await client.send(.delete, "/api/senders/\(senderID)/portail")
+    }
+
     // MARK: - Expediteurs et dettes
 
     public func senders() async throws -> [Sender] {

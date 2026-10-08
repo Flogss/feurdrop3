@@ -57,6 +57,7 @@ const {
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart, notifyTourEnd, euro } = require("../push");
 const { refreshGroupStats, buildLabelsPdf } = require("../bot");
+const { creePortail, retirePortail, infoPortail } = require("../portail");
 
 // SMIC horaire NET francais, sert de point de comparaison apres une tournee :
 // c'est ce qu'on touche vraiment, donc comparable a l'argent des colis.
@@ -450,8 +451,28 @@ router.get("/stats/revenue/weekly-series", (req, res) => {
   res.json(getWeeklySeries());
 });
 
+// Un expediteur tel que le dashboard le voit : son jeton brut reste en base,
+// le dashboard recoit le chemin de son espace prive (portail.chemin).
+function vueSender({ portail_jeton, portail_cree_le, ...sender }) {
+  return { ...sender, portail: infoPortail({ ...sender, portail_jeton, portail_cree_le }) };
+}
+
 router.get("/senders", (req, res) => {
-  res.json(db.prepare("SELECT * FROM senders ORDER BY name ASC").all());
+  res.json(db.prepare("SELECT * FROM senders ORDER BY name ASC").all().map(vueSender));
+});
+
+// L'espace prive d'un expediteur : le creer, ou le regenerer (l'ancien lien
+// cesse aussitot de marcher) ; le desactiver.
+router.post("/senders/:id/portail", (req, res) => {
+  const r = creePortail(Number(req.params.id));
+  if (r.erreur) return res.status(r.status).json({ error: r.erreur });
+  res.json(vueSender(r.sender));
+});
+
+router.delete("/senders/:id/portail", (req, res) => {
+  const r = retirePortail(Number(req.params.id));
+  if (r.erreur) return res.status(r.status).json({ error: r.erreur });
+  res.json(vueSender(r.sender));
 });
 
 router.get("/senders/merge-candidates", (req, res) => {
@@ -548,7 +569,7 @@ router.post("/senders", (req, res) => {
     return res.status(400).json({ error: "Cet expediteur existe deja" });
   }
   journalise("expediteur", `Expéditeur ${name} ajouté`, { detail: `${euro(price)} · LIT ${euro(litPrice)} · BJ ${euro(bjPrice)}` });
-  res.json(db.prepare("SELECT * FROM senders WHERE name = ?").get(name));
+  res.json(vueSender(db.prepare("SELECT * FROM senders WHERE name = ?").get(name)));
 });
 
 router.put("/senders/:id", (req, res) => {
@@ -570,7 +591,7 @@ router.put("/senders/:id", (req, res) => {
   }
   const sender = updateSenderPrices(req.params.id, patch);
   if (!sender) return res.status(404).json({ error: "Expediteur introuvable" });
-  res.json(sender);
+  res.json(vueSender(sender));
 });
 
 router.delete("/senders/:id", (req, res) => {

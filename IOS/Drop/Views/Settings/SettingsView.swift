@@ -216,6 +216,20 @@ struct SettingsView: View {
                     Image(systemName: "eurosign.circle.fill").foregroundStyle(Theme.violet)
                 }
             }
+            NavigationLink(value: Route.portails) {
+                Label {
+                    HStack {
+                        Text("Espaces expéditeurs")
+                        Spacer()
+                        let actifs = model.senders.filter { $0.portail?.lien != nil }.count
+                        if actifs > 0 {
+                            Text(Format.count(actifs, "lien", "liens")).foregroundStyle(Theme.text3)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "link.circle.fill").foregroundStyle(Theme.teal)
+                }
+            }
             NavigationLink(value: Route.mergeOther) {
                 Label {
                     Text("Regrouper en « Autre »")

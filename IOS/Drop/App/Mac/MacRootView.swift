@@ -166,6 +166,7 @@ struct MacRootView: View {
                     .navigationDestination(for: Route.self) { route in
                         switch route {
                         case .prices: PricesView()
+                        case .portails: PortailsView()
                         case .mergeOther: MergeOtherView()
                         default: EmptyView()
                         }
@@ -286,6 +287,7 @@ struct MacSettingsView: View {
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .prices: PricesView()
+                    case .portails: PortailsView()
                     case .mergeOther: MergeOtherView()
                     default: EmptyView()
                     }

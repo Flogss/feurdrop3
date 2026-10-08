@@ -2097,7 +2097,140 @@ async function loadSenders() {
       </div>`,
   });
   renderMergePairSelects(rows);
+  renderPortails(rows);
 }
+
+// --- Espaces expediteurs -------------------------------------------------------
+// Le lien prive de chaque expediteur : le creer, le copier, l'ouvrir, le
+// regenerer (l'ancien cesse de marcher) ou le desactiver.
+// le serveur donne le lien complet (domaine du portail) ; en local, un chemin
+const lienPortail = (s) => (s.portail?.lien ? new URL(s.portail.lien, location.origin).href : null);
+
+function renderPortails(rows) {
+  const box = $("portail-rows");
+  if (!box) return;
+  const actifs = rows.filter((s) => s.portail?.lien).length;
+  $("portail-total").textContent = actifs ? pluriel(actifs, "lien actif", "liens actifs") : "";
+  rendListe(box, rows, {
+    cle: (s) => s.id,
+    videHtml: vide("tag", "Aucun expéditeur"),
+    html: (s) => {
+      const p = s.portail || {};
+      const lien = lienPortail(s);
+      const depuis = p.creeLe ? new Date(`${p.creeLe.replace(" ", "T")}Z`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) : "";
+      const sous = !p.possible
+        ? "Regroupe plusieurs expéditeurs : pas d'espace privé"
+        : lien
+          ? `Lien actif${depuis ? ` depuis le ${depuis}` : ""}`
+          : "Pas encore de lien";
+      const nom = escapeAttr(s.name);
+      const actions = !p.possible
+        ? ""
+        : lien
+          ? `<button class="btn btn-sm btn-primary" data-portail-copie="${escapeAttr(lien)}" data-name="${nom}" type="button">${ico("copy")}<span>Copier</span></button>
+             <a class="btn btn-icon btn-sm btn-ghost" href="${escapeAttr(lien)}" target="_blank" rel="noopener noreferrer" aria-label="Ouvrir l'espace de ${nom}">${ico("external")}</a>
+             <button class="btn btn-icon btn-sm btn-ghost" data-portail-regenere="${s.id}" data-name="${nom}" type="button" aria-label="Régénérer le lien de ${nom}">${ico("refresh")}</button>
+             <button class="btn btn-icon btn-sm btn-ghost" data-portail-coupe="${s.id}" data-name="${nom}" type="button" aria-label="Désactiver l'espace de ${nom}">${ico("x")}</button>`
+          : `<button class="btn btn-sm btn-secondary" data-portail-cree="${s.id}" data-name="${nom}" type="button">${ico("plus")}<span>Créer le lien</span></button>`;
+      return `
+      <div class="lrow portail-row${lien ? " is-actif" : ""}" data-key="${s.id}">
+        ${avatar(s.name)}
+        <div class="lrow-main">
+          <div class="lrow-title" title="${nom}">${escapeHtml(s.name)}</div>
+          <div class="lrow-sub">${sous}</div>
+        </div>
+        <div class="portail-actions">${actions}</div>
+      </div>`;
+    },
+  });
+}
+
+async function copieTexte(texte) {
+  try {
+    await navigator.clipboard.writeText(texte);
+    return true;
+  } catch {
+    // Safari refuse parfois apres un appel reseau : la feuille de partage
+    if (navigator.share) {
+      try {
+        await navigator.share({ url: texte });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-portail-copie], [data-portail-cree], [data-portail-regenere], [data-portail-coupe]");
+  if (!b) return;
+  const d = b.dataset;
+
+  if (d.portailCopie) {
+    haptique();
+    if (await copieTexte(d.portailCopie)) {
+      fait(b);
+      toast(`Lien de ${d.name} copié`);
+    } else {
+      toast("Copie impossible : ouvre le lien et copie l'adresse", "error");
+    }
+    return;
+  }
+
+  if (d.portailCree) {
+    return agir(
+      b,
+      async () => {
+        const s = await postJSON(`/api/senders/${d.portailCree}/portail`);
+        await loadSenders();
+        const lien = lienPortail(s);
+        if (lien && (await copieTexte(lien))) return `Espace de ${d.name} créé · lien copié`;
+        return `Espace de ${d.name} créé`;
+      },
+      { succes: (texte) => texte, eclats: true }
+    );
+  }
+
+  if (d.portailRegenere) {
+    const ok = await confirmer({
+      titre: `Nouveau lien pour ${d.name} ?`,
+      message: "L'ancien lien cessera de marcher immédiatement. Il faudra lui envoyer le nouveau.",
+      action: "Régénérer",
+    });
+    if (!ok) return;
+    return agir(
+      b,
+      async () => {
+        const s = await postJSON(`/api/senders/${d.portailRegenere}/portail`);
+        await loadSenders();
+        const lien = lienPortail(s);
+        if (lien && (await copieTexte(lien))) return "Nouveau lien copié · l'ancien ne marche plus";
+        return "Nouveau lien créé · l'ancien ne marche plus";
+      },
+      { succes: (texte) => texte }
+    );
+  }
+
+  if (d.portailCoupe) {
+    const ok = await confirmer({
+      titre: `Désactiver l'espace de ${d.name} ?`,
+      message: "Son lien cessera de marcher. Tu pourras en recréer un nouveau plus tard.",
+      action: "Désactiver",
+      danger: true,
+    });
+    if (!ok) return;
+    return agir(
+      b,
+      async () => {
+        await fetchJSON(`/api/senders/${d.portailCoupe}/portail`, { method: "DELETE" });
+        await loadSenders();
+      },
+      { succes: `Espace de ${d.name} désactivé` }
+    );
+  }
+});
 
 // Remplit les deux listes deroulantes de fusion en conservant la selection
 // courante si les noms existent toujours.
