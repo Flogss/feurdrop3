@@ -1,7 +1,7 @@
 const path = require("path");
 const express = require("express");
 const compression = require("compression");
-const { FORME_JETON, PAGE, ENTETES, ENTETES_PAGE, limiteur } = require("./portailCommun");
+const { FORME_JETON, PUBLIC, pageHtml, ENTETES, ENTETES_PAGE, limiteur } = require("./portailCommun");
 
 // Le portail des expediteurs, sur son propre domaine : un service Railway a
 // part (DROP_ROLE=portail), pour que l'adresse du dashboard n'apparaisse
@@ -14,9 +14,9 @@ const { FORME_JETON, PAGE, ENTETES, ENTETES_PAGE, limiteur } = require("./portai
 // renvoie que les colis de cet expediteur.
 
 const DASHBOARD = (process.env.DROP_INTERNE || "http://feurdrop3.railway.internal:8080").replace(/\/+$/, "");
-const PUBLIC = path.join(__dirname, "..", "public");
-// les seuls fichiers que la page utilise
-const FICHIERS = ["portail.css", "portail.js", "favicon.svg", "icon-192.png"];
+// les seuls fichiers que la page utilise : le systeme de design du
+// dashboard (styles.css, et les particules du fond), et ceux du portail
+const FICHIERS = ["styles.css", "particules.js", "portail.css", "portail.js", "favicon.svg", "icon-192.png"];
 
 const app = express();
 // derriere le proxy de Railway : l'adresse du visiteur vient de ses en-tetes
@@ -24,8 +24,10 @@ app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(compression());
 
+// revalides a chaque chargement (304 s'ils n'ont pas change) : la page les
+// appelle de toute facon par leur empreinte
 for (const fichier of FICHIERS) {
-  app.get(`/${fichier}`, (req, res) => res.sendFile(path.join(PUBLIC, fichier), { maxAge: "1h" }));
+  app.get(`/${fichier}`, (req, res) => res.sendFile(path.join(PUBLIC, fichier), { cacheControl: false, headers: { "Cache-Control": "no-cache" } }));
 }
 
 const essais = limiteur({ fenetreMs: 15 * 60 * 1000, max: 30 });
@@ -67,11 +69,11 @@ app.use("/api", (req, res) => res.status(404).json({ error: "Introuvable" }));
 // un lien faux le decouvre a la premiere demande de colis.
 app.get("/:jeton", (req, res) => {
   res.set(ENTETES_PAGE);
-  res.status(FORME_JETON.test(req.params.jeton) ? 200 : 404).sendFile(PAGE);
+  res.status(FORME_JETON.test(req.params.jeton) ? 200 : 404).type("html").send(pageHtml());
 });
 app.use((req, res) => {
   res.set(ENTETES_PAGE);
-  res.status(404).sendFile(PAGE);
+  res.status(404).type("html").send(pageHtml());
 });
 
 const PORT = process.env.PORT || 3001;

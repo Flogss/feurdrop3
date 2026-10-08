@@ -1,11 +1,14 @@
 // ============================================================================
-// L'espace expediteur : ses colis, ou ils en sont, et le bouton pour les
-// suivre chez le transporteur. Le lien de la page est la cle : le serveur
-// deduit l'expediteur du jeton et ne renvoie que ses colis.
+// L'espace expediteur : un outil pour retrouver un colis en quelques secondes,
+// meme parmi des centaines. La recherche par numero de suivi (instantanee,
+// insensible aux espaces, sur une partie du numero), les colis ranges par
+// transporteur, les filtres par statut et par transporteur, le tri, et sur
+// chaque colis le bouton pour le suivre chez le transporteur.
 //
-// La page se met a jour toute seule (toutes les 5 s quand elle est visible) :
-// seul ce qui change bouge -- le badge d'un colis passe en fondu, sa barre
-// avance, les compteurs roulent. Rien n'est recharge en entier.
+// Le lien de la page est la cle : le serveur deduit l'expediteur du jeton et
+// ne renvoie que ses colis -- tous, pour que la recherche et les comptes
+// soient exacts. La page se relit toutes les 5 s quand elle est visible
+// (304 tant que rien ne bouge) ; seul ce qui change bouge a l'ecran.
 // ============================================================================
 (() => {
   "use strict";
@@ -16,54 +19,69 @@
 
   const ETAPES = ["a_imprimer", "imprime", "en_drop", "drope"];
   const NOMS = { a_imprimer: "Pas imprimé", imprime: "Imprimé", en_drop: "En cours de drop", drope: "Drop" };
-  const TRANSPORTEURS_CONNUS = new Set(["MR", "LP", "CHRONO", "UPS", "DPD", "GLS", "DHL", "FEDEX"]);
-  const PAR_PAGE = 60;
+  const CONNUS = new Set(["MR", "LP", "CHRONO", "UPS", "DPD", "GLS", "DHL", "FEDEX"]);
+  const TOUS = 2000; // tout l'historique (le serveur plafonne au meme nombre)
+  const APERCU = 5; // colis montres par groupe avant "Afficher les autres"
+  const LOT = 100; // colis ajoutes a chaque "Afficher plus"
+  const MAX_RESULTATS = 60;
   const RAFRAICHISSEMENT_MS = 5000;
   const reduit = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const avecSouris = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  const memoire = {
+    lis(cle, defaut) {
+      try {
+        return JSON.parse(localStorage.getItem(cle)) ?? defaut;
+      } catch (e) {
+        return defaut;
+      }
+    },
+    ecris(cle, valeur) {
+      try {
+        localStorage.setItem(cle, JSON.stringify(valeur));
+      } catch (e) {
+        // navigation privee : tant pis pour le souvenir
+      }
+    },
+  };
 
   const etat = {
     donnees: null,
     etag: null,
-    nombre: PAR_PAGE,
-    filtre: null,
     enCours: false,
     echecs: 0,
     minuteur: null,
     fini: false,
+    q: "",
+    etape: null,
+    transporteur: null,
+    tri: memoire.lis("drop.portail.tri", "recent"),
+    // les groupes replies (gardes d'une visite a l'autre), et ceux deplies
+    // au-dela de l'apercu
+    fermes: new Set(memoire.lis("drop.portail.fermes", [])),
+    montres: new Map(),
   };
 
-  // --- Dates ------------------------------------------------------------------
-  // Le serveur parle en UTC ("2026-10-08 14:32:05") ; on affiche l'heure locale.
+  // --- Petits outils ------------------------------------------------------------
+  const nf = new Intl.NumberFormat("fr-FR");
+  const pluriel = (n, un, plusieurs) => `${nf.format(n)} ${n > 1 ? plusieurs : un}`;
   const date = (s) => (s ? new Date(`${s.replace(" ", "T")}Z`) : null);
   const heure = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
   const jourCourt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
-  const jourLong = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long" });
-  const cleJour = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-  function decalageJours(d) {
+  function ecartJours(d) {
     const a = new Date();
     a.setHours(0, 0, 0, 0);
     const b = new Date(d);
     b.setHours(0, 0, 0, 0);
     return Math.round((a - b) / 86400000);
   }
-  function titreJour(d) {
-    const ecart = decalageJours(d);
-    if (ecart === 0) return "Aujourd'hui";
-    if (ecart === 1) return "Hier";
-    const t = jourLong.format(d);
-    return t.charAt(0).toUpperCase() + t.slice(1);
-  }
   function quand(d) {
-    const ecart = decalageJours(d);
+    const ecart = ecartJours(d);
     if (ecart === 0) return `à ${heure.format(d)}`;
     if (ecart === 1) return `hier à ${heure.format(d)}`;
-    return `le ${jourCourt.format(d)} à ${heure.format(d)}`;
+    return `le ${jourCourt.format(d)}`;
   }
 
-  const nf = new Intl.NumberFormat("fr-FR");
-  const pluriel = (n, un, plusieurs) => `${nf.format(n)} ${n > 1 ? plusieurs : un}`;
-
-  // --- Petits outils --------------------------------------------------------------
   function el(tag, classe, texte) {
     const e = document.createElement(tag);
     if (classe) e.className = classe;
@@ -81,14 +99,25 @@
   }
   // seul un lien https part vers un transporteur
   const lienSur = (u) => typeof u === "string" && /^https:\/\/[a-z0-9.-]+\//i.test(u);
+  const codeDe = (c) => c.transporteur?.code || "AUTRE";
+  const nomDe = (c) => c.transporteur?.nom || "Transporteur inconnu";
+  const couleur = (code) => (CONNUS.has(code) ? code : "autre");
 
-  let toastMinuteur = null;
-  function toast(texte) {
-    const t = $("toast");
-    t.textContent = texte;
-    t.classList.add("visible");
-    clearTimeout(toastMinuteur);
-    toastMinuteur = setTimeout(() => t.classList.remove("visible"), 2200);
+  function toast(message) {
+    const pile = $("toasts");
+    const t = el("div", "toast toast-success");
+    t.setAttribute("role", "status");
+    const ic = el("span", "toast-icon");
+    ic.append(icone("check"));
+    const temps = el("span", "toast-temps");
+    temps.style.animationDuration = "2600ms";
+    t.append(ic, el("span", null, message), temps);
+    pile.append(t);
+    while (pile.children.length > 2) pile.firstElementChild.remove();
+    setTimeout(() => {
+      t.classList.add("out");
+      setTimeout(() => t.remove(), 260);
+    }, 2600);
   }
 
   async function copie(texte) {
@@ -96,12 +125,10 @@
       await navigator.clipboard.writeText(texte);
       return true;
     } catch (err) {
-      // vieux navigateurs : par une zone de texte temporaire
-      const zone = el("textarea");
+      const zone = el("textarea", "sr");
       zone.value = texte;
       zone.setAttribute("readonly", "");
-      zone.className = "hors-ecran";
-      document.body.appendChild(zone);
+      document.body.append(zone);
       zone.select();
       let ok = false;
       try {
@@ -114,12 +141,62 @@
     }
   }
 
-  // --- Chargement -------------------------------------------------------------
+  // --- Le fond vivant (le meme que le dashboard) --------------------------------
+  {
+    const fond = document.querySelector(".ambient");
+    const toile = $("particules");
+    let envoie = null;
+    if (!reduit && toile?.transferControlToOffscreen && window.Worker) {
+      try {
+        const hors = toile.transferControlToOffscreen();
+        const travailleur = new Worker("/particules.js");
+        const dpr = () => Math.min(devicePixelRatio || 1, 2);
+        travailleur.postMessage({ type: "init", toile: hors, L: innerWidth, H: innerHeight, dpr: dpr(), nombre: innerWidth < 700 ? 30 : 56 }, [hors]);
+        envoie = (m) => travailleur.postMessage(m);
+        addEventListener("resize", () => envoie({ type: "taille", L: innerWidth, H: innerHeight, dpr: dpr() }));
+        document.addEventListener("visibilitychange", () => envoie({ type: "pause", pause: document.hidden }));
+      } catch (err) {
+        envoie = null;
+      }
+    }
+    let attente = false;
+    addEventListener(
+      "scroll",
+      () => {
+        if (attente) return;
+        attente = true;
+        requestAnimationFrame(() => {
+          attente = false;
+          envoie?.({ type: "defilement", y: scrollY });
+          fond.style.setProperty("--py", `${scrollY}px`);
+        });
+      },
+      { passive: true }
+    );
+    if (avecSouris && !reduit) {
+      addEventListener(
+        "pointermove",
+        (e) => {
+          fond.style.setProperty("--mx", `${(e.clientX / innerWidth - 0.5) * 50}px`);
+          fond.style.setProperty("--my", `${(e.clientY / innerHeight - 0.5) * 40}px`);
+          // la lumiere des cartes suit la souris, comme sur le dashboard
+          const c = e.target.closest?.(".card");
+          if (!c) return;
+          const r = c.getBoundingClientRect();
+          c.style.setProperty("--mx", `${e.clientX - r.left}px`);
+          c.style.setProperty("--my", `${e.clientY - r.top}px`);
+        },
+        { passive: true }
+      );
+    }
+  }
+
+  // --- Chargement ---------------------------------------------------------------
   async function charge() {
     if (etat.enCours || etat.fini) return;
     etat.enCours = true;
     try {
-      const res = await fetch(`/api/portail/${encodeURIComponent(jeton)}?n=${etat.nombre}`, {
+      const res = await fetch(`/api/portail/${encodeURIComponent(jeton)}?n=${TOUS}`, {
         cache: "no-store",
         credentials: "omit",
         headers: etat.etag ? { "If-None-Match": etat.etag } : {},
@@ -129,7 +206,7 @@
       if (!res.ok) throw new Error(String(res.status));
       const donnees = await res.json();
       etat.etag = res.headers.get("ETag");
-      rend(donnees);
+      recoit(donnees);
       enLigne();
     } catch (err) {
       horsLigne();
@@ -146,42 +223,35 @@
     const attente = etat.echecs ? Math.min(30000, RAFRAICHISSEMENT_MS * 2 ** (etat.echecs - 1)) : RAFRAICHISSEMENT_MS;
     etat.minuteur = setTimeout(charge, attente);
   }
-
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) clearTimeout(etat.minuteur);
     else charge();
   });
-  window.addEventListener("online", () => charge());
+  addEventListener("online", () => charge());
 
   let derniereMaj = 0;
   function enLigne() {
     etat.echecs = 0;
     derniereMaj = Date.now();
-    const d = $("direct");
-    d.classList.remove("hors-ligne");
-    d.classList.add("en-ligne");
-    $("direct-texte").textContent = "En direct";
+    $("live").classList.remove("is-off");
+    $("live-text").textContent = "En direct";
   }
   function horsLigne() {
     etat.echecs += 1;
-    const d = $("direct");
-    d.classList.remove("en-ligne");
-    d.classList.add("hors-ligne");
-    $("direct-texte").textContent = etat.donnees ? "Hors ligne · nouvel essai…" : "Connexion…";
+    $("live").classList.add("is-off");
+    $("live-text").textContent = etat.donnees ? "Hors ligne" : "Connexion…";
   }
-  // "En direct" devient "Mis à jour il y a 2 min" si les donnees vieillissent
   setInterval(() => {
-    if (!derniereMaj || $("direct").classList.contains("hors-ligne")) return;
+    if (!derniereMaj || $("live").classList.contains("is-off")) return;
     const s = Math.round((Date.now() - derniereMaj) / 1000);
-    $("direct-texte").textContent = s < 30 ? "En direct" : `Mis à jour il y a ${s < 90 ? "1 min" : `${Math.round(s / 60)} min`}`;
+    $("live-text").textContent = s < 30 ? "En direct" : `Il y a ${s < 90 ? "1 min" : `${Math.round(s / 60)} min`}`;
   }, 5000);
 
   function lienRefuse(status) {
     etat.fini = true;
     clearTimeout(etat.minuteur);
-    for (const id of ["accueil", "etapes", "filtre", "plus", "pied", "squelette"]) $(id).hidden = true;
-    $("liste").replaceChildren();
-    $("direct").hidden = true;
+    $("contenu").hidden = true;
+    $("live").hidden = true;
     if (status === 429) {
       $("message-titre").textContent = "Trop d'essais";
       $("message-texte").textContent = "Réessaie dans un quart d'heure.";
@@ -190,299 +260,476 @@
     document.title = "Lien invalide · DROP";
   }
 
-  // --- Rendu ------------------------------------------------------------------
-  function rend(d, { filtreChange = false } = {}) {
-    const premier = !etat.donnees;
+  // --- Donnees recues -------------------------------------------------------------
+  function recoit(d) {
     const avant = etat.donnees;
     etat.donnees = d;
-
-    if (premier) {
-      $("squelette").hidden = true;
-      $("accueil").hidden = false;
-      $("etapes").hidden = false;
+    if (!avant) {
+      $("nom").classList.remove("is-loading");
       $("pied").hidden = false;
-      document.body.classList.add("pret");
     }
     $("nom").textContent = d.expediteur;
-    const enCours = d.compte.a_imprimer + d.compte.imprime + d.compte.en_drop;
+    const enCours = d.colis.filter((c) => c.etape !== "drope").length;
     $("resume").textContent =
       d.total === 0
         ? "Aucun colis pour l'instant."
-        : `${enCours ? pluriel(enCours, "colis en cours", "colis en cours") : "Aucun colis en cours"} · ${pluriel(d.compte.drope, "dropé", "dropés")}`;
-
-    for (const etape of ETAPES) {
-      const n = d.compte[etape] || 0;
-      const cible = document.querySelector(`[data-compte="${etape}"]`);
-      roule(cible, n, premier);
-      cible.closest(".etape").classList.toggle("vide", n === 0);
-    }
-
-    // le filtre courant
-    const filtre = etat.filtre;
-    $("filtre").hidden = !filtre;
-    if (filtre) $("filtre-texte").textContent = `Colis « ${NOMS[filtre]} »`;
-    for (const b of document.querySelectorAll(".etape")) b.setAttribute("aria-pressed", String(b.dataset.etape === filtre));
-
-    // la liste voulue : groupee par jour de reception, du plus recent au plus ancien
-    const visibles = d.colis.filter((c) => !filtre || c.etape === filtre);
-    const voulu = [];
-    let jour = null;
-    for (const c of visibles) {
-      const recu = date(c.recuLe) || new Date();
-      const cle = cleJour(recu);
-      if (cle !== jour) {
-        voulu.push({ cle: `j:${cle}`, jour: true, titre: titreJour(recu) });
-        jour = cle;
-      }
-      voulu.push({ cle: `c:${c.ref}`, colis: c });
-    }
-    reconcilie(voulu, { anime: !premier && !filtreChange, avant });
-
-    const liste = $("liste");
-    let vide = liste.querySelector(".liste-vide");
-    if (visibles.length === 0) {
-      if (!vide) {
-        vide = el("p", "liste-vide");
-        liste.appendChild(vide);
-      }
-      vide.textContent = d.total === 0
-        ? "Tes colis apparaîtront ici dès qu'ils seront enregistrés."
-        : `Aucun colis « ${NOMS[filtre]} » pour le moment.`;
-    } else if (vide) {
-      vide.remove();
-    }
-
-    $("plus").hidden = !d.suite;
-    $("plus").disabled = false;
-    $("plus").textContent = "Voir les colis plus anciens";
+        : `${pluriel(d.total, "colis", "colis")} · ${enCours ? `${nf.format(enCours)} en cours` : "aucun en cours"}`;
+    rend({ anime: Boolean(avant), signale: Boolean(avant) });
   }
 
-  // Met la liste dans l'etat voulu en touchant le moins possible : les cartes
-  // existantes restent (et se mettent a jour sur place), les nouvelles entrent
-  // en fondu, celles qui partent se replient.
-  function reconcilie(voulu, { anime, avant }) {
-    const liste = $("liste");
-    const existants = new Map();
-    for (const e of liste.children) if (e.dataset.cle && !e.classList.contains("sortie")) existants.set(e.dataset.cle, e);
-    const gardes = new Set(voulu.map((v) => v.cle));
-    for (const [cle, e] of existants) {
-      if (gardes.has(cle)) continue;
-      existants.delete(cle);
-      if (anime && !reduit) sort(e);
-      else e.remove();
-    }
+  // --- Recherche --------------------------------------------------------------------
+  // Le numero tel qu'on le compare : majuscules, sans espaces ni tirets
+  // ("6n 0003 1133-081" -> "6N00031133081").
+  const norme = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-    const anciens = new Map((avant?.colis || []).map((c) => [c.ref, c]));
-    let curseur = liste.firstElementChild;
-    const passe = () => {
-      while (curseur && (curseur.classList.contains("sortie") || !curseur.dataset.cle)) curseur = curseur.nextElementSibling;
+  function cherche(q) {
+    const n = norme(q);
+    if (n.length < 3) return { n, resultats: [], tropCourt: true };
+    const resultats = [];
+    for (const c of etat.donnees.colis) {
+      const num = norme(c.suivi?.numero);
+      if (!num) continue;
+      // le numero entier d'abord, puis son debut, sa fin (on tape souvent les
+      // derniers chiffres), puis n'importe ou
+      const score = num === n ? 4 : num.startsWith(n) ? 3 : num.endsWith(n) ? 2 : num.includes(n) ? 1 : 0;
+      if (score) resultats.push({ c, score });
+    }
+    resultats.sort((a, b) => b.score - a.score || (b.c.recuLe || "").localeCompare(a.c.recuLe || ""));
+    return { n, resultats: resultats.map((r) => r.c), tropCourt: false };
+  }
+
+  // --- Filtres et tri -----------------------------------------------------------------
+  const filtre = (liste, { etape = etat.etape, transporteur = etat.transporteur } = {}) =>
+    liste.filter((c) => (!etape || c.etape === etape) && (!transporteur || codeDe(c) === transporteur));
+
+  function trie(liste) {
+    const parDate = (a, b) => (b.recuLe || "").localeCompare(a.recuLe || "");
+    if (etat.tri === "statut") return liste.sort((a, b) => ETAPES.indexOf(a.etape) - ETAPES.indexOf(b.etape) || parDate(a, b));
+    return liste.sort(parDate);
+  }
+
+  // Les colis par transporteur, du plus garni au moins garni.
+  function groupesDe(liste) {
+    const parCode = new Map();
+    for (const c of liste) {
+      const code = codeDe(c);
+      if (!parCode.has(code)) parCode.set(code, { code, nom: nomDe(c), colis: [] });
+      parCode.get(code).colis.push(c);
+    }
+    return [...parCode.values()].sort((a, b) => b.colis.length - a.colis.length || a.nom.localeCompare(b.nom));
+  }
+
+  // --- Rendu ---------------------------------------------------------------------------
+  function rend({ anime = false, signale = false } = {}) {
+    const d = etat.donnees;
+    if (!d) return;
+
+    // les compteurs de statut suivent le transporteur choisi, et inversement
+    const pourEtapes = filtre(d.colis, { etape: null });
+    for (const e of ETAPES) {
+      const n = pourEtapes.filter((c) => c.etape === e).length;
+      const cible = document.querySelector(`[data-compte="${e}"]`);
+      roule(cible, n, signale);
+      cible.closest(".p-etape").classList.toggle("vide", n === 0);
+    }
+    for (const b of document.querySelectorAll(".p-etape")) b.setAttribute("aria-pressed", String(b.dataset.etape === etat.etape));
+
+    rendTransporteurs();
+    rendBarre();
+
+    document.body.classList.toggle("en-recherche", Boolean(etat.q));
+    if (etat.q) rendRecherche(anime);
+    else rendGroupes(anime);
+  }
+
+  function rendTransporteurs() {
+    const liste = filtre(etat.donnees.colis, { transporteur: null });
+    const groupes = groupesDe(etat.donnees.colis);
+    const total = liste.length;
+    const items = [
+      { code: "*", nom: "Tous", n: total },
+      ...groupes.map((g) => ({ code: g.code, nom: g.nom, n: liste.filter((c) => codeDe(c) === g.code).length })),
+    ];
+    reconcilie($("transporteurs"), items, {
+      cle: (t) => `t:${t.code}`,
+      cree: (t) => {
+        const b = el("button", "p-tr carrier");
+        b.type = "button";
+        b.dataset.carrier = t.code === "*" ? "*" : couleur(t.code);
+        b.dataset.code = t.code;
+        const part = el("span", "p-tr-part");
+        part.append(el("i"));
+        b.append(el("i", "carrier-dot"), el("span", "p-tr-nom", t.nom), el("b", "p-tr-n"), part);
+        majTransporteur(b, t, total);
+        return b;
+      },
+      maj: (b, t) => majTransporteur(b, t, total),
+    });
+  }
+
+  function majTransporteur(b, t, total) {
+    b.querySelector(".p-tr-n").textContent = nf.format(t.n);
+    b.querySelector(".p-tr-part i").style.width = `${total ? Math.max(t.n ? 3 : 0, (t.n / total) * 100) : 0}%`;
+    b.classList.toggle("vide", t.n === 0 && t.code !== "*");
+    b.setAttribute("aria-pressed", String((etat.transporteur || "*") === t.code));
+    b.setAttribute("aria-label", `${t.nom} : ${pluriel(t.n, "colis", "colis")}`);
+  }
+
+  function rendBarre() {
+    const texte = $("barre-texte");
+    texte.replaceChildren();
+    if (etat.q) return;
+    const n = filtre(etat.donnees.colis).length;
+    const compte = el("span");
+    compte.append(el("b", null, nf.format(n)), document.createTextNode(" colis"));
+    texte.append(compte);
+    const puce = (libelle, quoi, code) => {
+      const b = el("button", `chip p-filtre${code ? " carrier" : ""}`);
+      b.type = "button";
+      if (code) b.dataset.carrier = couleur(code);
+      b.dataset.retire = quoi;
+      b.setAttribute("aria-label", `Retirer le filtre ${libelle}`);
+      b.append(el("span", null, libelle), icone("x"));
+      texte.append(b);
     };
-    let rang = 0;
-    for (const v of voulu) {
-      let e = existants.get(v.cle);
-      if (!e) {
-        e = v.jour ? creeJour(v) : creeCarte(v.colis);
-        if (!reduit) entre(e, anime ? 0 : Math.min(rang, 12) * 35);
-      } else if (v.jour) {
-        e.textContent = v.titre;
+    if (etat.transporteur) {
+      const c = etat.donnees.colis.find((x) => codeDe(x) === etat.transporteur);
+      puce(c ? nomDe(c) : etat.transporteur, "transporteur", etat.transporteur);
+    }
+    if (etat.etape) puce(NOMS[etat.etape], "etape");
+  }
+
+  function rendGroupes(anime) {
+    const liste = $("liste");
+    const visibles = filtre(etat.donnees.colis);
+    if (visibles.length === 0) {
+      const aucun = etat.donnees.total === 0;
+      remplace(
+        liste,
+        "vide",
+        videHtml(
+          "layers",
+          aucun ? "Pas encore de colis" : "Aucun colis ici",
+          aucun ? "Tes colis apparaîtront ici dès qu'ils seront enregistrés." : "Aucun colis ne correspond à ces filtres."
+        )
+      );
+      return;
+    }
+    const groupes = groupesDe(visibles);
+    for (const g of groupes) trie(g.colis);
+    reconcilie(liste, groupes, { cle: (g) => `g:${g.code}`, cree: creeGroupe, maj: majGroupe, anime });
+  }
+
+  function rendRecherche(anime) {
+    const liste = $("liste");
+    let carte = liste.querySelector(":scope > .p-resultats");
+    if (!carte) {
+      carte = el("section", "card p-resultats");
+      const tete = el("header", "p-resultats-tete");
+      tete.append(el("h2"), el("span", "card-meta"));
+      carte.append(tete, el("div", "p-lignes"), el("div", "p-resultats-vide"), el("p", "p-resultats-plus"));
+    }
+    remplace(liste, "resultats", carte);
+
+    const { n, resultats, tropCourt } = cherche(etat.q);
+    const titre = carte.querySelector("h2");
+    const meta = carte.querySelector(".card-meta");
+    const lignes = carte.querySelector(".p-lignes");
+    const vide = carte.querySelector(".p-resultats-vide");
+    const plus = carte.querySelector(".p-resultats-plus");
+    plus.hidden = true;
+    vide.replaceChildren();
+
+    if (tropCourt || !resultats.length) {
+      reconcilie(lignes, [], { cle: () => "", cree: () => el("div") });
+      if (tropCourt) {
+        titre.textContent = "Recherche";
+        meta.textContent = "";
+        vide.append(videHtml("search", "Tape au moins 3 caractères", "Le numéro complet, son début ou ses derniers chiffres : les espaces ne comptent pas."));
+        $("annonce").textContent = "";
       } else {
-        majCarte(e, v.colis, anciens.get(v.colis.ref), anime);
+        titre.textContent = "Aucun résultat";
+        meta.textContent = "";
+        vide.append(videHtml("search", `Aucun colis ne correspond à « ${etat.q.trim()} »`, "Vérifie le numéro, ou tape seulement ses derniers chiffres."));
+        $("annonce").textContent = "Aucun colis trouvé";
       }
-      rang += 1;
-      passe();
-      if (curseur === e) curseur = curseur.nextElementSibling;
-      else liste.insertBefore(e, curseur);
+      return;
+    }
+    titre.textContent = resultats.length > 1 ? "Colis trouvés" : "Colis trouvé";
+    meta.textContent = pluriel(resultats.length, "colis", "colis");
+    $("annonce").textContent = pluriel(resultats.length, "colis trouvé", "colis trouvés");
+    const montres = resultats.slice(0, MAX_RESULTATS);
+    reconcilie(lignes, montres, { cle: (c) => `c:${c.ref}`, cree: (c) => creeLigne(c, n), maj: (e, c) => majLigne(e, c, n), anime });
+    if (resultats.length > montres.length) {
+      plus.hidden = false;
+      plus.textContent = `${pluriel(resultats.length - montres.length, "autre colis correspond", "autres colis correspondent")} : précise le numéro.`;
     }
   }
 
-  function entre(e, delai) {
-    e.classList.add("entree");
-    e.animate(
-      [
-        { opacity: 0, transform: "translateY(10px) scale(0.985)", filter: "blur(4px)" },
-        { opacity: 1, transform: "none", filter: "blur(0)" },
-      ],
-      { duration: 520, delay: delai, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "backwards" }
-    ).finished.then(() => e.classList.remove("entree"), () => {});
+  // La liste ne montre qu'une chose (l'etat vide, ou les resultats).
+  function remplace(conteneur, cle, element) {
+    element.dataset.cle = cle;
+    reconcilie(conteneur, [element], { cle: () => cle, cree: () => element });
+    const ici = conteneur.querySelector(`:scope > [data-cle="${cle}"]`);
+    if (ici !== element) ici.replaceWith(element);
   }
 
-  function sort(e) {
-    e.classList.add("sortie");
-    const h = e.offsetHeight;
-    e.animate(
-      [
-        { opacity: 1, height: `${h}px` },
-        { opacity: 0, height: "0px", marginTop: "0px", marginBottom: "0px", paddingTop: "0px", paddingBottom: "0px" },
-      ],
-      { duration: 380, easing: "cubic-bezier(0.65, 0, 0.35, 1)", fill: "forwards" }
-    ).finished.then(() => e.remove(), () => e.remove());
+  function videHtml(nomIcone, titre, sous) {
+    const v = el("div", "empty");
+    const ic = el("span", "empty-icon");
+    ic.append(icone(nomIcone));
+    v.append(ic, el("span", "empty-title", titre), el("span", "empty-sub", sous));
+    return v;
   }
 
-  function creeJour(v) {
-    const h = el("h2", "jour", v.titre);
-    h.dataset.cle = v.cle;
-    return h;
+  // --- Un groupe (un transporteur) ------------------------------------------------------
+  function creeGroupe(g) {
+    const s = el("section", "card p-groupe carrier");
+    s.dataset.carrier = couleur(g.code);
+    s.dataset.code = g.code;
+    const tete = el("button", "p-groupe-tete");
+    tete.type = "button";
+    const mix = el("span", "p-groupe-mix");
+    for (const e of ETAPES) {
+      const i = el("i");
+      i.dataset.e = e;
+      mix.append(i);
+    }
+    const chevron = icone("chevron-down");
+    chevron.classList.add("p-groupe-chevron");
+    tete.append(el("i", "carrier-dot"), el("span", "p-groupe-nom"), el("span", "p-groupe-n"), chevron, mix);
+    const corps = el("div", "p-groupe-corps");
+    const interieur = el("div", "p-groupe-interieur");
+    const plus = el("button", "p-plus");
+    plus.type = "button";
+    interieur.append(el("div", "p-lignes"), plus);
+    corps.append(interieur);
+    s.append(tete, corps);
+    majGroupe(s, g);
+    return s;
   }
 
-  // --- Une carte colis ------------------------------------------------------------
-  function creeCarte(c) {
-    const carte = el("article", "colis");
-    carte.dataset.cle = `c:${c.ref}`;
+  function majGroupe(s, g) {
+    const code = g.code;
+    const focus = etat.transporteur === code;
+    const ferme = !focus && etat.fermes.has(code);
+    s.classList.toggle("ferme", ferme);
+    const tete = s.querySelector(".p-groupe-tete");
+    tete.setAttribute("aria-expanded", String(!ferme));
+    s.querySelector(".p-groupe-nom").textContent = g.nom;
+    s.querySelector(".p-groupe-n").textContent = pluriel(g.colis.length, "colis", "colis");
+    for (const i of s.querySelectorAll(".p-groupe-mix i")) {
+      i.style.flexGrow = String(g.colis.filter((c) => c.etape === i.dataset.e).length);
+    }
+    const enCours = g.colis.filter((c) => c.etape !== "drope").length;
+    tete.setAttribute("aria-label", `${g.nom} : ${pluriel(g.colis.length, "colis", "colis")}, ${nf.format(enCours)} en cours. ${ferme ? "Afficher" : "Masquer"} le groupe`);
 
-    const haut = el("div", "colis-haut");
-    const transporteur = el("span", "colis-transporteur");
-    transporteur.append(el("i", "pastille"), el("span", "t-nom"), el("span", "t-bj", "Boîte jaune"));
-    // le badge et son fantome (pendant un changement) occupent la meme case
-    const zone = el("span", "badge-zone");
-    zone.append(el("span", "badge"));
-    haut.append(transporteur, zone);
+    // combien de lignes : un apercu, sauf si on a deplie le groupe ou choisi
+    // ce transporteur. Replie, le groupe garde ses lignes le temps de
+    // l'animation : elles ne sont plus mises a jour.
+    const voulu = focus ? Math.max(LOT, etat.montres.get(code) || 0) : etat.montres.get(code) || APERCU;
+    const montres = g.colis.slice(0, voulu);
+    if (!ferme) {
+      reconcilie(s.querySelector(".p-lignes"), montres, { cle: (c) => `c:${c.ref}`, cree: (c) => creeLigne(c), maj: (e, c) => majLigne(e, c), anime: true });
+    }
 
-    const numero = el("div", "colis-numero");
-    numero.append(el("span", "numero-libelle", "N° de suivi"));
-    const bouton = el("button", "numero");
-    bouton.type = "button";
-    bouton.append(el("span", "numero-texte"), icone("copy"));
-    bouton.addEventListener("click", async () => {
-      const n = carte._colis?.suivi?.numero;
+    const plus = s.querySelector(".p-plus");
+    const reste = g.colis.length - montres.length;
+    if (reste > 0) {
+      plus.hidden = false;
+      plus.dataset.action = "plus";
+      plus.textContent = voulu <= APERCU && reste <= LOT ? `Afficher les ${pluriel(reste, "autre colis", "autres colis")}` : `Afficher ${nf.format(Math.min(reste, LOT))} de plus`;
+    } else {
+      // deplie au-dela de l'apercu : on peut le reduire
+      plus.hidden = focus || voulu <= APERCU;
+      plus.dataset.action = "moins";
+      plus.textContent = "Réduire";
+    }
+  }
+
+  // --- Une ligne colis -----------------------------------------------------------------
+  function creeLigne(c, recherche = "") {
+    const ligne = el("article", "p-colis");
+    const statut = el("span", "p-colis-statut");
+    statut.append(el("span", "p-ico"));
+
+    const centre = el("div", "p-colis-centre");
+    const l1 = el("div", "p-colis-l1");
+    const num = el("button", "p-num");
+    num.type = "button";
+    num.append(el("span", "p-num-texte"), icone("copy"));
+    num.addEventListener("click", async () => {
+      const n = ligne._colis?.suivi?.numero;
       if (!n) return;
       if (await copie(n)) {
-        bouton.classList.add("copie");
-        setTimeout(() => bouton.classList.remove("copie"), 1400);
+        num.classList.add("copie");
+        setTimeout(() => num.classList.remove("copie"), 1400);
         toast("Numéro copié");
       }
     });
-    numero.append(bouton, el("span", "numero-absent", "Pas de numéro de suivi pour ce colis"));
+    l1.append(num, el("span", "p-sans", "Sans numéro de suivi"));
+    const l2 = el("div", "p-colis-l2");
+    const tr = el("span", "p-colis-tr carrier");
+    tr.append(el("i", "carrier-dot"), el("span"));
+    l2.append(el("span", "p-etat-nom"), tr, el("span", "p-bj", "Boîte jaune"), el("span", "p-quand"));
+    const seg = el("div", "p-seg");
+    seg.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < 4; i++) seg.append(el("i"));
+    centre.append(l1, l2, seg);
 
-    const progression = el("div", "progression");
-    progression.setAttribute("role", "img");
-    const piste = el("div", "piste");
-    piste.append(el("div", "remplie"));
-    const jalons = el("ol", "jalons");
-    ETAPES.forEach((etape) => {
-      const li = el("li", "jalon");
-      li.dataset.etape = etape;
-      li.append(el("i", "jalon-point"), el("span", "jalon-nom", NOMS[etape]));
-      jalons.append(li);
-    });
-    progression.append(piste, jalons);
-
-    const dates = el("p", "colis-dates");
-
-    const suivre = el("a", "bouton bouton-suivi");
+    const suivre = el("a", "btn btn-sm btn-secondary p-suivre");
     suivre.target = "_blank";
     suivre.rel = "noopener noreferrer";
     suivre.referrerPolicy = "no-referrer";
-    suivre.append(el("span", null, "Suivre le colis"), icone("out"));
+    const libelle = el("span");
+    libelle.append(document.createTextNode("Suivre"), el("span", "p-suivre-long", " le colis"));
+    suivre.append(libelle, icone("external"));
     suivre.addEventListener("click", async (ev) => {
-      const s = carte._colis?.suivi;
+      const s = ligne._colis?.suivi;
       if (!s || s.lien) return; // lien direct : le navigateur l'ouvre
-      // pas de lien direct chez ce transporteur : sa page officielle, avec le
-      // numero copie pour le coller
+      // pas de lien direct chez ce transporteur : sa page, numero copie
       ev.preventDefault();
       const ok = await copie(s.numero);
       if (lienSur(s.page)) window.open(s.page, "_blank", "noopener,noreferrer");
       if (ok) toast("Numéro copié : colle-le sur la page du transporteur");
     });
 
-    carte.append(haut, numero, progression, dates, suivre);
-    majCarte(carte, c, null, false);
-    return carte;
+    ligne.append(statut, centre, suivre);
+    majLigne(ligne, c, recherche, { premiere: true });
+    return ligne;
   }
 
-  function majCarte(carte, c, ancien, anime) {
-    const avant = carte._colis;
-    carte._colis = c;
+  function majLigne(ligne, c, recherche = "", { premiere = false } = {}) {
+    const avant = ligne._colis;
+    ligne._colis = c;
     const etape = ETAPES.includes(c.etape) ? c.etape : "a_imprimer";
-    const change = anime && avant && avant.etape !== etape;
+    const change = !premiere && avant && avant.etape !== etape;
 
-    const code = c.transporteur?.code;
-    carte.dataset.transporteur = code && TRANSPORTEURS_CONNUS.has(code) ? code : "autre";
-    carte.querySelector(".t-nom").textContent = c.transporteur?.nom || "Transporteur inconnu";
-    carte.querySelector(".t-bj").hidden = !c.boiteJaune;
-
+    // le numero, la partie cherchee surlignee
     const numero = c.suivi?.numero || null;
-    carte.querySelector(".numero").hidden = !numero;
-    carte.querySelector(".numero-absent").hidden = Boolean(numero);
+    const num = ligne.querySelector(".p-num");
+    num.hidden = !numero;
+    ligne.querySelector(".p-sans").hidden = Boolean(numero);
     if (numero) {
-      carte.querySelector(".numero-texte").textContent = numero;
-      carte.querySelector(".numero").setAttribute("aria-label", `Copier le numéro ${numero}`);
+      const texte = ligne.querySelector(".p-num-texte");
+      const i = recherche ? numero.toUpperCase().indexOf(recherche) : -1;
+      if (i >= 0) {
+        texte.replaceChildren(
+          document.createTextNode(numero.slice(0, i)),
+          el("mark", null, numero.slice(i, i + recherche.length)),
+          document.createTextNode(numero.slice(i + recherche.length))
+        );
+      } else if (texte.textContent !== numero || texte.childElementCount) {
+        texte.textContent = numero;
+      }
+      num.setAttribute("aria-label", `Copier le numéro ${numero}`);
     }
 
-    const suivre = carte.querySelector(".bouton-suivi");
+    const tr = ligne.querySelector(".p-colis-tr");
+    tr.dataset.carrier = couleur(codeDe(c));
+    tr.lastElementChild.textContent = nomDe(c);
+    ligne.querySelector(".p-bj").hidden = !c.boiteJaune;
+    ligne.querySelector(".p-etat-nom").textContent = NOMS[etape];
+    // la derniere etape franchie, et quand
+    const moment = etape === "drope" && c.dropeLe ? `dropé ${quand(date(c.dropeLe))}` : c.recuLe ? `reçu ${quand(date(c.recuLe))}` : "";
+    ligne.querySelector(".p-quand").textContent = moment;
+
+    const rang = ETAPES.indexOf(etape);
+    ligne.querySelectorAll(".p-seg i").forEach((i, n) => {
+      i.classList.toggle("fait", n <= rang);
+      i.classList.toggle("actuel", n === rang);
+    });
+
+    const suivre = ligne.querySelector(".p-suivre");
     const cible = c.suivi ? c.suivi.lien || c.suivi.page : null;
     if (lienSur(cible)) {
       suivre.hidden = false;
       suivre.href = cible;
-      suivre.setAttribute("aria-label", `Suivre le colis ${numero} sur le site ${c.transporteur?.nom || "du transporteur"}`);
+      suivre.setAttribute("aria-label", `Suivre le colis ${numero} sur le site ${nomDe(c)}`);
     } else {
       suivre.hidden = true;
       suivre.removeAttribute("href");
     }
 
-    // les etapes franchies, avec leur heure
-    const morceaux = [];
-    const recu = date(c.recuLe);
-    if (recu) morceaux.push(`Reçu ${quand(recu)}`);
-    const imprime = date(c.imprimeLe);
-    if (imprime && etape !== "a_imprimer") morceaux.push(`imprimé ${quand(imprime)}`);
-    const drope = date(c.dropeLe);
-    if (drope && etape === "drope") morceaux.push(`dropé ${quand(drope)}`);
-    carte.querySelector(".colis-dates").textContent = morceaux.join(" · ");
-
-    const rangEtape = ETAPES.indexOf(etape);
-    carte.querySelector(".progression").setAttribute("aria-label", `Étape ${rangEtape + 1} sur 4 : ${NOMS[etape]}`);
-    for (const li of carte.querySelectorAll(".jalon")) {
-      const i = ETAPES.indexOf(li.dataset.etape);
-      li.classList.toggle("fait", i < rangEtape);
-      li.classList.toggle("actuel", i === rangEtape);
-    }
-
-    const badge = carte.querySelector(".badge");
+    const zone = ligne.querySelector(".p-colis-statut");
+    const ico = zone.querySelector(".p-ico:not(.fantome)");
     if (change && !reduit) {
-      // l'ancien badge s'efface pendant que le nouveau apparait a sa place
-      const fantome = badge.cloneNode(true);
-      fantome.classList.add("badge-fantome");
-      fantome.setAttribute("aria-hidden", "true");
-      badge.after(fantome);
+      // l'ancien statut s'efface pendant que le nouveau apparait a sa place
+      const fantome = ico.cloneNode(true);
+      fantome.classList.add("fantome");
+      zone.append(fantome);
       fantome
-        .animate(
-          [
-            { opacity: 1, transform: "none", filter: "blur(0)" },
-            { opacity: 0, transform: "translateY(-6px) scale(0.92)", filter: "blur(3px)" },
-          ],
-          { duration: 360, easing: "cubic-bezier(0.55, 0, 0.75, 0.2)", fill: "forwards" }
-        )
+        .animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.6) rotate(-12deg)", filter: "blur(3px)" }], {
+          duration: 340,
+          easing: "cubic-bezier(0.55, 0, 0.75, 0.2)",
+          fill: "forwards",
+        })
         .finished.then(() => fantome.remove(), () => fantome.remove());
-      remplisBadge(badge, etape);
-      badge.animate(
-        [
-          { opacity: 0, transform: "translateY(6px) scale(0.92)", filter: "blur(3px)" },
-          { opacity: 1, transform: "none", filter: "blur(0)" },
-        ],
-        { duration: 520, delay: 140, easing: "cubic-bezier(0.34, 1.45, 0.64, 1)", fill: "backwards" }
-      );
-      carte.classList.remove("vient-de-changer");
-      void carte.offsetWidth; // relance l'animation si elle tournait deja
-      carte.classList.add("vient-de-changer");
-      setTimeout(() => carte.classList.remove("vient-de-changer"), 1800);
+      ico.replaceChildren(icone(etape));
+      ico.animate([{ opacity: 0, transform: "scale(0.6) rotate(12deg)", filter: "blur(3px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }], {
+        duration: 520,
+        delay: 120,
+        easing: "cubic-bezier(0.34, 1.45, 0.64, 1)",
+        fill: "backwards",
+      });
+      ligne.classList.remove("vient-de-changer");
+      void ligne.offsetWidth;
+      ligne.classList.add("vient-de-changer");
+      setTimeout(() => ligne.classList.remove("vient-de-changer"), 1800);
       $("annonce").textContent = `${numero ? `Colis ${numero}` : "Un colis"} : ${NOMS[etape]}`;
-    } else if (badge.dataset.etape !== etape) {
-      remplisBadge(badge, etape);
+    } else if (ligne.dataset.etape !== etape) {
+      ico.replaceChildren(icone(etape));
     }
-    carte.dataset.etape = etape;
+    ligne.dataset.etape = etape;
   }
 
-  function remplisBadge(badge, etape) {
-    badge.dataset.etape = etape;
-    badge.replaceChildren(icone(etape), el("span", null, NOMS[etape]));
+  // --- Mise a jour d'une liste a cles ---------------------------------------------------
+  // Les elements existants restent (et se mettent a jour sur place), les
+  // nouveaux entrent en fondu, ceux qui ne sont plus voulus sont retires :
+  // seul ce qui change bouge. `anime` : une mise a jour en direct (pas de
+  // cascade a l'entree).
+  function reconcilie(conteneur, items, { cle, cree, maj, anime = false }) {
+    const existants = new Map();
+    for (const e of [...conteneur.children]) {
+      if (e.dataset.cle) existants.set(e.dataset.cle, e);
+      else e.remove(); // squelettes du chargement
+    }
+    const voulus = new Set(items.map(cle));
+    for (const [k, e] of existants) {
+      if (!voulus.has(k)) {
+        existants.delete(k);
+        e.remove();
+      }
+    }
+    let curseur = conteneur.firstElementChild;
+    let rang = 0;
+    for (const item of items) {
+      const k = cle(item);
+      let e = existants.get(k);
+      if (!e) {
+        e = cree(item);
+        e.dataset.cle = k;
+        if (!reduit) {
+          e.classList.add("p-entre");
+          e.style.animationDelay = `${anime ? 0 : Math.min(rang, 10) * 30}ms`;
+          e.addEventListener("animationend", () => e.classList.remove("p-entre"), { once: true });
+        }
+      } else if (maj) {
+        maj(e, item);
+      }
+      rang += 1;
+      if (curseur === e) curseur = curseur.nextElementSibling;
+      else conteneur.insertBefore(e, curseur);
+    }
   }
 
   // Un nombre qui change roule jusqu'a sa nouvelle valeur.
-  function roule(cible, n, premier) {
-    const depuis = Number(cible.dataset.valeur || 0);
+  function roule(cible, n, signale) {
+    const premier = cible.dataset.valeur === undefined;
+    const depuis = Number(cible.dataset.valeur ?? 0);
     cible.dataset.valeur = String(n);
     if (depuis === n && !premier) return;
-    if (reduit || (!premier && Math.abs(n - depuis) === 0)) {
+    if (reduit) {
       cible.textContent = nf.format(n);
       return;
     }
@@ -495,37 +742,110 @@
       if (p < 1) requestAnimationFrame(pas);
     };
     requestAnimationFrame(pas);
-    if (!premier) {
-      const tuile = cible.closest(".etape");
+    if (signale && !premier) {
+      const tuile = cible.closest(".p-etape");
       tuile.classList.remove("pulse");
       void tuile.offsetWidth;
       tuile.classList.add("pulse");
     }
   }
 
-  // --- Filtres par etape ---------------------------------------------------------
-  for (const b of document.querySelectorAll(".etape")) {
+  // --- Gestes ---------------------------------------------------------------------------
+  const champ = $("recherche");
+  const zoneRecherche = $("zone-recherche");
+  function surRecherche() {
+    etat.q = champ.value;
+    zoneRecherche.classList.toggle("a-texte", Boolean(etat.q));
+    $("effacer").hidden = !etat.q;
+    rend();
+  }
+  champ.addEventListener("input", surRecherche);
+  champ.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      champ.value = "";
+      surRecherche();
+    } else if (e.key === "Enter") {
+      champ.blur(); // ferme le clavier du telephone : les resultats sont deja la
+    }
+  });
+  // sur telephone, la recherche remonte en haut de l'ecran au premier appui
+  champ.addEventListener("focus", () => {
+    if (innerWidth < 960 && zoneRecherche.getBoundingClientRect().top > 80) {
+      zoneRecherche.scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "start" });
+    }
+  });
+  $("effacer").addEventListener("click", () => {
+    champ.value = "";
+    surRecherche();
+    champ.focus();
+  });
+  // "/" place le curseur dans la recherche (au clavier)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && document.activeElement !== champ && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      champ.focus();
+    }
+  });
+
+  for (const b of document.querySelectorAll(".p-etape")) {
     b.addEventListener("click", () => {
-      etat.filtre = etat.filtre === b.dataset.etape ? null : b.dataset.etape;
-      if (etat.donnees) rend(etat.donnees, { filtreChange: true });
-      if (etat.filtre) $("filtre").scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "nearest" });
+      etat.etape = etat.etape === b.dataset.etape ? null : b.dataset.etape;
+      rend();
     });
   }
-  $("filtre-tout").addEventListener("click", () => {
-    etat.filtre = null;
-    if (etat.donnees) rend(etat.donnees, { filtreChange: true });
+
+  $("transporteurs").addEventListener("click", (e) => {
+    const b = e.target.closest(".p-tr");
+    if (!b) return;
+    const code = b.dataset.code;
+    etat.transporteur = code === "*" || etat.transporteur === code ? null : code;
+    rend();
+    if (etat.transporteur && innerWidth < 960) $("liste").scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "start" });
   });
 
-  $("plus").addEventListener("click", () => {
-    etat.nombre += PAR_PAGE;
-    etat.etag = null;
-    $("plus").disabled = true;
-    $("plus").textContent = "Chargement…";
-    clearTimeout(etat.minuteur);
-    charge();
+  $("barre-texte").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-retire]");
+    if (!b) return;
+    etat[b.dataset.retire] = null;
+    rend();
   });
 
-  // --- C'est parti -------------------------------------------------------------
+  const boutonsTri = document.querySelectorAll(".p-tri button");
+  for (const b of boutonsTri) {
+    b.setAttribute("aria-pressed", String(b.dataset.tri === etat.tri));
+    b.addEventListener("click", () => {
+      etat.tri = b.dataset.tri;
+      memoire.ecris("drop.portail.tri", etat.tri);
+      for (const x of boutonsTri) x.setAttribute("aria-pressed", String(x === b));
+      rend();
+    });
+  }
+
+  $("liste").addEventListener("click", (e) => {
+    const groupe = e.target.closest(".p-groupe");
+    if (!groupe) return;
+    const code = groupe.dataset.code;
+    if (e.target.closest(".p-groupe-tete")) {
+      if (etat.transporteur === code) return; // un transporteur choisi reste deplie
+      if (etat.fermes.has(code)) etat.fermes.delete(code);
+      else etat.fermes.add(code);
+      memoire.ecris("drop.portail.fermes", [...etat.fermes]);
+      rend();
+    } else if (e.target.closest(".p-plus")) {
+      const plus = e.target.closest(".p-plus");
+      if (plus.dataset.action === "moins") {
+        etat.montres.delete(code);
+        rend();
+        groupe.scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "nearest" });
+      } else {
+        const deja = etat.transporteur === code ? Math.max(LOT, etat.montres.get(code) || 0) : etat.montres.get(code) || APERCU;
+        etat.montres.set(code, deja <= APERCU ? LOT : deja + LOT);
+        rend();
+      }
+    }
+  });
+
+  // --- C'est parti -----------------------------------------------------------------------
   if (!jeton) lienRefuse(404);
   else charge();
 })();

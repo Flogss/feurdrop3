@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const { portailPour, portailExiste } = require("../portail");
-const { PAGE, ENTETES, ENTETES_PAGE, limiteur } = require("../portailCommun");
+const { pageHtml, ENTETES, ENTETES_PAGE, limiteur } = require("../portailCommun");
 
 // Les colis d'un espace expediteur, sans connexion : le jeton est la cle.
 // Rien ici ne touche au dashboard -- seulement les colis que le jeton designe.
@@ -41,10 +41,10 @@ router.use((req, res) => res.status(404).json({ error: "Introuvable" }));
 // local, quand aucun domaine de portail n'est configure (PORTAIL_URL).
 function pagePortail(req, res) {
   res.set(ENTETES_PAGE);
-  if (essais.bloque(req.ip)) return res.status(429).sendFile(PAGE);
+  if (essais.bloque(req.ip)) return res.status(429).type("html").send(pageHtml());
   const valide = portailExiste(req.params.jeton);
   if (!valide) essais.echec(req.ip);
-  res.status(valide ? 200 : 404).sendFile(PAGE);
+  res.status(valide ? 200 : 404).type("html").send(pageHtml());
 }
 
 module.exports = { router, pagePortail };

@@ -1,4 +1,6 @@
+const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 // Ce que partagent le dashboard (qui fournit les colis du portail) et le
 // petit serveur du portail (qui sert la page sur son propre domaine) : la
@@ -8,6 +10,22 @@ const path = require("path");
 const FORME_JETON = /^[A-Za-z0-9_-]{24,64}$/;
 
 const PAGE = path.join(__dirname, "pages", "portail.html");
+const PUBLIC = path.join(__dirname, "..", "public");
+
+// La page, avec l'empreinte du contenu de chacun de ses fichiers dans leur
+// adresse (/portail.js?v=3f9a1c2e) : apres une mise a jour, aucun navigateur
+// ne melange la nouvelle page et un ancien script garde en cache. Calculee
+// une fois : les fichiers ne changent pas tant que le serveur tourne.
+let pageVersionnee = null;
+function pageHtml() {
+  if (!pageVersionnee) {
+    pageVersionnee = fs.readFileSync(PAGE, "utf8").replace(/(href|src)="\/(styles\.css|portail\.css|portail\.js)"/g, (tout, attr, fichier) => {
+      const empreinte = crypto.createHash("sha1").update(fs.readFileSync(path.join(PUBLIC, fichier))).digest("hex").slice(0, 10);
+      return `${attr}="/${fichier}?v=${empreinte}"`;
+    });
+  }
+  return pageVersionnee;
+}
 
 const ENTETES = {
   "Cache-Control": "no-store",
@@ -24,6 +42,8 @@ const CSP = [
   "style-src 'self'",
   "img-src 'self' data:",
   "connect-src 'self'",
+  // le fond vivant : ses particules sont dessinees dans un worker
+  "worker-src 'self'",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
@@ -55,4 +75,4 @@ function limiteur({ fenetreMs, max }) {
   };
 }
 
-module.exports = { FORME_JETON, PAGE, ENTETES, ENTETES_PAGE, limiteur };
+module.exports = { FORME_JETON, PAGE, PUBLIC, pageHtml, ENTETES, ENTETES_PAGE, limiteur };
