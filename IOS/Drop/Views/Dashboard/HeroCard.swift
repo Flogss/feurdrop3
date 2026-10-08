@@ -8,6 +8,8 @@ struct HeroCard: View {
     @Environment(AppModel.self) private var app
     @State private var confirmeRetour = false
     @State private var confirmeAnnulation = false
+    /// ce qu'on peut emporter : la feuille de depart est ouverte
+    @State private var choixTournee: TourChoix?
 
     private var model: DashboardModel { app.dashboard }
     private var enTournee: Bool { stats.tour.isActive }
@@ -127,12 +129,18 @@ struct HeroCard: View {
             .allowsHitTesting(false)
     }
 
+    /// le depart, ce qu'on a emporte, et ce qui attend (arrive depuis, ou
+    /// laisse a la maison)
     private var noteTournee: String {
         let debut = ServerDate.time(stats.tour.startedAt)
-        if stats.tour.arrivedCount > 0 {
-            return "Parti à \(debut). \(Format.count(stats.tour.arrivedCount, "colis reçu", "colis reçus")) depuis (\(Format.euro(stats.tour.arrivedValue))) attendront la prochaine tournée."
+        let selection = stats.tour.selection ?? []
+        let avec = selection.isEmpty ? "" : " avec \(selection.prefix(4).joined(separator: ", "))\(selection.count > 4 ? " +\(selection.count - 4)" : "")"
+        let horsSac = stats.tour.horsSacCount ?? stats.tour.arrivedCount
+        if horsSac > 0 {
+            let valeur = stats.tour.horsSacValue ?? stats.tour.arrivedValue
+            return "Parti à \(debut)\(avec). \(Format.count(horsSac, "autre colis attendra", "autres colis attendront")) la prochaine tournée (\(Format.euro(valeur)))."
         }
-        return "Parti à \(debut). Seuls les colis présents au départ peuvent être dropés."
+        return "Parti à \(debut)\(avec). Seuls les colis présents au départ peuvent être dropés."
     }
 
     // MARK: Actions
@@ -148,7 +156,15 @@ struct HeroCard: View {
                         confirmeRetour = true
                     }
                 } else {
-                    Task { await model.startTour() }
+                    // au depart : on choisit ce qu'on emporte
+                    Task {
+                        guard let choix = await model.tourChoix() else { return }
+                        if choix.groupes.isEmpty {
+                            await model.startTour()
+                        } else {
+                            choixTournee = choix
+                        }
+                    }
                 }
             } label: {
                 HStack(spacing: 8) {
@@ -180,6 +196,18 @@ struct HeroCard: View {
             }
         }
         .sensoryFeedback(.success, trigger: enTournee)
+        .sheet(isPresented: Binding(get: { choixTournee != nil }, set: { if !$0 { choixTournee = nil } })) {
+            if let choix = choixTournee {
+                TourChoixSheet(choix: choix) { cles in
+                    Task { await model.startTour(selection: cles) }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                #if os(macOS)
+                .frame(minWidth: 480, minHeight: 540)
+                #endif
+            }
+        }
     }
 }
 

@@ -2689,6 +2689,55 @@ a.toast-lien { color: inherit; text-decoration: none; cursor: pointer; }
 .sheet-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .sheet-layer.closing .sheet-backdrop { animation: fade-out var(--t-3) var(--ease-in) forwards; }
 .sheet-layer.closing .sheet { animation: sheet-out 260ms var(--ease-in) forwards; }
+/* Depart en tournee : les transporteurs a emporter, en puces qu'on coche.
+   Les categories (Specials, LIT) cochent ou decochent tous les leurs. */
+.tour-sheet { max-width: 560px; max-height: calc(100dvh - 24px - env(safe-area-inset-top)); display: flex; flex-direction: column; }
+.tour-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.tour-sheet-head .btn { color: rgb(var(--violet-300)); }
+.tour-groupes { display: flex; flex-direction: column; gap: 16px; overflow-y: auto; margin: 0 -20px; padding: 2px 20px 4px; scrollbar-width: none; overscroll-behavior: contain; }
+.tour-groupes::-webkit-scrollbar { display: none; }
+.tour-groupe { display: flex; flex-direction: column; gap: 9px; }
+.tour-groupe.is-new { animation: tour-groupe-in var(--t-5) var(--ease-out) both; }
+.tour-groupe.is-new:nth-child(2) { animation-delay: 70ms; }
+.tour-groupe.is-new:nth-child(3) { animation-delay: 140ms; }
+@keyframes tour-groupe-in { from { opacity: 0; transform: translate3d(0, 12px, 0); filter: blur(4px); } }
+.tour-groupe-nom { font: 650 12px/1 var(--font-sans); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.tour-choix { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.tour-puce, .tour-categorie {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 12px;
+  border-radius: var(--r-pill); border: 1px solid var(--line-2); background: rgb(255 255 255 / 0.03);
+  color: var(--text-3); font-size: 14px; font-weight: 600; white-space: nowrap;
+  transition: background-color var(--t-3) var(--ease-out), border-color var(--t-3) var(--ease-out), color var(--t-2), transform var(--t-3) var(--ease-spring), box-shadow var(--t-4) var(--ease-out);
+}
+.tour-puce b, .tour-categorie b { font-weight: 700; font-variant-numeric: tabular-nums; color: inherit; opacity: 0.75; }
+.tour-puce .carrier-dot { opacity: 0.4; transition: opacity var(--t-3), transform var(--t-3) var(--ease-spring); }
+.tour-puce:active, .tour-categorie:active { transform: scale(0.95); }
+.tour-puce[aria-pressed="true"] {
+  color: var(--text); border-color: rgb(var(--c) / 0.55);
+  background: linear-gradient(180deg, rgb(var(--c) / 0.2), rgb(var(--c) / 0.08));
+  box-shadow: 0 6px 18px -10px rgb(var(--c) / 0.9);
+}
+.tour-puce[aria-pressed="true"] .carrier-dot { opacity: 1; transform: scale(1.15); }
+
+.tour-categorie { align-self: flex-start; padding-left: 8px; color: var(--text-2); }
+.tour-coche {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  border: 1.5px solid var(--line-3); color: transparent;
+  transition: background-color var(--t-3), border-color var(--t-3), color var(--t-2), transform var(--t-3) var(--ease-spring);
+}
+.tour-coche .icon { width: 14px; height: 14px; stroke-width: 2.6; }
+.tour-categorie-special { --k: var(--special-rgb); }
+.tour-categorie-lit { --k: var(--teal-rgb); }
+.tour-categorie[aria-pressed="true"], .tour-categorie[aria-pressed="mixed"] { color: var(--text); border-color: rgb(var(--k) / 0.5); background: rgb(var(--k) / 0.12); }
+.tour-categorie[aria-pressed="true"] .tour-coche, .tour-categorie[aria-pressed="mixed"] .tour-coche {
+  background: rgb(var(--k)); border-color: rgb(var(--k)); color: #120e1c; transform: scale(1.05);
+}
+
+.tour-resume { margin: 16px 0 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 15px; color: var(--text-2); }
+.tour-resume b { color: var(--text); }
+.tour-resume-note { display: block; margin-top: 3px; font-size: 13px; color: var(--warn); }
+
 @keyframes sheet-in { from { transform: translate3d(0, calc(100% + 24px), 0); } }
 @keyframes sheet-out { to { transform: translate3d(0, calc(100% + 24px), 0); } }
 

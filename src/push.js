@@ -139,12 +139,11 @@ async function notifyNewColis({ count }) {
   for (const [endpoint, n] of annonces) setPushAnnounced(endpoint, n);
 }
 
-// Depart en tournee : ce qu'on emporte.
-function notifyTourStart() {
-  const pending = getPendingSummary();
+// Depart en tournee : ce qu'on emporte (le sac, pas tout ce qui attend).
+function notifyTourStart(sac = getPendingSummary()) {
   return sendToAll({
-    title: `🚚 En tournée · ${euro(pending.value)}`,
-    body: `${pending.count} colis dans le sac`,
+    title: `🚚 En tournée · ${euro(sac.value)}`,
+    body: `${sac.count} colis dans le sac`,
     tag: "tour",
     url: "/",
   }).catch((err) => console.error("[push] notifyTourStart", err.message));

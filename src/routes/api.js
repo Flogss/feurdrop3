@@ -27,6 +27,9 @@ const {
   dropBySender,
   dropColis,
   getTourStart,
+  getTourSelectionNoms,
+  getTourChoix,
+  getHorsTournee,
   startTour,
   endTour,
   recordTour,
@@ -144,10 +147,9 @@ router.get("/stats", (req, res) => {
        WHERE status = 'dropped' AND date(dropped_at) = date('now')`
     )
     .get();
-  // le "en attente" par expediteur suit la meme regle que le bouton Drop
-  const pendingInScope = tour.params.length
-    ? "status = 'pending' AND created_at <= @tourStart"
-    : "status = 'pending'";
+  // le "en attente" par expediteur suit la meme regle que le bouton Drop :
+  // pendant une tournee, seulement ce qui est dans le sac
+  const pendingInScope = `status = 'pending'${tour.clause}`;
   const bySender = db
     .prepare(
       `SELECT sender_name,
@@ -157,7 +159,7 @@ router.get("/stats", (req, res) => {
               SUM(CASE WHEN status = 'dropped' THEN price ELSE 0 END) AS dropped_value
        FROM colis GROUP BY sender_name ORDER BY pending_count DESC`
     )
-    .all(...(tour.params.length ? [{ tourStart: tour.params[0] }] : []));
+    .all(...tour.params, ...tour.params);
   const litPending = db
     .prepare(
       `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'lit'${tour.clause}`
@@ -169,6 +171,7 @@ router.get("/stats", (req, res) => {
     )
     .get(...tour.params);
   const arrived = getArrivedDuringTour();
+  const horsSac = getHorsTournee();
 
   res.json({
     pendingCount: pending.count,
@@ -190,6 +193,11 @@ router.get("/stats", (req, res) => {
       startedAt: getTourStart(),
       arrivedCount: arrived.count,
       arrivedValue: arrived.value,
+      // les transporteurs emportes (null : tout), et ce qui reste en attente
+      // hors du sac (arrive depuis, ou pas dans la selection)
+      selection: getTourSelectionNoms(),
+      horsSacCount: horsSac.count,
+      horsSacValue: horsSac.value,
       // heure du serveur : le chrono du navigateur s'y recale pour ne pas
       // deriver si les deux horloges different
       now: serverNow(),
@@ -199,18 +207,37 @@ router.get("/stats", (req, res) => {
 });
 
 // --- Tournee ----------------------------------------------------------------
+// Ce qu'on peut emporter, pour choisir avant de partir.
+router.get("/tour/choix", (req, res) => {
+  res.json(getTourChoix());
+});
+
+// Depart. `selection` : les transporteurs emportes ("normal:MR", "lit:DHL",
+// "bj:BJ"...) ; sans selection (ancienne app), la tournee prend tout. Tout
+// cocher revient a tout prendre.
 router.post("/tour/start", (req, res) => {
-  const startedAt = startTour();
+  // deja parti (double appui, deux appareils) : la tournee en cours reste telle quelle
+  if (getTourStart()) return res.json({ ok: true, startedAt: getTourStart(), selection: getTourSelectionNoms() });
+  let selection = null;
+  if (Array.isArray(req.body?.selection)) {
+    selection = req.body.selection.filter((c) => typeof c === "string");
+    if (selection.length === 0) return res.status(400).json({ error: "Choisis au moins un transporteur" });
+    const tout = getTourChoix().groupes.flatMap((g) => g.transporteurs.map((t) => t.cle));
+    if (tout.every((cle) => selection.includes(cle))) selection = null;
+  }
+  const startedAt = startTour(selection);
+  const scope = tourScope();
   const sac = db
-    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND created_at <= ?")
-    .get(startedAt);
+    .prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'${scope.clause}`)
+    .get(...scope.params);
+  const noms = getTourSelectionNoms();
   journalise("tournee", "Départ en tournée", {
-    detail: `${sac.count} colis dans le sac`,
+    detail: [`${sac.count} colis dans le sac`, noms ? noms.join(", ") : null].filter(Boolean).join(" · ").slice(0, 200),
     valeur: sac.value,
     nombre: sac.count,
   });
-  notifyTourStart();
-  res.json({ ok: true, startedAt });
+  notifyTourStart(sac);
+  res.json({ ok: true, startedAt, count: sac.count, value: sac.value, selection: noms });
 });
 
 // Retour de tournee : ce qu'on a emporte a ete poste, donc on le marque drope

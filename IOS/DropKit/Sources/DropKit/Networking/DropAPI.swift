@@ -40,8 +40,16 @@ public struct DropAPI: Sendable {
 
     // MARK: - Tournee
 
-    public func startTour() async throws {
-        _ = try await client.raw(.post, "/api/tour/start")
+    /// Ce qu'on peut emporter (pour choisir les transporteurs avant de partir).
+    public func tourChoix() async throws -> TourChoix {
+        try await client.send(.get, "/api/tour/choix")
+    }
+
+    /// Depart en tournee avec les transporteurs choisis (`selection` : leurs
+    /// cles, nil : tout).
+    public func startTour(selection: [String]? = nil) async throws -> TourDepart {
+        struct Corps: Encodable, Sendable { let selection: [String]? }
+        return try await client.send(.post, "/api/tour/start", body: Corps(selection: selection))
     }
 
     /// retour de tournee : ce qu'on avait emporte (et imprime) est drope

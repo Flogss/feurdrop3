@@ -79,6 +79,11 @@ public struct Tour: Codable, Sendable, Equatable {
     /// heure du serveur : le chrono s'y recale pour ne pas deriver
     public var now: String?
     public var last: TourSummary?
+    /// les transporteurs emportes ("Mondial Relay", "LIT DHL"...) ; nil : tout
+    public var selection: [String]?
+    /// ce qui attend hors du sac : arrive depuis, ou laisse a la maison
+    public var horsSacCount: Int?
+    public var horsSacValue: Double?
 
     public init(startedAt: String? = nil, arrivedCount: Int = 0, arrivedValue: Double = 0, now: String? = nil, last: TourSummary? = nil) {
         self.startedAt = startedAt
@@ -89,6 +94,37 @@ public struct Tour: Codable, Sendable, Equatable {
     }
 
     public var isActive: Bool { startedAt != nil }
+}
+
+/// `GET /api/tour/choix` : ce qu'on peut emporter, pour choisir avant de
+/// partir. Les transporteurs (boite jaune comprise), puis Special et LIT.
+public struct TourChoix: Codable, Sendable, Equatable {
+    public var groupes: [TourGroupe]
+}
+
+public struct TourGroupe: Codable, Sendable, Equatable, Identifiable {
+    /// "normal", "special" ou "lit"
+    public var id: String
+    public var nom: String
+    public var transporteurs: [TourTransporteur]
+}
+
+public struct TourTransporteur: Codable, Sendable, Equatable, Identifiable {
+    /// "normal:MR", "lit:DHL", "bj:BJ"...
+    public var cle: String
+    public var code: String
+    public var nom: String
+    public var count: Int
+    /// deja imprimes : les seuls que le retour de tournee drope
+    public var prets: Int
+    public var value: Double
+    public var id: String { cle }
+}
+
+/// `POST /api/tour/start` : le sac emporte.
+public struct TourDepart: Codable, Sendable, Equatable {
+    public var count: Int?
+    public var value: Double?
 }
 
 public struct TourSummary: Codable, Sendable, Equatable {

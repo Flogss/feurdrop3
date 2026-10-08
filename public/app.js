@@ -1538,10 +1538,14 @@ function renderTour(tour) {
     return;
   }
 
+  // ce qu'on a emporte, et ce qui attend (arrive depuis, ou laisse a la maison)
+  const sel = tour.selection || [];
+  const avec = sel.length ? ` avec ${sel.slice(0, 4).join(", ")}${sel.length > 4 ? ` +${sel.length - 4}` : ""}` : "";
+  const horsSac = tour.horsSacCount ?? tour.arrivedCount;
   note.textContent =
-    `Parti à ${formatTourTime(tourStartedAt)}. ` +
-    (tour.arrivedCount > 0
-      ? `${pluriel(tour.arrivedCount, "colis reçu", "colis reçus")} depuis (${euro(tour.arrivedValue)}) attendront la prochaine tournée.`
+    `Parti à ${formatTourTime(tourStartedAt)}${avec}. ` +
+    (horsSac > 0
+      ? `${pluriel(horsSac, "autre colis attendra", "autres colis attendront")} la prochaine tournée (${euro(tour.horsSacValue ?? tour.arrivedValue)}).`
       : "Seuls les colis présents au départ peuvent être dropés.");
 
   startChrono(tourStartedAt);
@@ -1683,17 +1687,146 @@ $("tour-btn").addEventListener("click", async (e) => {
     return;
   }
 
-  const sac = bagSummary.count;
+  // au depart : on choisit ce qu'on emporte
+  await choisirTournee(bouton);
+});
+
+// --- Choix de la tournee ---------------------------------------------------------
+// Au depart, on coche les transporteurs qu'on va poster ; les speciaux et les
+// LIT ont leur propre categorie : la toucher prend (ou laisse) tous ses
+// transporteurs, chacun restant decochable. Seul ce qui est coche part dans
+// le sac : compteurs, retour de tournee et suivi des expediteurs.
+const choixTournee = { groupes: [], selection: new Set(), bouton: null };
+
+async function choisirTournee(bouton) {
+  let choix;
+  try {
+    occupe(bouton, true);
+    choix = await fetchJSON("/api/tour/choix");
+  } catch (err) {
+    secoue(bouton);
+    toast(err.message || "Connexion impossible", "error");
+    return;
+  } finally {
+    occupe(bouton, false);
+  }
+  // rien en attente : on part quand meme, comme avant
+  if (!choix.groupes.length) return partirEnTournee(bouton, null);
+
+  choixTournee.groupes = choix.groupes;
+  choixTournee.selection = new Set(choix.groupes.flatMap((g) => g.transporteurs.map((t) => t.cle)));
+  choixTournee.bouton = bouton;
+  rendChoixTournee({ premier: true });
+  const couche = $("tour-sheet");
+  couche.classList.remove("closing");
+  couche.hidden = false;
+  haptique();
+  requestAnimationFrame(() => $("tour-partir").focus({ preventScroll: true }));
+}
+
+function fermeChoixTournee() {
+  const couche = $("tour-sheet");
+  if (couche.hidden) return;
+  couche.classList.add("closing");
+  setTimeout(() => {
+    couche.hidden = true;
+    couche.classList.remove("closing");
+  }, prefersReducedMotion ? 0 : 260);
+}
+
+function rendChoixTournee({ premier = false } = {}) {
+  const sel = choixTournee.selection;
+  const puce = (t) => `
+    <button class="tour-puce carrier" type="button" data-cle="${escapeAttr(t.cle)}" data-carrier="${escapeAttr(t.code)}" aria-pressed="${sel.has(t.cle)}">
+      <i class="carrier-dot"></i><span>${escapeHtml(t.nom)}</span><b>${entier(t.count)}</b>
+    </button>`;
+  $("tour-groupes").innerHTML = choixTournee.groupes
+    .map((g) => {
+      const cles = g.transporteurs.map((t) => t.cle);
+      const pris = cles.filter((c) => sel.has(c)).length;
+      const etat = pris === 0 ? "false" : pris === cles.length ? "true" : "mixed";
+      const total = g.transporteurs.reduce((n, t) => n + t.count, 0);
+      const tete =
+        g.id === "normal"
+          ? `<div class="tour-groupe-nom">${escapeHtml(g.nom)}</div>`
+          : `<button class="tour-categorie tour-categorie-${g.id}" type="button" data-groupe="${g.id}" aria-pressed="${etat}">
+               <span class="tour-coche" aria-hidden="true">${ico(etat === "mixed" ? "minus" : "check")}</span>
+               <span>${escapeHtml(g.nom)}</span><b>${entier(total)}</b>
+             </button>`;
+      return `<section class="tour-groupe${premier ? " is-new" : ""}">${tete}<div class="tour-choix">${g.transporteurs.map(puce).join("")}</div></section>`;
+    })
+    .join("");
+
+  const tous = choixTournee.groupes.flatMap((g) => g.transporteurs);
+  const pris = tous.filter((t) => sel.has(t.cle));
+  const count = pris.reduce((n, t) => n + t.count, 0);
+  const prets = pris.reduce((n, t) => n + t.prets, 0);
+  const value = pris.reduce((n, t) => n + t.value, 0);
+  $("tour-tout").textContent = pris.length === tous.length ? "Aucun" : "Tout";
+  $("tour-resume").innerHTML = pris.length
+    ? `<b>${pluriel(count, "colis", "colis")}</b> dans le sac · ${euro(value)}` +
+      (count > prets ? `<span class="tour-resume-note">${pluriel(count - prets, "pas encore imprimé restera", "pas encore imprimés resteront")} en attente</span>` : "")
+    : "Choisis au moins un transporteur.";
+  $("tour-partir").disabled = pris.length === 0;
+}
+
+$("tour-groupes").addEventListener("click", (e) => {
+  const puce = e.target.closest(".tour-puce");
+  const categorie = e.target.closest(".tour-categorie");
+  const sel = choixTournee.selection;
+  if (puce) {
+    const cle = puce.dataset.cle;
+    if (sel.has(cle)) sel.delete(cle);
+    else sel.add(cle);
+  } else if (categorie) {
+    const groupe = choixTournee.groupes.find((g) => g.id === categorie.dataset.groupe);
+    const cles = groupe.transporteurs.map((t) => t.cle);
+    const tousPris = cles.every((c) => sel.has(c));
+    for (const c of cles) tousPris ? sel.delete(c) : sel.add(c);
+  } else {
+    return;
+  }
+  haptique();
+  rendChoixTournee();
+});
+
+$("tour-tout").addEventListener("click", () => {
+  const tous = choixTournee.groupes.flatMap((g) => g.transporteurs.map((t) => t.cle));
+  choixTournee.selection = new Set(choixTournee.selection.size === tous.length ? [] : tous);
+  haptique();
+  rendChoixTournee();
+});
+
+$("tour-sheet").addEventListener("click", (e) => {
+  if (e.target.closest("[data-tour-fermer]")) fermeChoixTournee();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") fermeChoixTournee();
+});
+
+$("tour-partir").addEventListener("click", async () => {
+  const selection = [...choixTournee.selection];
+  if (!selection.length) return;
+  fermeChoixTournee();
+  await partirEnTournee(choixTournee.bouton, selection);
+});
+
+// `selection` : les cles cochees (null : tout)
+async function partirEnTournee(bouton, selection) {
   await agir(
     bouton,
     async () => {
-      await postJSON("/api/tour/start");
+      const r = await postJSON("/api/tour/start", selection ? { selection } : {});
       renderCache.clear();
       await refreshAll();
+      return r;
     },
-    { succes: `Bonne tournée ! ${pluriel(sac, "colis", "colis")} dans le sac.`, eclats: { nombre: 14 } }
+    {
+      succes: (r) => `Bonne tournée ! ${pluriel(r?.count ?? bagSummary.count, "colis", "colis")} dans le sac.`,
+      eclats: { nombre: 14 },
+    }
   );
-});
+}
 
 // drop = true : le sac est drope. false : on referme sans rien dropper.
 async function endTour(drop, bouton) {

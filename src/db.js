@@ -754,13 +754,96 @@ function getTourStart() {
   return getSetting("tour_started_at", null) || null;
 }
 
-function startTour() {
+// On ne part pas forcement avec tout : au depart, on choisit les
+// transporteurs qu'on va poster (et, a part, ceux des speciaux et des LIT).
+// La selection est une liste de cles "type:transporteur" -- "normal:MR",
+// "lit:DHL", "special:LP", "bj:BJ". Sans selection, la tournee prend tout.
+const TYPES_TOURNEE = new Set(["normal", "lit", "special", "bj"]);
+const CLE_TOURNEE = /^(normal|lit|special|bj):[A-Za-z]{1,20}$/;
+// le transporteur d'un colis tel que la tournee le range
+const CODE_TOURNEE_SQL = "CASE WHEN type = 'bj' THEN 'BJ' ELSE COALESCE(carrier, 'Inconnu') END";
+
+function getTourSelection() {
+  const brut = getSetting("tour_selection", null);
+  if (!brut) return null;
+  try {
+    const liste = JSON.parse(brut);
+    return Array.isArray(liste) ? liste.filter((c) => CLE_TOURNEE.test(c)) : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+// La condition SQL d'une selection : "un de ces couples type/transporteur".
+function selectionSql(selection) {
+  const morceaux = [];
+  const params = [];
+  for (const cle of selection) {
+    const [type, code] = cle.split(":");
+    if (!TYPES_TOURNEE.has(type)) continue;
+    morceaux.push(`(type = ? AND ${CODE_TOURNEE_SQL} = ?)`);
+    params.push(type, code);
+  }
+  return morceaux.length ? { clause: ` AND (${morceaux.join(" OR ")})`, params } : { clause: " AND 0", params: [] };
+}
+
+// `selection` : les cles choisies au depart (null : tout).
+function startTour(selection = null) {
+  const propre = Array.isArray(selection) ? [...new Set(selection.filter((c) => CLE_TOURNEE.test(c)))] : null;
+  if (propre) setSetting("tour_selection", JSON.stringify(propre));
+  else db.prepare("DELETE FROM settings WHERE key = 'tour_selection'").run();
   setSetting("tour_started_at", db.prepare("SELECT datetime('now') AS d").get().d);
   return getTourStart();
 }
 
 function endTour() {
-  db.prepare("DELETE FROM settings WHERE key = 'tour_started_at'").run();
+  db.prepare("DELETE FROM settings WHERE key IN ('tour_started_at', 'tour_selection')").run();
+}
+
+// Ce qu'on peut emporter : les colis en attente, ranges comme au depart en
+// tournee -- les transporteurs (boite jaune comprise), puis les speciaux et
+// les LIT a part, chacun par transporteur. `prets` : deja imprimes (ou sans
+// etiquette), les seuls qu'un retour de tournee peut dropper.
+function getTourChoix() {
+  const lignes = db
+    .prepare(
+      `SELECT type, ${CODE_TOURNEE_SQL} AS code, COUNT(*) AS count,
+              SUM(CASE WHEN ${PRET_SQL} THEN 1 ELSE 0 END) AS prets,
+              COALESCE(SUM(price), 0) AS value
+       FROM colis WHERE status = 'pending'
+       GROUP BY type, code ORDER BY count DESC`
+    )
+    .all();
+  const groupes = [
+    { id: "normal", nom: "Transporteurs", transporteurs: [] },
+    { id: "special", nom: "Spécial", transporteurs: [] },
+    { id: "lit", nom: "LIT", transporteurs: [] },
+  ];
+  for (const l of lignes) {
+    const groupe = groupes.find((g) => g.id === (l.type === "bj" ? "normal" : l.type));
+    if (!groupe) continue;
+    groupe.transporteurs.push({
+      cle: `${l.type}:${l.code}`,
+      code: l.code,
+      nom: l.code === "BJ" ? "Boîte jaune" : l.code === "Inconnu" ? "Non reconnu" : carrierLabel(l.code),
+      count: l.count,
+      prets: l.prets,
+      value: l.value,
+    });
+  }
+  return { groupes: groupes.filter((g) => g.transporteurs.length > 0) };
+}
+
+// Les noms de la selection en cours ("Mondial Relay, UPS, LIT DHL"), ou null
+// si la tournee prend tout.
+function getTourSelectionNoms() {
+  const selection = getTourSelection();
+  if (!selection) return null;
+  return selection.map((cle) => {
+    const [type, code] = cle.split(":");
+    const nom = code === "BJ" ? "Boîte jaune" : code === "Inconnu" ? "Non reconnu" : carrierLabel(code);
+    return type === "lit" ? `LIT ${nom}` : type === "special" ? `Spécial ${nom}` : nom;
+  });
 }
 
 // Historique des tournees : sert au cumul de la journee (une deuxieme sortie
@@ -809,10 +892,27 @@ function serverNow() {
   return db.prepare("SELECT datetime('now') AS d").get().d;
 }
 
-// Condition SQL a coller apres un WHERE existant, plus ses parametres.
+// Condition SQL a coller apres un WHERE existant, plus ses parametres : le
+// sac de la tournee en cours (arrive avant le depart, et dans la selection).
 function tourScope() {
   const start = getTourStart();
-  return start ? { clause: " AND created_at <= ?", params: [start] } : { clause: "", params: [] };
+  if (!start) return { clause: "", params: [] };
+  const selection = getTourSelection();
+  const choix = selection ? selectionSql(selection) : { clause: "", params: [] };
+  return { clause: ` AND created_at <= ?${choix.clause}`, params: [start, ...choix.params] };
+}
+
+// Les colis en attente qui ne sont pas dans le sac : arrives depuis le
+// depart, ou d'un transporteur qu'on n'a pas emporte.
+function getHorsTournee() {
+  if (!getTourStart()) return { count: 0, value: 0 };
+  const { clause, params } = tourScope();
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis
+       WHERE status = 'pending' AND id NOT IN (SELECT id FROM colis WHERE status = 'pending'${clause})`
+    )
+    .get(...params);
 }
 
 // Colis arrives depuis le depart : ils restent en attente pour la prochaine
@@ -832,9 +932,8 @@ function getArrivedDuringTour() {
 function endTourIfEmpty() {
   const start = getTourStart();
   if (!start) return false;
-  const left = db
-    .prepare("SELECT COUNT(*) AS c FROM colis WHERE status = 'pending' AND created_at <= ?")
-    .get(start).c;
+  const { clause, params } = tourScope();
+  const left = db.prepare(`SELECT COUNT(*) AS c FROM colis WHERE status = 'pending'${clause}`).get(...params).c;
   if (left > 0) return false;
   endTour();
   journalise("tournee", "Sac vide : tournée refermée");
@@ -1566,6 +1665,10 @@ module.exports = {
   dropBySender,
   dropColis,
   getTourStart,
+  getTourSelection,
+  getTourSelectionNoms,
+  getTourChoix,
+  getHorsTournee,
   startTour,
   endTour,
   recordTour,

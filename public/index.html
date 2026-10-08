@@ -694,6 +694,26 @@
      remplace les boites natives du navigateur. -->
 <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 
+<!-- Depart en tournee : ce qu'on emporte -->
+<div class="sheet-layer" id="tour-sheet" hidden>
+  <div class="sheet-backdrop" data-tour-fermer></div>
+  <div class="sheet tour-sheet" role="dialog" aria-modal="true" aria-labelledby="tour-sheet-title">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <div class="tour-sheet-head">
+      <h2 class="sheet-title" id="tour-sheet-title">Qu'est-ce que tu postes ?</h2>
+      <button class="btn btn-sm btn-ghost" id="tour-tout" type="button">Aucun</button>
+    </div>
+    <div class="tour-groupes" id="tour-groupes"></div>
+    <p class="tour-resume" id="tour-resume" aria-live="polite"></p>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-lg" type="button" data-tour-fermer>Annuler</button>
+      <button class="btn btn-primary btn-lg" type="button" id="tour-partir">
+        <svg class="icon"><use href="#i-truck"/></svg><span>C'est parti</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="sheet-layer" id="sheet" hidden>
   <div class="sheet-backdrop" data-sheet-cancel></div>
   <div class="sheet" role="alertdialog" aria-modal="true" aria-labelledby="sheet-title" aria-describedby="sheet-message">

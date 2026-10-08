@@ -204,10 +204,22 @@ final class DashboardModel {
 
     // MARK: Tournee
 
-    func startTour() async {
-        let sac = stats?.pendingCount ?? 0
+    /// Ce qu'on peut emporter, pour choisir avant de partir (nil : echec,
+    /// deja signale).
+    func tourChoix() async -> TourChoix? {
+        guard !busy.contains("tour") else { return nil }
+        busy.insert("tour")
+        defer { busy.remove("tour") }
+        return await app.perform { try await app.api.tourChoix() }
+    }
+
+    /// Depart avec les transporteurs choisis (`selection` : leurs cles ; nil :
+    /// tout). Seul ce qui est choisi part dans le sac.
+    func startTour(selection: [String]? = nil) async {
+        var sac = stats?.pendingCount ?? 0
         await run("tour") {
-            try await app.api.startTour()
+            let depart = try await app.api.startTour(selection: selection)
+            if let n = depart.count { sac = n }
         } succes: {
             "Bonne tournée ! \(Format.count(sac, "colis", "colis")) dans le sac."
         }

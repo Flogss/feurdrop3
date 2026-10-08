@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { db, getSetting, setSetting, getTourStart, journalise } = require("./db");
+const { db, getSetting, setSetting, tourScope, journalise } = require("./db");
 const { suiviDuColis, transporteurDuColis } = require("./suiviColis");
 const { carrierLabel } = require("./carrier");
 const { FORME_JETON } = require("./portailCommun");
@@ -96,23 +96,31 @@ function refDe(id) {
 //   a_imprimer : l'etiquette n'est pas encore sortie ;
 //   imprime    : prete a partir (un colis compte a la main n'a rien a imprimer) ;
 //   en_drop    : une tournee est en cours et le colis est dans le sac (pret,
-//                et deja la au depart -- la meme regle que le dashboard) ;
+//                deja la au depart, d'un transporteur emporte -- la regle meme
+//                du dashboard, tourScope) ;
 //   drope      : depose.
-function etapeDe(colis, depart) {
+function etapeDe(colis, dansLeSac) {
   if (colis.status === "dropped") return "drope";
   const pret = Boolean(colis.printed_at || !colis.file_id);
-  if (pret && depart && colis.created_at <= depart) return "en_drop";
+  if (pret && dansLeSac.has(colis.id)) return "en_drop";
   return pret ? "imprime" : "a_imprimer";
+}
+
+// Les colis du sac de la tournee en cours (aucun hors tournee).
+function idsDuSac() {
+  const { clause, params } = tourScope();
+  if (!clause) return new Set();
+  return new Set(db.prepare(`SELECT id FROM colis WHERE status = 'pending'${clause}`).all(...params).map((r) => r.id));
 }
 
 // Uniquement ce qui sert a l'expediteur : ni prix, ni paiement, ni note, ni
 // fichier, ni legende, ni rien du dashboard.
-function vueColis(colis, depart) {
+function vueColis(colis, dansLeSac) {
   const suivi = suiviDuColis(colis);
   const code = suivi ? suivi.transporteur : transporteurDuColis(colis);
   return {
     ref: refDe(colis.id),
-    etape: etapeDe(colis, depart),
+    etape: etapeDe(colis, dansLeSac),
     transporteur: code ? { code, nom: suivi ? suivi.nom : carrierLabel(code) } : null,
     boiteJaune: colis.type === "bj",
     suivi: suivi ? { numero: suivi.numero, lien: suivi.lien, page: suivi.page } : null,
@@ -161,8 +169,8 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
     )
     .get(jeton).c;
 
-  const depart = getTourStart();
-  const colis = lignes.map((l) => vueColis(l, depart));
+  const sac = idsDuSac();
+  const colis = lignes.map((l) => vueColis(l, sac));
   const compte = { a_imprimer: 0, imprime: 0, en_drop: 0, drope: 0 };
   for (const c of colis) if (c.etape !== "drope") compte[c.etape] += 1;
   // les dropes se comptent sur tout l'historique, pas seulement la page
