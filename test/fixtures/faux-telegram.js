@@ -32,7 +32,10 @@ function analyse(type, brut) {
     const champs = {};
     const fichiers = {};
     for (const m of texte.matchAll(/name="([^"]+)"(?:; filename="([^"]+)")?\r\n(?:Content-Type: ([^\r]+)\r\n)?\r\n([\s\S]*?)\r\n--/g)) {
-      if (m[2]) fichiers[m[1]] = { nom: m[2], type: m[3], taille: Buffer.byteLength(m[4], "latin1"), debut: m[4].slice(0, 5) };
+      if (m[2]) {
+        const octets = Buffer.from(m[4], "latin1");
+        fichiers[m[1]] = { nom: m[2], type: m[3], taille: octets.length, debut: m[4].slice(0, 5), octets };
+      }
       else champs[m[1]] = m[4];
     }
     return { ...champs, _fichiers: fichiers };

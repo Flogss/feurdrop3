@@ -105,6 +105,7 @@ const {
   PROGRESS_MIN_INTERVAL_MS,
 } = require("./bot/impression");
 const { handleFusion, ajouteAFusion, handleStopFusion } = require("./bot/fusion");
+const { handleSave } = require("./bot/sauvegarde");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 
@@ -272,7 +273,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
         {},
         30000
       );
@@ -354,6 +355,10 @@ function startBot() {
     )
   );
 
+  // sauvegarde JSON des donnees, envoyee en document : reservee a la liste
+  // blanche (le fichier contient les donnees de tous les expediteurs)
+  bot.onText(/^\/save(@\w+)?$/i, command((msg) => handleSave(bot, msg), { niveau: "admin" }));
+
   // Les boutons agissent sur un colis designe par son numero : un appui venu
   // d'ailleurs que le groupe ou l'equipe est refuse comme une commande.
   bot.on("callback_query", (query) =>
@@ -428,6 +433,7 @@ async function registerCommands(bot) {
     { command: "normalall", description: "Remettre tout le dernier lot dans Normaux" },
     { command: "clear", description: "Retirer le colis mais garder le fichier (en reponse)" },
     { command: "regles", description: "Voir ce que le bot a appris" },
+    { command: "save", description: "Sauvegarde des donnees en JSON (administrateurs)" },
     ...CARRIERS.map((carrier) => ({
       command: `transporteur_${carrier.code.toLowerCase()}`,
       description: carrier.code === "BJ" ? "BJ (type de colis)" : carrier.label,

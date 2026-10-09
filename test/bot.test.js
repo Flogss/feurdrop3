@@ -180,6 +180,48 @@ test("/fusion puis /stopfusion : les fichiers ne comptent pas et reviennent fusi
   assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM colis").get().n, avant, "aucun colis cree");
 });
 
+const documentsA = (chatId, motif) =>
+  faux.appelsDe("sendDocument").filter((x) => Number(x.params.chat_id) === chatId && motif.test(x.params._fichiers?.document?.nom || ""));
+
+test("/save : refuse a un simple membre, rien n'est envoye", async () => {
+  faux.livre(commande(MEMBRE, "/save"));
+  assert.ok(await faux.attends(() => messagesA(MEMBRE, /réservée aux administrateurs/).length >= 1));
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(documentsA(MEMBRE, /feurdrop-backup/).length, 0);
+});
+
+test("/save : la liste blanche recoit le JSON en prive, lisible et verifie", async () => {
+  faux.livre(commande(ADMIN, "/save"));
+  assert.ok(await faux.attends(() => documentsA(ADMIN, /^feurdrop-backup-.*\.json$/).length === 1, 8000), "document envoye");
+  const envoi = documentsA(ADMIN, /feurdrop-backup/)[0];
+  assert.match(envoi.params.caption, /✅ Sauvegarde FeurDrop terminée/);
+  assert.match(envoi.params.caption, /colis \d+/);
+  const { verifieSauvegarde } = require("../src/sauvegarde");
+  const texte = envoi.params._fichiers.document.octets.toString("utf8");
+  const controle = verifieSauvegarde(texte);
+  assert.equal(JSON.parse(texte).donnees.colis.length, db.db.prepare("SELECT COUNT(*) AS n FROM colis").get().n);
+  assert.ok(controle.total > 0);
+  assert.ok(!texte.includes(process.env.TELEGRAM_BOT_TOKEN));
+});
+
+test("/save tape dans le groupe : le fichier part a la destination des sauvegardes, pas dans le groupe", async () => {
+  process.env.TELEGRAM_BACKUP_CHAT_ID = "-1009999";
+  try {
+    faux.livre(commande(ADMIN, "/save", { id: GROUPE, type: "supergroup" }));
+    assert.ok(await faux.attends(() => documentsA(-1009999, /feurdrop-backup/).length === 1, 8000));
+    assert.equal(documentsA(GROUPE, /feurdrop-backup/).length, 0, "rien dans le groupe");
+    assert.ok(await faux.attends(() => messagesA(GROUPE, /Sauvegarde envoyée/).length === 1));
+  } finally {
+    delete process.env.TELEGRAM_BACKUP_CHAT_ID;
+  }
+});
+
+test("/save : un envoi rate est signale clairement", async () => {
+  faux.forceReponse("sendDocument", 400, { ok: false, error_code: 400, description: "Bad Request: chat not found" });
+  faux.livre(commande(ADMIN, "/save"));
+  assert.ok(await faux.attends(() => messagesA(ADMIN, /❌ Sauvegarde créée mais envoi impossible : .*chat not found/).length === 1, 8000));
+});
+
 test("la bibliotheque Telegram envoie toujours les fichiers et rapporte les 429", async () => {
   await bot.sendDocument(GROUPE, Buffer.from("%PDF-1.4 essai"), { caption: "essai" }, { filename: "essai.pdf", contentType: "application/pdf" });
   const envoi = faux.appelsDe("sendDocument").at(-1);
