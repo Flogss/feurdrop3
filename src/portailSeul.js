@@ -2,6 +2,7 @@ const path = require("path");
 const express = require("express");
 const compression = require("compression");
 const { FORME_JETON, PUBLIC, pageHtml, ENTETES, ENTETES_PAGE, limiteur } = require("./portailCommun");
+const { servirPaquets } = require("./assemblage");
 
 // Le portail des expediteurs, sur son propre domaine : un service Railway a
 // part (DROP_ROLE=portail), pour que l'adresse du dashboard n'apparaisse
@@ -15,8 +16,9 @@ const { FORME_JETON, PUBLIC, pageHtml, ENTETES, ENTETES_PAGE, limiteur } = requi
 
 const DASHBOARD = (process.env.DROP_INTERNE || "http://feurdrop3.railway.internal:8080").replace(/\/+$/, "");
 // les seuls fichiers que la page utilise : le systeme de design du
-// dashboard (styles.css, et les particules du fond), et ceux du portail
-const FICHIERS = ["styles.css", "particules.js", "portail.css", "portail.js", "favicon.svg", "icon-192.png"];
+// dashboard (styles.css, assemble depuis public/css/ -- voir assemblage.js --
+// et les particules du fond), et ceux du portail
+const FICHIERS = ["particules.js", "portail.css", "portail.js", "favicon.svg", "icon-192.png"];
 
 const app = express();
 // derriere le proxy de Railway : l'adresse du visiteur vient de ses en-tetes
@@ -26,6 +28,7 @@ app.use(compression());
 
 // revalides a chaque chargement (304 s'ils n'ont pas change) : la page les
 // appelle de toute facon par leur empreinte
+app.use(servirPaquets({ seulement: ["styles.css"] }));
 for (const fichier of FICHIERS) {
   app.get(`/${fichier}`, (req, res) => res.sendFile(path.join(PUBLIC, fichier), { cacheControl: false, headers: { "Cache-Control": "no-cache" } }));
 }

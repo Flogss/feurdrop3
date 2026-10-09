@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const express = require("express");
 const {
   getPrintableSummary,
@@ -23,6 +24,7 @@ const {
   corrigeTransporteur,
   getBot,
 } = require("../bot");
+const { routeAsync } = require("../http");
 
 // "BJ" figure dans la liste des transporteurs parce que /transporteur sait le
 // corriger, mais c'est un type de colis : il n'a rien a faire dans le menu.
@@ -127,7 +129,7 @@ function rowsFor({ categorie, ids, scope }) {
   return getPrintableColis(categorie, { scope });
 }
 
-router.post("/build", async (req, res) => {
+router.post("/build", routeAsync(async (req, res) => {
   const { categorie = "*", ids = null, scope = "new" } = req.body || {};
   try {
     const rows = rowsFor({ categorie, ids, scope });
@@ -149,7 +151,8 @@ router.post("/build", async (req, res) => {
     }
 
     purge();
-    const id = Math.random().toString(36).slice(2, 10);
+    // l'adresse du PDF suffit a le telecharger : un identifiant imprevisible
+    const id = crypto.randomBytes(16).toString("base64url");
     const nom = categorie === "*" ? "toutes" : String(categorie).toLowerCase();
     // rien n'est marque ici : voir l'en-tete du fichier
     jobs.set(id, { pdf: built.pdf, name: `etiquettes-${nom}.pdf`, at: Date.now(), ids: built.printedIds, marque: false });
@@ -171,7 +174,7 @@ router.post("/build", async (req, res) => {
   } catch (err) {
     fail(res, err, 500);
   }
-});
+}));
 
 // Marque une fournee comme imprimee (une seule fois par PDF) : plus de
 // ressortie, ici comme sur Telegram, et "Deja imprime" sous les fichiers.

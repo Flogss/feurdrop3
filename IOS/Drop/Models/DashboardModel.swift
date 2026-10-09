@@ -228,14 +228,19 @@ final class DashboardModel {
     /// `drop` : le sac est poste. Sinon on referme sans rien dropper.
     /// `drop` : le sac est poste -- seuls les colis imprimes partent, le
     /// reste attend la prochaine tournee. Sinon on referme sans rien dropper.
+    /// La tournee affichee part avec la demande : si elle est deja terminee
+    /// (autre appareil, ou refermee apres le dernier drop), le serveur refuse
+    /// au lieu de dropper autre chose, et l'ecran se remet a jour.
     func endTour(drop: Bool) async {
+        let affichee = stats?.tour.startedAt
         if drop {
-            await runDrop("tour") { try await app.api.finishTour() } message: { r in
+            await runDrop("tour") { try await app.api.finishTour(startedAt: affichee) } message: { r in
                 Self.message(r, suffixe: " · \(Format.euro(r.value ?? 0))")
             }
         } else {
-            await run("tour") { try await app.api.cancelTour() } succes: { "Tournée annulée" }
+            await run("tour") { try await app.api.cancelTour(startedAt: affichee) } succes: { "Tournée annulée" }
         }
+        await refresh()
     }
 
     func dismissTourSummary() async {
@@ -304,8 +309,10 @@ final class DashboardModel {
                     let retires = try await app.api.quickRemove(sender: nom, n: e.retraits)
                     app.toasts.show("−\(Format.count(retires, "colis", "colis")) · \(nom)")
                 } catch {
+                    // « − » ne retire que des colis comptes a la main : une
+                    // vraie etiquette se retire depuis Imprime ou avec /del
                     if case APIError.server(status: 404, _) = error {
-                        app.toasts.show("Aucun colis en attente pour \(nom)", style: .info)
+                        app.toasts.show("Aucun colis compté à la main pour \(nom)", style: .info)
                     } else {
                         app.report(error)
                     }

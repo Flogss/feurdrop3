@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { contenuPublic } = require("./assemblage");
 
 // Ce que partagent le dashboard (qui fournit les colis du portail) et le
 // petit serveur du portail (qui sert la page sur son propre domaine) : la
@@ -20,7 +21,7 @@ let pageVersionnee = null;
 function pageHtml() {
   if (!pageVersionnee) {
     pageVersionnee = fs.readFileSync(PAGE, "utf8").replace(/(href|src)="\/(styles\.css|portail\.css|portail\.js)"/g, (tout, attr, fichier) => {
-      const empreinte = crypto.createHash("sha1").update(fs.readFileSync(path.join(PUBLIC, fichier))).digest("hex").slice(0, 10);
+      const empreinte = crypto.createHash("sha1").update(contenuPublic(fichier)).digest("hex").slice(0, 10);
       return `${attr}="/${fichier}?v=${empreinte}"`;
     });
   }

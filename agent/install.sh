@@ -13,17 +13,25 @@ if [ -z "$NODE" ]; then
   exit 1
 fi
 
+# Le jeton ne vit jamais dans ce depot : il se passe en argument
+# (./install.sh <jeton>) ou dans DROP_PRINT_TOKEN, sinon le fichier est cree
+# avec une place a remplir. Voir README.md pour le recuperer.
+JETON="${1:-$DROP_PRINT_TOKEN}"
 if [ ! -f "$HOME/.drop-print.json" ]; then
   cat > "$HOME/.drop-print.json" <<JSON
 {
   "server": "https://feurdrop3-production.up.railway.app",
-  "token": "cb3786003c1fe8e9ba9cb2dacd5583c0acbfae238def0ab9",
+  "token": "${JETON:-COLLE-ICI-LE-JETON-D-IMPRESSION}",
   "printer": "ITPP130_Printer_0",
   "pollSeconds": 10
 }
 JSON
+  chmod 600 "$HOME/.drop-print.json"
   echo "Configuration creee : $HOME/.drop-print.json"
-  echo "Mets-y le jeton d'impression (visible dans les logs Railway), puis relance ce script."
+fi
+if grep -q "COLLE-ICI-LE-JETON" "$HOME/.drop-print.json"; then
+  echo "Mets le jeton d'impression dans $HOME/.drop-print.json (voir README.md), puis relance ce script."
+  exit 1
 fi
 
 mkdir -p "$HOME/Library/LaunchAgents"

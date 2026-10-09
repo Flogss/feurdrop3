@@ -10,11 +10,24 @@ Mac perd le réseau au mauvais moment, l'étiquette repartira au tour suivant.
 
 ## Installation
 
-**1. Récupérer le jeton.** Il apparaît dans les logs Railway au démarrage :
+**1. Récupérer le jeton.** Il n'est plus affiché en clair dans les logs
+(seulement ses 4 derniers caractères, pour vérifier que le Mac a le bon) :
 
 ```
-[print] jeton de l'agent d'impression : 4f3a...
+[print] jeton de l'agent d'impression : gardé en base (…4f3a)
 ```
+
+Le plus simple est de le choisir soi-même : une longue valeur aléatoire
+(`openssl rand -hex 24`) dans la variable `PRINT_TOKEN` du service Railway,
+et la même dans la configuration du Mac. Pour lire celui que le serveur a
+généré lui-même, depuis un terminal du service (`railway ssh`) :
+
+```bash
+npm run jeton-impression
+```
+
+L'agent l'envoie dans l'en-tête `X-Print-Token` (le paramètre `?token=` de
+l'adresse n'est plus accepté).
 
 **2. Trouver le nom de l'imprimante.**
 
@@ -35,7 +48,8 @@ lpstat -p
 
 `"printer": null` utilise l'imprimante par défaut du Mac.
 
-**4. Installer le service.**
+**4. Installer le service** (le jeton peut aussi se passer en argument :
+`./install.sh <jeton>`).
 
 ```bash
 ./agent/install.sh

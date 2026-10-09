@@ -297,13 +297,34 @@ struct SettingsView: View {
 
     private func appliqueAdresse() {
         let propre = adresse.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: propre), url.scheme?.hasPrefix("http") == true, url.host() != nil else {
+        guard let url = URL(string: propre), url.scheme?.hasPrefix("http") == true, let hote = url.host() else {
             app.toasts.show("Adresse invalide", style: .error)
+            return
+        }
+        // iOS n'autorise le http en clair que sur le reseau local (ATS) : une
+        // adresse publique en http ne repondrait jamais, autant le dire ici
+        if url.scheme == "http", !Self.estLocale(hote) {
+            app.toasts.show("En http, seulement une adresse du réseau local : utilise https", style: .error)
             return
         }
         app.serverURL = url
         adresse = url.absoluteString
         app.toasts.show("Serveur enregistré")
         Task { await model.refresh() }
+    }
+
+    /// localhost, machine.local, nom sans point, ou adresse IP privee : ce que
+    /// NSAllowsLocalNetworking laisse joindre en http.
+    static func estLocale(_ hote: String) -> Bool {
+        let h = hote.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if h.contains(":") { return h == "::1" || h.hasPrefix("fe80") }
+        if h == "localhost" || h.hasSuffix(".local") || !h.contains(".") { return true }
+        let octets = h.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4 else { return false }
+        switch (octets[0], octets[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        default: return false
+        }
     }
 }

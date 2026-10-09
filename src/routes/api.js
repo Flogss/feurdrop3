@@ -2,6 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const {
   db,
+  transaction,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
   updateSenderPrices,
@@ -13,7 +14,6 @@ const {
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
-  getStock,
   getStocks,
   adjustStock,
   consumeStock,
@@ -57,10 +57,13 @@ const {
   getJournal,
   undropColis,
   restoreStock,
+  arrondiCentimes,
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart, notifyTourEnd, euro } = require("../push");
 const { refreshGroupStats, buildLabelsPdf } = require("../bot");
 const { creePortail, retirePortail, infoPortail } = require("../portail");
+const { routeAsync } = require("../http");
+const { aujourdhuiParis } = require("../dates");
 
 // SMIC horaire NET francais, sert de point de comparaison apres une tournee :
 // c'est ce qu'on touche vraiment, donc comparable a l'argent des colis.
@@ -100,7 +103,11 @@ router.use((req, res, next) => {
   operations.set(cle, { at: maintenant, enCours: true });
   const envoie = res.json.bind(res);
   res.json = (corps) => {
-    operations.set(cle, { at: Date.now(), status: res.statusCode, corps });
+    // une erreur du serveur n'a rien applique (les ecritures groupees sont
+    // dans une transaction) : la cle est liberee pour qu'un nouvel essai
+    // refasse l'operation au lieu de rejouer l'erreur
+    if (res.statusCode >= 500) operations.delete(cle);
+    else operations.set(cle, { at: Date.now(), status: res.statusCode, corps });
     return envoie(corps);
   };
   // une reponse qui n'est pas du JSON (erreur imprevue) libere la cle
@@ -135,18 +142,18 @@ router.get("/stats", (req, res) => {
   const tour = tourScope();
   const pending = db
     .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'${tour.clause}`
+      `SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(price), 0), 2) AS value FROM colis WHERE status = 'pending'${tour.clause}`
     )
     .get(...tour.params);
   const dropped = db
-    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'dropped'")
+    .prepare("SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(price), 0), 2) AS value FROM colis WHERE status = 'dropped'")
     .get();
   const today = db
     .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis
-       WHERE status = 'dropped' AND date(dropped_at) = date('now')`
+      `SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(price), 0), 2) AS value FROM colis
+       WHERE status = 'dropped' AND dropped_at >= datetime('now', '-2 days') AND jour_paris(dropped_at) = ?`
     )
-    .get();
+    .get(aujourdhuiParis());
   // le "en attente" par expediteur suit la meme regle que le bouton Drop :
   // pendant une tournee, seulement ce qui est dans le sac
   const pendingInScope = `status = 'pending'${tour.clause}`;
@@ -154,20 +161,20 @@ router.get("/stats", (req, res) => {
     .prepare(
       `SELECT sender_name,
               SUM(CASE WHEN ${pendingInScope} THEN 1 ELSE 0 END) AS pending_count,
-              SUM(CASE WHEN ${pendingInScope} THEN price ELSE 0 END) AS pending_value,
+              ROUND(SUM(CASE WHEN ${pendingInScope} THEN price ELSE 0 END), 2) AS pending_value,
               SUM(CASE WHEN status = 'dropped' THEN 1 ELSE 0 END) AS dropped_count,
-              SUM(CASE WHEN status = 'dropped' THEN price ELSE 0 END) AS dropped_value
+              ROUND(SUM(CASE WHEN status = 'dropped' THEN price ELSE 0 END), 2) AS dropped_value
        FROM colis GROUP BY sender_name ORDER BY pending_count DESC`
     )
     .all(...tour.params, ...tour.params);
   const litPending = db
     .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'lit'${tour.clause}`
+      `SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(price), 0), 2) AS value FROM colis WHERE status = 'pending' AND type = 'lit'${tour.clause}`
     )
     .get(...tour.params);
   const bjPending = db
     .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending' AND type = 'bj'${tour.clause}`
+      `SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(price), 0), 2) AS value FROM colis WHERE status = 'pending' AND type = 'bj'${tour.clause}`
     )
     .get(...tour.params);
   const arrived = getArrivedDuringTour();
@@ -228,7 +235,7 @@ router.post("/tour/start", (req, res) => {
   const startedAt = startTour(selection);
   const scope = tourScope();
   const sac = db
-    .prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(price), 0) AS value FROM colis WHERE status = 'pending'${scope.clause}`)
+    .prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(price), 0), 2) AS value FROM colis WHERE status = 'pending'${scope.clause}`)
     .get(...scope.params);
   const noms = getTourSelectionNoms();
   journalise("tournee", "Départ en tournée", {
@@ -242,34 +249,68 @@ router.post("/tour/start", (req, res) => {
 
 // Retour de tournee : ce qu'on a emporte a ete poste, donc on le marque drope
 // et la tournee se referme (les colis recus pendant redeviennent droppables).
-router.post("/tour/finish", (req, res) => {
+//
+// Seulement s'il y a une tournee, et seulement CELLE que l'ecran montrait.
+// Sans tournee, dropAll() n'a plus de sac pour le limiter : un second appui,
+// ou un deuxieme appareil reste sur l'ancien ecran (la tournee s'etant
+// refermee toute seule apres le dernier drop a l'unite), droppait TOUT ce qui
+// etait pret -- colis arrives pendant la tournee et imprimes automatiquement
+// compris -- et retirait autant de pochettes du stock.
+// `startedAt` : l'heure de depart de la tournee affichee (facultatif pour les
+// anciennes versions de l'app) ; si une autre tournee a commence depuis, ce
+// n'est pas a cet ecran de la terminer.
+function verifieTournee(req, res) {
   const startedAt = getTourStart();
-  // seulement ce qui etait pret a partir (imprime) : le reste du sac reste en
-  // attente pour la prochaine fois
-  const dropped = dropAll({ finDeTournee: true });
-  const count = dropped.count;
-  const bag = { count, value: dropped.value };
-  consumeStock(dropped);
-  const endedAt = serverNow();
-  endTour();
+  if (!startedAt) {
+    res.status(409).json({ error: "Aucune tournée en cours : rien n'a été dropé.", code: "aucune_tournee" });
+    return null;
+  }
+  const affichee = req.body?.startedAt;
+  if (affichee != null && affichee !== startedAt) {
+    res.status(409).json({
+      error: "Cette tournée est déjà terminée et une autre a commencé depuis : rien n'a été dropé.",
+      code: "tournee_perimee",
+    });
+    return null;
+  }
+  return startedAt;
+}
 
-  let summary = null;
-  if (startedAt) {
+const dureeTexte = (seconds) =>
+  seconds < 3600
+    ? `${Math.max(1, Math.round(seconds / 60))} min`
+    : `${Math.floor(seconds / 3600)} h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}`;
+
+router.post("/tour/finish", (req, res) => {
+  const startedAt = verifieTournee(req, res);
+  if (!startedAt) return;
+
+  // Tout ou rien : le drop du sac, le stock, la cloture et le resume. Le
+  // traitement est synchrone de bout en bout : une seconde demande ne peut
+  // passer qu'apres, et trouve alors la tournee fermee (409).
+  const { dropped, summary } = transaction(() => {
+    // seulement ce qui etait pret a partir (imprime), et seulement le sac de
+    // CETTE tournee : le reste attend la prochaine fois
+    const dropped = dropAll({ finDeTournee: true });
+    consumeStock(dropped);
+    const endedAt = serverNow();
+    endTour();
+
     const seconds = Math.max(
       0,
       Math.round((Date.parse(`${endedAt.replace(" ", "T")}Z`) - Date.parse(`${startedAt.replace(" ", "T")}Z`)) / 1000)
     );
-    recordTour({ startedAt, endedAt, seconds, count, value: bag.value });
+    recordTour({ startedAt, endedAt, seconds, count: dropped.count, value: dropped.value });
 
     // le cumul du jour inclut la tournee qu'on vient d'enregistrer : une
     // deuxieme sortie s'ajoute a la premiere pour le taux horaire
     const day = getDayTours(endedAt);
-    summary = {
+    const summary = {
       startedAt,
       endedAt,
       seconds,
-      count,
-      value: bag.value,
+      count: dropped.count,
+      value: dropped.value,
       smicHourly: SMIC_HOURLY,
       day: {
         sessions: day.sessions,
@@ -279,24 +320,32 @@ router.post("/tour/finish", (req, res) => {
       },
     };
     saveLastTour(summary);
-  }
-  const duree = !summary
-    ? null
-    : summary.seconds < 3600
-      ? `${Math.max(1, Math.round(summary.seconds / 60))} min`
-      : `${Math.floor(summary.seconds / 3600)} h ${String(Math.floor((summary.seconds % 3600) / 60)).padStart(2, "0")}`;
-  journalise("tournee", "Tournée terminée", {
-    detail: [
-      `${count} colis dropé${count > 1 ? "s" : ""}`,
-      duree,
-      dropped.restants ? `${dropped.restants} pas encore imprimé${dropped.restants > 1 ? "s" : ""}, resté${dropped.restants > 1 ? "s" : ""} en attente` : null,
-    ].filter(Boolean).join(" · "),
-    valeur: bag.value,
-    nombre: count,
+    const count = dropped.count;
+    journalise("tournee", "Tournée terminée", {
+      detail: [
+        `${count} colis dropé${count > 1 ? "s" : ""}`,
+        dureeTexte(seconds),
+        dropped.restants ? `${dropped.restants} pas encore imprimé${dropped.restants > 1 ? "s" : ""}, resté${dropped.restants > 1 ? "s" : ""} en attente` : null,
+      ].filter(Boolean).join(" · "),
+      valeur: dropped.value,
+      nombre: count,
+    });
+    return { dropped, summary };
   });
-  if (count > 0) notifyTourEnd({ count, value: bag.value, seconds: summary?.seconds || 0, smicHourly: SMIC_HOURLY });
 
-  res.json({ ok: true, count, value: bag.value, restants: dropped.restants, startedAt, endedAt, summary, stocks: getStocks() });
+  const { count, value } = dropped;
+  if (count > 0) notifyTourEnd({ count, value, seconds: summary.seconds, smicHourly: SMIC_HOURLY });
+
+  res.json({
+    ok: true,
+    count,
+    value,
+    restants: dropped.restants,
+    startedAt,
+    endedAt: summary.endedAt,
+    summary,
+    stocks: getStocks(),
+  });
 });
 
 // Fermeture du resume de tournee affiche sur le dashboard.
@@ -306,8 +355,11 @@ router.post("/tour/dismiss-summary", (req, res) => {
 });
 
 // Annulation : on referme la tournee sans rien dropper (finalement pas parti,
-// ou rien poste).
+// ou rien poste). Deja refermee : rien a faire. Un ecran perime n'annule pas
+// la tournee suivante.
 router.post("/tour/end", (req, res) => {
+  if (!getTourStart()) return res.json({ ok: true, startedAt: null, deja: true });
+  if (!verifieTournee(req, res)) return;
   endTour();
   journalise("tournee", "Tournée annulée", { detail: "rien n'a été dropé" });
   res.json({ ok: true, startedAt: null });
@@ -316,9 +368,11 @@ router.post("/tour/end", (req, res) => {
 // --- Impression automatique -------------------------------------------------
 // Un agent tourne sur le Mac relie a l'imprimante : il demande regulierement
 // s'il y a du nouveau, recupere un PDF deja au format 4x6, l'imprime, puis
-// confirme. Le jeton evite que n'importe qui aspire les etiquettes.
+// confirme. Le jeton evite que n'importe qui aspire les etiquettes. Il voyage
+// dans l'en-tete X-Print-Token, jamais dans l'adresse : une adresse finit dans
+// les journaux d'acces, les proxys et l'historique.
 function checkPrintToken(req, res) {
-  const provided = String(req.get("x-print-token") || req.query.token || "");
+  const provided = String(req.get("x-print-token") || "");
   const expected = getPrintToken();
   const ok =
     provided.length === expected.length &&
@@ -339,7 +393,7 @@ router.get("/print/queue", (req, res) => {
 // Le PDF pret a imprimer. Les identifiants partent dans un en-tete : l'agent
 // ne confirmera qu'apres impression reussie, donc rien n'est perdu si le Mac
 // s'eteint au mauvais moment.
-router.get("/print/next", async (req, res) => {
+router.get("/print/next", routeAsync(async (req, res) => {
   if (!checkPrintToken(req, res)) return;
   if (!isAutoPrintEnabled()) return res.status(409).json({ error: "Impression automatique desactivee" });
 
@@ -359,7 +413,7 @@ router.get("/print/next", async (req, res) => {
     console.error("[print] preparation impossible :", err.message);
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 router.post("/print/done", (req, res) => {
   if (!checkPrintToken(req, res)) return;
@@ -435,9 +489,15 @@ router.post("/colis/quick-add/:sender", (req, res) => {
   res.json({ ...colis, count: n });
 });
 
+// « − » ne retire que des colis comptes a la main : une vraie etiquette ne
+// quitte jamais la file d'impression par ce bouton (voir quickRemoveColis).
 router.post("/colis/quick-remove/:sender", (req, res) => {
   const removed = quickRemoveColis(req.params.sender, nombreDe(req));
-  if (!removed) return res.status(404).json({ error: "Aucun colis en attente pour cet expediteur" });
+  if (!removed) {
+    return res.status(404).json({
+      error: `Aucun colis compté à la main pour ${req.params.sender} : une étiquette reçue se retire depuis Imprime ou avec /del`,
+    });
+  }
   res.json({ ok: true, removed });
 });
 
@@ -588,9 +648,9 @@ router.post("/senders", (req, res) => {
   try {
     db.prepare("INSERT INTO senders (name, price, lit_price, bj_price) VALUES (?, ?, ?, ?)").run(
       name,
-      price,
-      litPrice,
-      bjPrice
+      arrondiCentimes(price),
+      arrondiCentimes(litPrice),
+      arrondiCentimes(bjPrice)
     );
   } catch (err) {
     return res.status(400).json({ error: "Cet expediteur existe deja" });

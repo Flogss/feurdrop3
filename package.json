@@ -5,11 +5,16 @@
   "main": "src/server.js",
   "type": "commonjs",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test --test-force-exit test/*.test.js",
+    "lint": "eslint .",
+    "verifie": "npm run lint && npm test",
+    "jeton-impression": "node scripts/jeton-impression.js",
+    "etude-centimes": "node scripts/etude-centimes.js"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
@@ -20,5 +25,14 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "web-push": "^3.6.7"
+  },
+  "overrides": {
+    "@cypress/request": "^4.0.1",
+    "request": "npm:@cypress/request@^4.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0"
   }
 }

@@ -18,7 +18,6 @@ const MARGIN = 3 * MM; // bord du rouleau, l'entrainement du papier n'est jamais
 const GAP = 4 * MM; // de quoi passer les ciseaux entre deux bordereaux
 const USABLE_WIDTH = ROLL_WIDTH - MARGIN * 2;
 const MIN_SCALE = 0.75; // en-dessous, les barres du code-barres deviennent douteuses
-const MAX_PER_ROW = 3;
 
 // Les deux orientations possibles d'un bordereau, avec son encombrement sur le
 // rouleau (outW : en travers, outH : dans la longueur).
@@ -27,77 +26,6 @@ function orientations(label) {
     { rotation: 0, outW: label.width, outH: label.height },
     { rotation: 90, outW: label.height, outH: label.width },
   ];
-}
-
-// Met une rangee a l'echelle. On cherche la hauteur commune t la plus petite :
-// a hauteur t, un bordereau occupe t x (outW / outH) de largeur, donc
-// t = largeur disponible / somme des rapports. Un bordereau qui voudrait
-// depasser sa taille naturelle est plafonne a 1 et la place qu'il n'utilise
-// pas est redistribuee aux autres.
-function fitRow(forms) {
-  const available = USABLE_WIDTH - GAP * (forms.length - 1);
-  if (available <= 0) return null;
-
-  const scales = forms.map(() => 1);
-  const capped = forms.map(() => false);
-
-  for (let pass = 0; pass <= forms.length; pass += 1) {
-    let width = available;
-    let ratios = 0;
-    forms.forEach((form, i) => {
-      if (capped[i]) width -= form.outW;
-      else ratios += form.outW / form.outH;
-    });
-    if (ratios === 0) break; // tout le monde est a sa taille naturelle
-    if (width <= 0) return null;
-
-    const t = width / ratios;
-    let changed = false;
-    forms.forEach((form, i) => {
-      if (!capped[i] && t > form.outH) {
-        capped[i] = true;
-        scales[i] = 1;
-        changed = true;
-      }
-    });
-    if (!changed) {
-      forms.forEach((form, i) => {
-        if (!capped[i]) scales[i] = t / form.outH;
-      });
-      break;
-    }
-  }
-
-  const used = forms.reduce((sum, form, i) => sum + form.outW * scales[i], 0) + GAP * (forms.length - 1);
-  if (used > USABLE_WIDTH + 0.5) return null;
-
-  return {
-    scales,
-    height: Math.max(...forms.map((form, i) => form.outH * scales[i])),
-    minScale: Math.min(...scales),
-  };
-}
-
-// Meilleure mise en page d'une rangee : on essaie les orientations (2 par
-// bordereau, donc 8 combinaisons au plus) et on garde la plus courte.
-function bestRow(labels, { allowSmall = false } = {}) {
-  if (labels.length > MAX_PER_ROW) return null;
-  const choices = labels.map(orientations);
-  let best = null;
-
-  const explore = (index, forms) => {
-    if (index === labels.length) {
-      const fit = fitRow(forms);
-      if (!fit) return;
-      if (!allowSmall && fit.minScale < MIN_SCALE) return;
-      if (!best || fit.height < best.height - 0.5) best = { ...fit, forms: [...forms] };
-      return;
-    }
-    for (const form of choices[index]) explore(index + 1, [...forms, form]);
-  };
-  explore(0, []);
-
-  return best;
 }
 
 // Un bordereau photographie est aussi valable qu'un PDF : beaucoup de LIT

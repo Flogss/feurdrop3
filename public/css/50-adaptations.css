@@ -1,0 +1,160 @@
+/* ==========================================================================
+   Petits ecrans
+   ========================================================================== */
+
+@media (max-width: 374px) {
+  .app { padding-left: calc(12px + env(safe-area-inset-left)); padding-right: calc(12px + env(safe-area-inset-right)); }
+  .hero-value { font-size: 54px; }
+  .metric-value { font-size: 23px; }
+  .live-text { display: none; }
+  .live { padding: 0 10px; }
+  .mini-stepper .step { width: 30px; }
+  .sender .btn-drop { min-width: 0; }
+}
+
+/* ==========================================================================
+   Tablette et bureau
+   ========================================================================== */
+
+@media (min-width: 640px) {
+  :root { --gap: 16px; }
+  .card { padding: 22px; }
+  .hero { padding: 26px; }
+  .hero-value { font-size: 78px; }
+  .metric { padding: 18px 20px; }
+  .metric-value { font-size: 31px; }
+  .metric-value.is-long { font-size: 27px; }
+  .page-head h1 { font-size: 36px; }
+  .page-cta { grid-column: auto; width: auto; }
+  .special-list { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .merge-pair-form { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; }
+  .merge-pair-arrow { display: block; }
+  .merge-pair-submit { grid-column: 1 / -1; }
+  .toasts { left: auto; right: 24px; bottom: 24px; align-items: flex-end; padding: 0; }
+  .sheet-layer { align-items: center; }
+  .sheet { margin: 0 16px; padding: 24px; border-radius: 26px; animation: modal-in 420ms var(--ease-spring) both; }
+  .sheet-layer.closing .sheet { animation: modal-out var(--t-2) var(--ease-in) forwards; }
+  .sheet-grip { display: none; }
+  .imp-edit-grid { grid-template-columns: 140px minmax(0, 1fr); }
+  .stats-top { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats-top .metric-week { grid-column: auto; }
+}
+@keyframes modal-in { from { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.94); filter: blur(6px); } }
+@keyframes modal-out { to { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.97); } }
+
+@media (min-width: 960px) {
+  .app {
+    max-width: 1240px;
+    padding: 0 32px 64px;
+  }
+
+  /* la barre du haut reste accrochee, en verre, et porte la navigation */
+  .topbar {
+    position: sticky;
+    top: 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    height: 76px;
+    margin: 0 -32px;
+    padding: 0 32px;
+    transition: background-color var(--t-4), box-shadow var(--t-4);
+  }
+  body.is-scrolled .topbar {
+    background: rgb(12 10 18 / 0.55);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.06), 0 12px 30px -20px rgb(0 0 0 / 0.9);
+  }
+  .topbar-end { justify-self: end; }
+  .tabbar {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    margin: 0;
+    max-width: none;
+    height: 50px;
+    grid-template-columns: repeat(3, 140px);
+    padding: 5px;
+    border-radius: 25px;
+  }
+  .tab-indicator { top: 5px; height: 40px; border-radius: 20px; }
+  .tab-hover {
+    display: block;
+    position: absolute;
+    z-index: 1;
+    top: 5px;
+    left: 0;
+    height: 40px;
+    border-radius: 20px;
+    background: rgb(255 255 255 / 0.07);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 380ms var(--ease-out), width 380ms var(--ease-out), opacity var(--t-3);
+  }
+  .tabbar.has-hover .tab-hover { opacity: 1; }
+  .tab { flex-direction: row; gap: 8px; height: 40px; border-radius: 20px; font-size: 14px; letter-spacing: -0.005em; }
+  .tab .icon { width: 18px; height: 18px; }
+  .tab-badge { position: static; margin-left: -2px; box-shadow: 0 4px 12px -2px rgb(var(--accent-rgb) / 0.9); }
+
+  main { margin-top: 16px; }
+
+  .dash {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    grid-template-areas:
+      "hero     metrics"
+      "hero     stock"
+      "summary  summary"
+      "carriers senders"
+      "tools    tools"
+      "journal  journal";
+    align-items: start;
+  }
+  .dash:has(> .summary[hidden]) {
+    grid-template-areas:
+      "hero     metrics"
+      "hero     stock"
+      "carriers senders"
+      "tools    tools"
+      "journal  journal";
+  }
+  .hero { grid-area: hero; align-self: stretch; display: flex; flex-direction: column; }
+  .hero-actions { margin-top: auto; padding-top: 24px; }
+  .summary {
+    grid-area: summary;
+    grid-template-columns: auto minmax(0, 1.2fr) auto minmax(0, 1fr) auto;
+    grid-template-areas: "icon titles rate day close";
+    align-items: center;
+    column-gap: 20px;
+  }
+  .summary .tour-rate { margin-top: 0; }
+  .summary-day { margin-top: 0; padding: 0 0 0 20px; border-top: 0; border-left: 1px solid var(--line); }
+  .metrics { grid-area: metrics; }
+  .stock-card { grid-area: stock; }
+  .carriers-card { grid-area: carriers; }
+  .senders-card { grid-area: senders; }
+  .tools { grid-area: tools; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
+  .journal-card { grid-area: journal; }
+
+  .imp-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .suivi-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
+  .suivi-wide { grid-column: 1 / -1; }
+  .stats-duo { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; }
+  .donut-svg { width: 220px; height: 220px; }
+  .toasts { bottom: 28px; }
+}
+
+/* ==========================================================================
+   Mouvement reduit : tout arrive en place, sans trajet.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .live-dot::after, .suivi-fill-glow, .blob, .particules, .hero-aura, .hero-dots::after, .brand-mark::after, .brand-mark::before, .btn-primary::before { display: none; }
+}
+

@@ -19,19 +19,11 @@ const {
   listCarrierRules,
   clearCarrierRules,
   getUnclassifiedPending,
-  getPrintableColis,
-  getPrintableSummary,
-  countAlreadyPrinted,
-  getLitPrintable,
-  countLitPrintable,
   markPrinted,
-  getPrintJobs,
-  getPrintJobColis,
   getColisById,
   evenements,
   dropColis,
   consumeStock,
-  FREE_STATUS,
   getBatchColis,
   deleteColis,
   setBatchPrice,
@@ -42,7 +34,6 @@ const {
   setStatsMessageId,
   getSetting,
   setSetting,
-  journalise,
   undropColis,
   restoreStock,
   inscritArrivee,
@@ -56,7 +47,7 @@ const { renderStatsImage } = require("./statsImage");
 const { detectCarrier, CARRIERS, parseCarrier, carrierLabel, deriveRules } = require("./carrier");
 const { mergeLabels } = require("./printer");
 const { buildRoll } = require("./rollPrinter");
-const { createWriteQueue, delaiDemande, avecReessais } = require("./throttle");
+const { delaiDemande } = require("./throttle");
 const {
   apparieColis,
   apparieCode,
@@ -74,189 +65,48 @@ const {
 } = require("./specials");
 const { notifyNewColis } = require("./push");
 const { classifyFile } = require("./classify");
+const { acteurs } = require("./bot/acces");
+const {
+  DEBOUNCE_MS,
+  AUTO_GROUP_CHAT_ID,
+  listeAcces,
+  acces,
+  TOPIC_BY_TYPE,
+  TYPE_LABELS,
+} = require("./bot/config");
+const { extractSenderName, colisAttachment, resolveForcedType } = require("./bot/fichiers");
+const {
+  ecritureGroupe,
+  batchKey,
+  threadOpts,
+  replyEphemeral,
+  scheduleDelete,
+  REACTION_RECEIVED,
+  REACTION_UNKNOWN,
+  REACTION_UNKNOWN_FALLBACK,
+  queueReaction,
+  CARRIER_LIST_HINT,
+} = require("./bot/outils");
+const {
+  boutonsDe,
+  retiensBoutons,
+  aDesBoutons,
+  poseBoutons,
+  poseBoutonsMaintenant,
+  refreshFileButtons,
+  markButtonsPrinted,
+} = require("./bot/boutons");
+const {
+  handlePrintCommand,
+  handlePrintCallback,
+  downloadLabels,
+  startProgress,
+  progressBar,
+  PROGRESS_MIN_INTERVAL_MS,
+} = require("./bot/impression");
+const { handleFusion, ajouteAFusion, handleStopFusion } = require("./bot/fusion");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
-const DEBOUNCE_MS = Number(process.env.BATCH_DEBOUNCE_MS || 3000);
-
-// Groupe Telegram avec topics dedies : les PDF envoyes directement dans ces
-// topics sont comptes automatiquement, sans avoir besoin de forward au bot.
-const AUTO_GROUP_CHAT_ID = -1004388459228; // derive de l'id de canal 4388459228 (t.me/c/4388459228/...)
-const AUTO_LIT_TOPIC_IDS = [4];
-const AUTO_NORMAL_TOPIC_IDS = [2];
-// Les colis BJ sont factures comme des colis normaux, ils sont juste
-// comptabilises a part pour le suivi.
-const AUTO_BJ_TOPIC_IDS = [6];
-// Topic "special" : photos de contexte, captures, colis pris en photo. A
-// renseigner dans SPECIAL_TOPIC_ID (le nombre a la fin du lien t.me/c/.../N).
-// t.me/c/4388459228/5 . On y envoie aussi des PDF : dans "special" un PDF
-// reste un colis ordinaire, seules les images y valent 0 EUR.
-const AUTO_SPECIAL_TOPIC_IDS = (process.env.SPECIAL_TOPIC_ID || "5")
-  .split(",")
-  .map((n) => Number(n.trim()))
-  .filter(Number.isFinite);
-
-// Ou reposter un fichier selon son type. Le topic 1 d'un forum est le General
-// et n'a pas de message_thread_id cote Bot API : d'ou le filtre.
-const TOPIC_BY_TYPE = {
-  normal: AUTO_NORMAL_TOPIC_IDS[0],
-  lit: AUTO_LIT_TOPIC_IDS[0],
-  bj: AUTO_BJ_TOPIC_IDS[0],
-  special: AUTO_SPECIAL_TOPIC_IDS[0],
-};
-
-const TYPE_LABELS = {
-  normal: "Normaux",
-  lit: "LIT",
-  bj: "Boite jaune",
-  special: "Special",
-};
-// Le topic "1" (t.me/c/.../1) correspond au topic General par defaut d'un
-// forum Telegram, qui n'a pas de vrai message_thread_id cote Bot API : il ne
-// faut pas en passer un pour y poster.
-
-function extractSenderName(msg) {
-  const origin = msg.forward_origin;
-  if (origin) {
-    if (origin.type === "user" && origin.sender_user) {
-      return origin.sender_user.username
-        ? `@${origin.sender_user.username}`
-        : origin.sender_user.first_name;
-    }
-    if (origin.type === "hidden_user" && origin.sender_user_name) {
-      return origin.sender_user_name;
-    }
-    if (origin.type === "chat" && origin.sender_chat) {
-      return origin.sender_chat.title || origin.sender_chat.username || "Chat inconnu";
-    }
-    if (origin.type === "channel" && origin.chat) {
-      return origin.chat.title || "Canal inconnu";
-    }
-  }
-
-  if (msg.forward_from) {
-    return msg.forward_from.username
-      ? `@${msg.forward_from.username}`
-      : msg.forward_from.first_name;
-  }
-  if (msg.forward_sender_name) return msg.forward_sender_name;
-  if (msg.forward_from_chat) {
-    return msg.forward_from_chat.title || msg.forward_from_chat.username || "Chat inconnu";
-  }
-
-  // pas de trace de transfert : le PDF a ete poste directement, il vient donc
-  // de nous et non d'un expediteur tiers
-  return "Moi";
-}
-
-function isPdf(document) {
-  if (!document) return false;
-  if (document.mime_type === "application/pdf") return true;
-  return /\.pdf$/i.test(document.file_name || "");
-}
-
-function isImageDocument(document) {
-  if (!document) return false;
-  if ((document.mime_type || "").startsWith("image/")) return true;
-  return /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(document.file_name || "");
-}
-
-// Un colis peut arriver en PDF, en fichier image, ou en photo Telegram
-// (compressee : dans ce cas il n'y a pas de nom de fichier, seule la
-// legende peut porter le numero de suivi).
-function colisAttachment(msg) {
-  if (isPdf(msg.document)) {
-    return { fileName: msg.document.file_name || null, fileId: msg.document.file_id, kind: "pdf" };
-  }
-  if (isImageDocument(msg.document)) {
-    return { fileName: msg.document.file_name || null, fileId: msg.document.file_id, kind: "image" };
-  }
-  if (Array.isArray(msg.photo) && msg.photo.length > 0) {
-    // on garde la plus grande taille : c'est celle qui imprime correctement
-    const best = msg.photo[msg.photo.length - 1];
-    return { fileName: null, fileId: best.file_id, kind: "image" };
-  }
-  return null;
-}
-
-// Chats inconnus deja signales, pour ne pas repeter le meme avertissement.
-const ignoredChatsLogged = new Set();
-
-// Determine le type impose par le topic Telegram, ou null si le fichier ne
-// doit pas etre compte du tout.
-// Deux sources sont legitimes et deux seulement :
-//   - le groupe configure, dans un des topics suivis ;
-//   - un transfert direct au bot en message prive.
-// Tout le reste (autre groupe, autre canal, ancien groupe ou l'on est encore
-// membre, topic non suivi) est ignore : sinon la moindre photo postee ailleurs
-// se retrouvait comptee comme un colis.
-function resolveForcedType(msg) {
-  if (msg.chat.id === AUTO_GROUP_CHAT_ID) {
-    const threadId = msg.message_thread_id;
-    if (AUTO_LIT_TOPIC_IDS.includes(threadId)) return "lit";
-    if (AUTO_NORMAL_TOPIC_IDS.includes(threadId)) return "normal";
-    if (AUTO_BJ_TOPIC_IDS.includes(threadId)) return "bj";
-    if (AUTO_SPECIAL_TOPIC_IDS.includes(threadId)) return "special";
-    return null; // bon groupe, mais topic non suivi
-  }
-
-  if (msg.chat.type === "private") return undefined; // transfert direct au bot
-
-  if (!ignoredChatsLogged.has(msg.chat.id)) {
-    ignoredChatsLogged.add(msg.chat.id);
-    console.log(
-      `[bot] fichiers ignores dans "${msg.chat.title || msg.chat.id}" (id ${msg.chat.id}) :` +
-        ` ce n'est pas le groupe configure (${AUTO_GROUP_CHAT_ID}).`
-    );
-  }
-  return null;
-}
-
-// Reactions : le pouce accuse reception d'un colis, le point d'interrogation
-// signale un transporteur non reconnu (il remplace le pouce sur le meme
-// message). Telegram n'accepte qu'une liste fermee d'emojis en reaction, d'ou
-// le repli sur 🤔 si ❓ est refuse.
-const REACTION_RECEIVED = "👍";
-const REACTION_UNKNOWN = "❓";
-const REACTION_UNKNOWN_FALLBACK = "🤔";
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Toutes les ecritures vers le groupe passent par une file cadencee : voir
-// throttle.js pour le pourquoi.
-// Les envois (copies de fichiers) sont doses sur le plafond de Telegram ; le
-// reste -- editions, suppressions groupees, image de stats -- passe dans la
-// meme file, a un rythme plus serre, puisqu'il ne compte pas dans ce plafond.
-const ecritureGroupe = createWriteQueue({
-  intervalMs: Number(process.env.GROUP_WRITE_INTERVAL_MS || 350),
-  envoisParMinute: Number(process.env.GROUP_SENDS_PER_MIN || 20),
-  fenetreMs: Number(process.env.GROUP_SENDS_WINDOW_MS || 60000),
-  onWait: (secondes, err) =>
-    console.warn(err ? `[bot] ${err.message} : nouvel essai dans ${secondes}s` : `[bot] 429 : pause de ${secondes}s avant de reessayer`),
-});
-
-// Les reactions partent une par une : un lot de 20 fichiers ferait sinon
-// autant d'appels simultanes et Telegram limiterait.
-let reactionQueue = Promise.resolve();
-function queueReaction(bot, chatId, messageId, emoji, fallbackEmoji) {
-  if (!chatId || !messageId) return;
-  const react = (value) =>
-    bot.setMessageReaction(chatId, messageId, { reaction: [{ type: "emoji", emoji: value }] });
-
-  // dans le groupe, une reaction est une ecriture comme une autre : elle prend
-  // sa place dans la file au lieu de doubler les copies en cours
-  if (chatId === AUTO_GROUP_CHAT_ID) {
-    ecritureGroupe(() => react(emoji))
-      .catch(() => (fallbackEmoji ? ecritureGroupe(() => react(fallbackEmoji)) : null))
-      .catch((err) => console.error("[bot] reaction", err.message));
-    return;
-  }
-
-  reactionQueue = reactionQueue
-    .then(() => sleep(120))
-    .then(() => react(emoji))
-    .catch(() => (fallbackEmoji ? react(fallbackEmoji) : null))
-    .catch((err) => console.error("[bot] reaction", err.message));
-}
 
 // Efface la commande de l'utilisateur une fois traitee pour ne pas polluer le
 // fil. Supprimer le message de QUELQU'UN D'AUTRE exige le droit "Supprimer les
@@ -281,8 +131,64 @@ function deleteCommand(bot, msg) {
   });
 }
 
-function batchKey(chatId, threadId) {
-  return `${chatId}:${threadId || 0}`;
+// --- Controle d'acces ----------------------------------------------------------
+// Chaque entree (fichier, commande, bouton) passe par selonAcces. Quand la
+// reponse est connue d'avance (liste blanche, groupe de travail), la suite
+// s'execute tout de suite, exactement comme avant. Sinon (inconnu en prive),
+// l'appartenance au groupe est verifiee aupres de Telegram ; les messages
+// suivants du meme chat attendent leur tour, pour garder l'ordre d'arrivee
+// (c'est lui qui appaire un code de special avec son PDF).
+const accesEnCours = new Map(); // chatId -> promesse de la verification en cours
+const refusSignales = new Map(); // userId -> instant du dernier message de refus
+const REFUS_INTERVALLE_MS = 10 * 60 * 1000;
+
+function refuseAcces(bot, entree, { niveau = "equipe" } = {}) {
+  const { userId, chat } = acteurs(entree);
+  if (entree?.data !== undefined && entree?.id) {
+    bot
+      .answerCallbackQuery(entree.id, { text: niveau === "admin" ? "🔒 Réservé aux administrateurs du bot" : "🔒 Non autorisé", show_alert: true })
+      .catch(() => {});
+    return;
+  }
+  const dernier = refusSignales.get(String(userId)) || 0;
+  if (Date.now() - dernier < REFUS_INTERVALLE_MS) return;
+  refusSignales.set(String(userId), Date.now());
+  console.warn(`[bot] acces refuse : utilisateur ${userId ?? "?"} dans le chat ${chat?.id} (${chat?.type || "?"})`);
+  // en prive seulement : un groupe tiers ou le bot aurait ete ajoute ne
+  // recoit rien
+  if (chat?.type !== "private" && niveau !== "admin") return;
+  const texte =
+    niveau === "admin"
+      ? "🔒 Cette commande est réservée aux administrateurs du bot (TELEGRAM_ALLOWED_USERS)."
+      : `🔒 Ce bot est réservé à l'équipe.\nTon identifiant Telegram : ${userId ?? "inconnu"} -- envoie-le à l'administrateur pour être ajouté.`;
+  bot.sendMessage(chat.id, texte, entree?.message_thread_id ? { message_thread_id: entree.message_thread_id } : {}).catch(() => {});
+}
+
+function selonAcces(bot, entree, suite, options = {}) {
+  const { chat } = acteurs(entree);
+  const cle = chat?.id;
+  const executeSuite = () => {
+    try {
+      return Promise.resolve(suite()).catch((err) => console.error("[bot] traitement :", err?.stack || err));
+    } catch (err) {
+      console.error("[bot] traitement :", err?.stack || err);
+      return undefined;
+    }
+  };
+  const enCours = accesEnCours.get(cle);
+  const verdict = enCours ? null : acces.verdictImmediat(entree, options);
+  if (verdict === true) return executeSuite();
+  if (verdict === false) return refuseAcces(bot, entree, options);
+
+  const verification = (enCours || Promise.resolve())
+    .then(() => acces.autorise(bot, entree, options))
+    .then((ok) => (ok ? executeSuite() : refuseAcces(bot, entree, options)))
+    .catch((err) => console.error("[bot] controle d'acces :", err?.message || err))
+    .finally(() => {
+      if (accesEnCours.get(cle) === verification) accesEnCours.delete(cle);
+    });
+  accesEnCours.set(cle, verification);
+  return verification;
 }
 
 // Instance partagee : le dashboard web (routes/api.js) s'en sert pour
@@ -295,7 +201,12 @@ function startBot() {
     return null;
   }
 
-  const bot = new TelegramBot(TOKEN, { polling: true });
+  // TELEGRAM_API_URL : une autre adresse que api.telegram.org -- un faux
+  // serveur Telegram pour les tests (voir test/bot.test.js), jamais en prod
+  const bot = new TelegramBot(TOKEN, {
+    polling: true,
+    ...(process.env.TELEGRAM_API_URL ? { baseApiUrl: process.env.TELEGRAM_API_URL } : {}),
+  });
   botInstance = bot;
   // l'id du message de stats vaut pour un chat donne : si on a change de
   // groupe, on repart de zero au lieu d'essayer d'editer un message d'ailleurs
@@ -311,7 +222,11 @@ function startBot() {
   const handleIncoming = (msg) => {
     const attachment = colisAttachment(msg);
     if (!attachment) return;
+    // un inconnu en prive n'entre pas : rien n'est compte, republie ni imprime
+    selonAcces(bot, msg, () => recoitFichier(msg, attachment));
+  };
 
+  const recoitFichier = (msg, attachment) => {
     // mode fusion (/fusion) : le fichier est mis de cote pour le PDF fusionne,
     // il ne compte pas et n'est pas republie
     if (ajouteAFusion(bot, msg, attachment)) return;
@@ -340,10 +255,12 @@ function startBot() {
   bot.on("channel_post", handleIncoming);
 
   // Chaque commande est effacee du fil une fois traitee : le chat ne garde
-  // que les colis et les recapitulatifs.
-  const command = (handler) => (msg, match) => {
+  // que les colis et les recapitulatifs. Elle ne s'execute que pour l'equipe
+  // (niveau "admin" : la liste blanche seule). Une erreur dans une commande
+  // async est consignee au lieu de remonter en rejet non gere.
+  const command = (handler, options = {}) => (msg, match) => {
     try {
-      handler(msg, match);
+      selonAcces(bot, msg, () => handler(msg, match), options);
     } finally {
       deleteCommand(bot, msg);
     }
@@ -425,20 +342,28 @@ function startBot() {
   bot.onText(/^\/stopfusion(@\w+)?$/i, command((msg) => handleStopFusion(bot, msg)));
 
   bot.onText(/^\/regles(@\w+)?$/i, command((msg) => handleRulesCommand(bot, msg)));
+  // efface tout ce que le bot a appris : reserve a la liste blanche
   bot.onText(
     /^\/regles_reset(@\w+)?$/i,
-    command((msg) => {
-      const count = clearCarrierRules();
-      replyEphemeral(bot, msg, `${count} regle(s) oubliee(s).`, {}, 8000);
-    })
+    command(
+      (msg) => {
+        const count = clearCarrierRules();
+        replyEphemeral(bot, msg, `${count} regle(s) oubliee(s).`, {}, 8000);
+      },
+      { niveau: "admin" }
+    )
   );
 
-  bot.on("callback_query", (query) => {
-    if (/^c:/.test(query.data || "")) return handleFileButton(bot, query);
-    if (/^sp:/.test(query.data || "")) return handleCodeButton(bot, query);
-    if (/^pra?:|^prmenu:|^prjob:/.test(query.data || "")) return handlePrintCallback(bot, query);
-    return handleCarrierCallback(bot, query);
-  });
+  // Les boutons agissent sur un colis designe par son numero : un appui venu
+  // d'ailleurs que le groupe ou l'equipe est refuse comme une commande.
+  bot.on("callback_query", (query) =>
+    selonAcces(bot, query, () => {
+      if (/^c:/.test(query.data || "")) return handleFileButton(bot, query);
+      if (/^sp:/.test(query.data || "")) return handleCodeButton(bot, query);
+      if (/^pra?:|^prmenu:|^prjob:/.test(query.data || "")) return handlePrintCallback(bot, query);
+      return handleCarrierCallback(bot, query);
+    })
+  );
 
   registerCommands(bot);
 
@@ -462,6 +387,11 @@ function startBot() {
     enfileFichier(bot, msg, attachment, batches, a.id);
   }
 
+  console.log(
+    `[bot] acces : groupe de travail, ${acces.taille()} utilisateur(s) en liste blanche` +
+      (listeAcces.source ? ` (${listeAcces.source})` : " (TELEGRAM_ALLOWED_USERS vide : /regles_reset ferme)") +
+      (process.env.TELEGRAM_GROUP_MEMBERS !== "0" ? ", membres du groupe en prive" : "")
+  );
   console.log("[bot] demarre (polling)");
   return bot;
 }
@@ -514,35 +444,6 @@ async function registerCommands(bot) {
   }
   console.log(`[bot] ${commands.length} commandes enregistrees`);
 }
-
-// Dans un groupe a topics, il faut repondre dans le topic d'origine.
-function threadOpts(msg) {
-  return msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {};
-}
-
-// Les reponses du bot s'effacent toutes seules : combinees a la suppression
-// de la commande, le fil ne garde que les colis et le recapitulatif.
-const REPLY_TTL_MS = Number(process.env.REPLY_TTL_MS || 2000);
-
-function replyEphemeral(bot, msg, text, extra = {}, ttl = REPLY_TTL_MS) {
-  return bot
-    .sendMessage(msg.chat.id, text, { ...threadOpts(msg), ...extra })
-    .then((sent) => {
-      scheduleDelete(bot, sent.chat.id, sent.message_id, ttl);
-      return sent;
-    })
-    .catch((err) => console.error("[bot] envoi reponse", err.message));
-}
-
-function scheduleDelete(bot, chatId, messageId, ttl = REPLY_TTL_MS) {
-  setTimeout(() => {
-    bot.deleteMessage(chatId, messageId).catch((err) => {
-      console.error("[bot] suppression reponse impossible :", err.message);
-    });
-  }, ttl);
-}
-
-const CARRIER_LIST_HINT = CARRIERS.map((c) => `${c.code} (${c.label})`).join(", ");
 
 // Cible de la commande : le colis auquel on repond, sinon le dernier lot recu.
 function carrierTarget(msg) {
@@ -759,155 +660,6 @@ function retireCodeSpecial(bot, msg, paire, alsoDeleteFile) {
     `Code #${numero} retire${alsoDeleteFile ? " et efface du fil" : ""}.` +
       (reste?.colis_id ? ` Le colis #${numero} attend un autre code.` : "")
   );
-}
-
-
-// --- Aiguillage des fichiers envoyes en prive --------------------------------
-//
-// Le fichier est republie tel quel dans le topic qui lui revient : copyMessage
-// conserve le document et sa legende a l'octet pres, contrairement a un renvoi
-// qui ajouterait un en-tete "transfere de". Le colis est ensuite rattache au
-// message REPUBLIE, pour que /del et les boutons agissent la ou le fichier se
-// trouve vraiment.
-
-// Boutons sous un PDF republie. Ils font exactement ce que font les commandes
-// /clear et /del, plus un "Imprime" qui sort l'etiquette de la file de
-// /imprime sans rien effacer.
-// Trois etats, dans l'ordre de la vie d'une etiquette :
-//   a imprimer : Imprime / Clean / Del
-//   imprimee   : Drop -- une liasse imprimee ne part pas forcement d'un bloc,
-//                on doit pouvoir solder les colis un par un a mesure qu'on
-//                les poste
-//   dropee     : "Drope" -- un nouvel appui annule le drop (colis remis en
-//                attente, de retour dans la file d'impression s'il n'avait pas
-//                ete imprime)
-function fileButtons(colisId, { printed = false, dropped = false, note = null, special = null } = {}) {
-  const lignes = [];
-  // un PDF de special porte le numero de sa paire : c'est ce qui le relie a
-  // son code-barre devant le locker
-  if (special) {
-    lignes.push([
-      {
-        text: `⭐ #${special.numero} · ${special.code ? "🔑 code lie" : "🔑 code en attente"}`,
-        callback_data: `c:s:${colisId}`,
-      },
-    ]);
-  }
-  // La note se lit sous le fichier sans y toucher : la legende reste celle de
-  // l'expediteur. Le texte entier s'affiche en tapant dessus.
-  if (note) {
-    lignes.push([{ text: `📝 ${tronque(note, 40)}`, callback_data: `c:m:${colisId}` }]);
-  }
-  if (dropped) {
-    lignes.push([{ text: "✅ Drope · annuler", callback_data: `c:k:${colisId}` }]);
-  } else if (printed) {
-    lignes.push([{ text: "📮 Drop", callback_data: `c:x:${colisId}` }]);
-  } else {
-    lignes.push([
-      { text: "🖨 Imprime", callback_data: `c:p:${colisId}` },
-      { text: "🧹 Clean", callback_data: `c:c:${colisId}` },
-      { text: "🗑 Del", callback_data: `c:d:${colisId}` },
-    ]);
-  }
-  return { inline_keyboard: lignes };
-}
-
-// Les boutons d'un colis se deduisent de son etat en base : un seul endroit
-// pour les calculer, quel que soit le geste qui vient de le modifier.
-function boutonsDe(colis) {
-  const paire = colis.type === "special" ? paireDuColis(colis.id) : null;
-  return fileButtons(colis.id, {
-    printed: Boolean(colis.printed_at),
-    dropped: colis.status === "dropped",
-    note: colis.note,
-    special: paire ? { numero: paire.numero, code: Boolean(paire.code_file_id) } : null,
-  });
-}
-
-// Une image de "special" vaut 0 EUR et ne se drope pas : elle n'a rien a
-// faire de boutons. Tout le reste, PDF ou image, est un vrai colis.
-function aDesBoutons(colis) {
-  return Boolean(colis) && colis.status !== FREE_STATUS;
-}
-
-function tronque(texte, max) {
-  const propre = String(texte).replace(/\s+/g, " ").trim();
-  return propre.length > max ? `${propre.slice(0, max - 1)}…` : propre;
-}
-
-// --- Pose des boutons ---------------------------------------------------------
-// Le dernier clavier pose sur chaque message, pour ne jamais renvoyer a
-// Telegram ce qu'il affiche deja. Un drop fait depuis le bouton Telegram, puis
-// signale par la base, ne fait ainsi qu'une edition, pas deux -- et chaque
-// edition evitee est une place de plus pour les envois.
-const boutonsAffiches = new Map(); // "chat:message" -> clavier en JSON
-const BOUTONS_MEMOIRE = 5000;
-
-function retiensBoutons(chatId, messageId, clavier) {
-  const cle = `${chatId}:${messageId}`;
-  boutonsAffiches.delete(cle); // le plus recent passe en fin de liste
-  boutonsAffiches.set(cle, JSON.stringify(clavier || { inline_keyboard: [] }));
-  if (boutonsAffiches.size > BOUTONS_MEMOIRE) boutonsAffiches.delete(boutonsAffiches.keys().next().value);
-}
-
-function dejaAffiches(chatId, messageId, clavier) {
-  return boutonsAffiches.get(`${chatId}:${messageId}`) === JSON.stringify(clavier);
-}
-
-// Pose un clavier par la file d'ecriture. `clavier` peut etre une fonction :
-// il est alors calcule au moment de l'envoi, l'etat du colis ayant pu changer
-// pendant l'attente.
-function poseBoutons(bot, chatId, messageId, clavier, { priorite = "normale" } = {}) {
-  const calcule = () => (typeof clavier === "function" ? clavier() : clavier);
-  const avant = calcule();
-  if (!avant || dejaAffiches(chatId, messageId, avant)) return Promise.resolve();
-
-  return ecritureGroupe(() => edite(bot, chatId, messageId, calcule()), { priorite });
-}
-
-// Pour un bouton presse : l'edition part tout de suite, hors file -- c'est
-// la reponse au doigt, elle ne doit pas attendre derriere des envois.
-function poseBoutonsMaintenant(bot, chatId, messageId, clavier) {
-  return edite(bot, chatId, messageId, clavier).catch(() => {});
-}
-
-// Le clavier est note comme affiche AU DEPART de l'edition, pas a son retour :
-// deux editions identiques lancees ensemble (le bouton presse, et le signal de
-// drop qui suit) n'en font qu'une. Si Telegram refuse, on l'oublie -- un 429
-// reessaye par la file doit repartir pour de bon.
-async function edite(bot, chatId, messageId, clavier) {
-  if (!clavier || dejaAffiches(chatId, messageId, clavier)) return;
-  const cle = `${chatId}:${messageId}`;
-  const precedent = boutonsAffiches.get(cle);
-  retiensBoutons(chatId, messageId, clavier);
-  try {
-    await bot.editMessageReplyMarkup(clavier, { chat_id: chatId, message_id: messageId });
-  } catch (err) {
-    // deja ce clavier-la : Telegram le dit, ce n'est pas un echec
-    if (/not modified/i.test(err.message)) return;
-    if (precedent === undefined) boutonsAffiches.delete(cle);
-    else boutonsAffiches.set(cle, precedent);
-    throw err;
-  }
-}
-
-// Repose les boutons d'un colis en relisant son etat : appele apres /note, un
-// drop, une correction depuis le site.
-function refreshFileButtons(bot, colis, { priorite = "normale" } = {}) {
-  if (!colis || !colis.chat_id || !colis.message_id) return;
-  const id = colis.id;
-  poseBoutons(
-    bot,
-    colis.chat_id,
-    colis.message_id,
-    () => {
-      const frais = getColisById(id);
-      return frais && aDesBoutons(frais) ? boutonsDe(frais) : null;
-    },
-    { priorite }
-  )
-    // le message n'a pas forcement de boutons (colis d'avant cette version)
-    .catch(() => {});
 }
 
 // Un drop fait sur le site -- ou en fin de tournee, ou depuis le bouton --
@@ -1476,15 +1228,6 @@ async function handleFileButton(bot, query) {
   return repondre("Action inconnue.");
 }
 
-// Une etiquette sortie par /imprime ne doit plus proposer le bouton : on
-// remplace les boutons par la mention "deja imprime" sous le fichier concerne.
-// Une liasse de 30 etiquettes, c'est 30 editions dans le groupe : elles passent
-// par la file cadencee, sinon Telegram en refuse la moitie (429) et les
-// boutons Drop n'apparaissent que sous une partie des fichiers.
-function markButtonsPrinted(bot, ids) {
-  for (const id of ids) refreshFileButtons(bot, getColisById(id));
-}
-
 // --- Deplacer un colis d'un topic a un autre ---------------------------------
 // /lit, /unlit, /special : changer le type ne suffit pas, le fichier doit
 // suivre. Sinon il reste la ou il etait et il faut encore trier a la main --
@@ -1732,591 +1475,6 @@ async function handleLienSpecial(bot, msg, role, numero) {
   replyEphemeral(bot, msg, texte, {}, 12000);
 }
 
-// --- Impression ------------------------------------------------------------
-// Fusionne les etiquettes en attente d'un transporteur en un seul PDF au
-// format exact de l'imprimante thermique 4x6. Reserve au proprietaire et au
-// tete-a-tete avec le bot : c'est un fichier qui contient toutes les
-// etiquettes, il n'a rien a faire dans un groupe.
-// Ouvert a tout le monde, mais pas n'importe ou : en tete-a-tete avec le bot,
-// ou dans le groupe de travail. Le PDF regroupe toutes les etiquettes en
-// attente du transporteur choisi, quel que soit l'expediteur : il n'a rien a
-// faire dans un groupe tiers.
-function canPrint(msg) {
-  return msg.chat.type === "private" || msg.chat.id === AUTO_GROUP_CHAT_ID;
-}
-
-function handlePrintCommand(bot, msg, rawName) {
-  if (!canPrint(msg)) {
-    return replyEphemeral(
-      bot,
-      msg,
-      "La commande /imprime ne marche qu'en message prive avec le bot ou dans le groupe de travail.",
-      {},
-      8000
-    );
-  }
-
-  if (rawName && rawName.trim()) {
-    // "lit" n'est pas un transporteur mais une file d'impression a part
-    if (/^lits?$/i.test(rawName.trim())) return sendMergedLabels(bot, msg, "LIT");
-    // les speciaux non plus : /imprime special sort leur liasse a part
-    if (/^sp[eé]ciaux?$|^sp[eé]cial$/i.test(rawName.trim())) return sendMergedLabels(bot, msg, "SPECIAL");
-    const carrier = parseCarrier(rawName);
-    if (!carrier) {
-      return replyEphemeral(bot, msg, `Transporteur inconnu : "${rawName.trim()}".\nAu choix : ${CARRIER_LIST_HINT}`);
-    }
-    return sendMergedLabels(bot, msg, carrier.code);
-  }
-
-  sendPrintMenu(bot, msg.chat.id);
-}
-
-// Pastilles reprenant les couleurs du dashboard, pour repérer une compagnie
-// d'un coup d'oeil dans le menu.
-// Les noms Telegram peuvent contenir < ou & : le mode HTML exige de les fuir.
-function escapeHtml(text) {
-  return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-const CARRIER_DOTS = {
-  MR: "🩷",
-  LP: "🟡",
-  CHRONO: "🟢",
-  UPS: "🟤",
-  DPD: "🔴",
-  GLS: "🔵",
-  DHL: "🟠",
-  FEDEX: "🟣",
-  BJ: "🟨",
-  LIT: "🧻",
-  SPECIAL: "⭐",
-  Inconnu: "⚠️",
-};
-
-function carrierDot(code) {
-  return CARRIER_DOTS[code] || "⬜";
-}
-
-// Menu des etiquettes a imprimer. Par defaut il ne montre que celles qui ne
-// sont jamais sorties de l'imprimante : imprimer 10 MR, en recevoir 2 puis
-// faire "Tout" ne doit ressortir que les 2. Le bouton de reglage donne acces
-// aux deja imprimees.
-function sendPrintMenu(bot, chatId) {
-  const summary = getPrintableSummary().filter((row) => row.count > 0);
-  const alreadyPrinted = countAlreadyPrinted() + countLitPrintable({ scope: "printed" });
-
-  if (summary.length === 0 && countLitPrintable() === 0) {
-    const text =
-      alreadyPrinted > 0
-        ? `🖨 <b>Rien de nouveau a imprimer</b>\n\n${alreadyPrinted} etiquette(s) en attente sont deja sorties de l'imprimante.`
-        : "🖨 <b>Aucune etiquette a imprimer</b>\n\nTout est a jour.";
-    const opts = { parse_mode: "HTML" };
-    if (alreadyPrinted > 0) {
-      opts.reply_markup = {
-        inline_keyboard: [[{ text: `↻ Reimprimer (${alreadyPrinted})`, callback_data: "prmenu:all" }]],
-      };
-    }
-    return bot.sendMessage(chatId, text, opts).catch((err) => console.error("[bot] menu impression", err.message));
-  }
-
-  const lit = countLitPrintable();
-  const total = summary.reduce((sum, row) => sum + row.count, 0) + lit;
-  const lines = summary.map(
-    (row) => `${carrierDot(row.carrier)} <b>${carrierLabel(row.carrier)}</b> — ${row.count}`
-  );
-  if (lit > 0) lines.push(`🧻 <b>LIT</b> — ${lit} <i>(rouleau)</i>`);
-  const text = `<b>${total} etiquette${total > 1 ? "s" : ""}</b>\n\n${lines.join("\n")}`;
-
-  const keyboard = [];
-  for (let i = 0; i < summary.length; i += 2) {
-    keyboard.push(
-      summary.slice(i, i + 2).map((row) => ({
-        text: `${carrierDot(row.carrier)} ${carrierLabel(row.carrier)} · ${row.count}`,
-        callback_data: `pr:${row.carrier}`,
-      }))
-    );
-  }
-  if (lit > 0) keyboard.push([{ text: `🧻 LIT · ${lit} — rouleau 210 mm`, callback_data: "pr:LIT" }]);
-  if (summary.length > 0) {
-    const thermiques = total - lit;
-    keyboard.push([{ text: `🖨 Tout imprimer · ${thermiques}`, callback_data: "pr:*" }]);
-  }
-  if (alreadyPrinted > 0) {
-    keyboard.push([{ text: `↻ Deja imprimees · ${alreadyPrinted}`, callback_data: "prmenu:all" }]);
-  }
-
-  bot
-    .sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } })
-    .catch((err) => console.error("[bot] clavier impression", err.message));
-}
-
-// Menu de reimpression : on y voit qui a imprime quoi et quand, parce qu'on
-// est plusieurs a travailler sur les memes colis.
-function sendReprintMenu(bot, chatId) {
-  const jobs = getPrintJobs();
-  const summary = getPrintableSummary({ scope: "printed" }).filter((row) => row.count > 0);
-  const litPrinted = countLitPrintable({ scope: "printed" });
-  const alreadyPrinted = countAlreadyPrinted() + litPrinted;
-
-  if (alreadyPrinted === 0) {
-    return bot
-      .sendMessage(chatId, "↻ <b>Rien a reimprimer</b>\n\nAucune etiquette en attente n'est deja sortie.", {
-        parse_mode: "HTML",
-      })
-      .catch(() => {});
-  }
-
-  const lines = jobs.map((job) => {
-    const carriers = String(job.carriers || "")
-      .split(",")
-      .map((code) => `${carrierDot(code)} ${carrierLabel(code)}`)
-      .join(", ");
-    return `${jobIcon(job)} <b>${escapeHtml(job.printed_by)}</b> · ${jobWhen(job.printed_at)}\n     ${job.count} etiquette${
-      job.count > 1 ? "s" : ""
-    } — ${carriers}`;
-  });
-
-  const text =
-    `↻ <b>Deja imprimees</b>\n\n${
-      lines.length > 0 ? lines.join("\n\n") : `${alreadyPrinted} etiquette(s), impressions d'avant le suivi.`
-    }\n\n<i>Choisis une fournee a refaire, ou passe par les compagnies.</i>`;
-
-  const keyboard = jobs.map((job) => [
-    {
-      text: `${jobIcon(job)} ${job.printed_by} · ${jobWhen(job.printed_at)} · ${job.count}`,
-      callback_data: `prjob:${job.job}`,
-    },
-  ]);
-
-  for (let i = 0; i < summary.length; i += 2) {
-    keyboard.push(
-      summary.slice(i, i + 2).map((row) => ({
-        text: `${carrierDot(row.carrier)} ${carrierLabel(row.carrier)} · ${row.count}`,
-        callback_data: `pra:${row.carrier}`,
-      }))
-    );
-  }
-  if (litPrinted > 0) {
-    keyboard.push([{ text: `🧻 LIT · ${litPrinted} — rouleau`, callback_data: "pra:LIT" }]);
-  }
-  if (summary.length > 0) {
-    keyboard.push([{ text: `↻ Tout reimprimer · ${alreadyPrinted - litPrinted}`, callback_data: "pra:*" }]);
-  }
-  keyboard.push([{ text: "← Retour", callback_data: "prmenu:new" }]);
-
-  bot
-    .sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } })
-    .catch((err) => console.error("[bot] clavier reimpression", err.message));
-}
-
-// L'agent du Mac imprime sans utilisateur : on le distingue d'un humain.
-function jobIcon(job) {
-  return /auto/i.test(job.printed_by || "") ? "🤖" : "👤";
-}
-
-// "14:32", "hier 18:40", "lun 09:15" — les dates SQLite sont en UTC.
-function jobWhen(sqlDate) {
-  const date = new Date(`${String(sqlDate).replace(" ", "T")}Z`);
-  if (Number.isNaN(date.getTime())) return "?";
-  const heure = date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-  const jours = Math.floor((Date.now() - date.getTime()) / 86400000);
-  if (jours === 0) return heure;
-  if (jours === 1) return `hier ${heure}`;
-  return `${date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" })} ${heure}`;
-}
-
-function handlePrintCallback(bot, query) {
-  const msg = { chat: query.message.chat, from: query.from };
-  if (!canPrint(msg)) {
-    return bot.answerCallbackQuery(query.id, { text: "Pas ici." }).catch(() => {});
-  }
-
-  const data = query.data || "";
-  bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
-
-  if (data === "prmenu:all") {
-    bot.answerCallbackQuery(query.id).catch(() => {});
-    return sendReprintMenu(bot, query.message.chat.id);
-  }
-  if (data === "prmenu:new") {
-    bot.answerCallbackQuery(query.id).catch(() => {});
-    return sendPrintMenu(bot, query.message.chat.id);
-  }
-
-  bot.answerCallbackQuery(query.id, { text: "Preparation..." }).catch(() => {});
-
-  if (data.startsWith("prjob:")) {
-    return sendMergedLabels(bot, msg, null, { job: data.slice(6) });
-  }
-
-  const includePrinted = data.startsWith("pra:");
-  const code = data.slice(data.indexOf(":") + 1);
-  sendMergedLabels(bot, msg, code, { includePrinted });
-}
-
-// Telecharge les etiquettes une par une (Telegram limite les rafales), les
-// assemble, puis renvoie le PDF pret a imprimer.
-async function sendMergedLabels(bot, msg, code, { includePrinted = false, job = null } = {}) {
-  const chatId = msg.chat.id;
-  const scope = { scope: includePrinted ? "printed" : "new" };
-  const rows = job
-    ? getPrintJobColis(job)
-    : code === "LIT"
-      ? getLitPrintable(scope)
-      : code === "*"
-        ? getPrintableSummary(scope).flatMap((row) => getPrintableColis(row.carrier, scope))
-        : getPrintableColis(code, scope);
-
-  // les LIT sortent sur le rouleau 210 mm, pas sur la thermique 4x6
-  const onRoll = code === "LIT" || (job && rows.length > 0 && rows.every((r) => r.type === "lit"));
-
-  if (rows.length === 0) {
-    return replyEphemeral(bot, msg, `Aucune etiquette ${code === "*" ? "" : carrierLabel(code)} a imprimer.`, {}, 8000);
-  }
-
-  const progress = await startProgress(bot, chatId, rows.length);
-
-  const { labels, missing } = await downloadLabels(bot, rows, () => progress.step());
-
-  await progress.finish(onRoll ? "Mise en page du rouleau..." : "Assemblage du PDF...");
-  const assembled = onRoll ? await buildRoll(labels) : await mergeLabels(labels);
-  const { pdf, failed } = assembled;
-  progress.remove();
-
-  if (!pdf) {
-    // dire POURQUOI : "rien a imprimer" tout seul ne laisse aucune prise
-    const causes = [...new Set(failed.map((f) => f.reason))].slice(0, 3);
-    const detail = failed.length > 0
-      ? `\n${failed.length} fichier(s) illisible(s) :\n• ${causes.join("\n• ")}`
-      : missing.length > 0
-        ? `\n${missing.length} fichier(s) introuvable(s) sur Telegram (message supprime ou trop vieux).`
-        : "";
-    return bot.sendMessage(chatId, `Aucune etiquette lisible : rien a imprimer.${detail}`).catch(() => {});
-  }
-
-  const name = onRoll
-    ? "lit-rouleau"
-    : job
-      ? "reimpression"
-      : code === "*"
-        ? "toutes"
-        : carrierLabel(code).toLowerCase().replace(/\s+/g, "-");
-  const printedIds = labels.filter((l) => !failed.some((f) => f.colisId === l.colisId)).map((l) => l.colisId);
-  const caption =
-    captionFor(rows, printedIds) +
-    (onRoll
-      ? `\n📏 ${(assembled.lengthMm / 10).toFixed(0)} cm de rouleau · ${assembled.rows} rangee${assembled.rows > 1 ? "s" : ""}` +
-        (assembled.trimmed > 0
-          ? ` · ${assembled.trimmed} bloc${assembled.trimmed > 1 ? "s" : ""} d'instructions retire${assembled.trimmed > 1 ? "s" : ""}`
-          : "") +
-        `\n✂️ Decoupe le long des pointilles`
-      : "") +
-    (missing.length > 0 ? `\n⚠️ ${missing.length} fichier(s) introuvable(s) sur Telegram.` : "") +
-    (failed.length > 0 ? `\n⚠️ ${failed.length} fichier(s) illisible(s).` : "");
-
-  try {
-    await bot.sendDocument(
-      chatId,
-      pdf,
-      { caption },
-      { filename: `etiquettes-${name}.pdf`, contentType: "application/pdf" }
-    );
-    // le PDF est parti : ces etiquettes ne reviendront plus dans le menu, ni
-    // dans la file de l'impression automatique
-    markPrinted(printedIds, printerName(msg));
-    // sous chaque fichier concerne, le bouton "Imprime" laisse la place a la
-    // mention "deja imprime"
-    markButtonsPrinted(bot, printedIds);
-  } catch (err) {
-    bot.sendMessage(chatId, `Envoi impossible : ${err.message}`).catch(() => {});
-  }
-}
-
-// --- Mode fusion ---------------------------------------------------------------
-// /fusion : les fichiers envoyes ensuite dans ce chat (ou ce topic) ne sont pas
-// des colis -- rien n'est compte, rien n'est republie -- ils sont mis de cote.
-// /stopfusion : le bot les fusionne en un seul PDF, au format etiquette comme
-// /imprime, et le renvoie. L'etat est garde en base : un redemarrage du bot en
-// pleine fusion ne perd aucun fichier.
-
-const minuteursFusion = new Map(); // cle -> minuteur de mise a jour du message
-
-function cleFusion(msg) {
-  return `fusion:${batchKey(msg.chat.id, msg.message_thread_id)}`;
-}
-
-function lisFusion(msg) {
-  const brut = getSetting(cleFusion(msg), "");
-  if (!brut) return null;
-  try {
-    return JSON.parse(brut);
-  } catch {
-    return null;
-  }
-}
-
-function ecrisFusion(msg, etat) {
-  setSetting(cleFusion(msg), etat ? JSON.stringify(etat) : "");
-}
-
-// les deux seules sources legitimes, comme pour les colis : le prive et le
-// groupe configure
-function fusionPermise(msg) {
-  return msg.chat.type === "private" || msg.chat.id === AUTO_GROUP_CHAT_ID;
-}
-
-const fichiers = (n) => `${n} fichier${n > 1 ? "s" : ""}`;
-
-function texteFusion(n) {
-  return (
-    `🔀 Mode fusion\n` +
-    `${n === 0 ? "Envoie tes colis" : `${fichiers(n)} recu${n > 1 ? "s" : ""}`} : ils ne comptent pas.\n` +
-    `/stopfusion pour recevoir le PDF fusionne.`
-  );
-}
-
-async function handleFusion(bot, msg) {
-  if (!fusionPermise(msg)) return;
-  const deja = lisFusion(msg);
-  if (deja) {
-    replyEphemeral(bot, msg, `Deja en mode fusion (${fichiers(deja.fichiers.length)}). /stopfusion pour recevoir le PDF.`, {}, 8000);
-    return;
-  }
-  // l'etat d'abord : un fichier envoye juste apres la commande est deja pris
-  ecrisFusion(msg, { debut: Date.now(), fichiers: [], messageId: null });
-  const envoye = await bot.sendMessage(msg.chat.id, texteFusion(0), threadOpts(msg)).catch(() => null);
-  const etat = lisFusion(msg);
-  if (etat && envoye) {
-    etat.messageId = envoye.message_id;
-    ecrisFusion(msg, etat);
-    if (etat.fichiers.length > 0) majMessageFusion(bot, msg);
-  } else if (envoye) {
-    // /stopfusion est arrive entre-temps
-    bot.deleteMessage(msg.chat.id, envoye.message_id).catch(() => {});
-  }
-}
-
-// Vrai si le fichier a ete pris par une fusion en cours.
-function ajouteAFusion(bot, msg, attachment) {
-  if (!fusionPermise(msg)) return false;
-  const etat = lisFusion(msg);
-  if (!etat) return false;
-  etat.fichiers.push({ fileId: attachment.fileId, kind: attachment.kind, nom: attachment.fileName, messageId: msg.message_id });
-  ecrisFusion(msg, etat);
-  // ✍ et non 👍 : on voit tout de suite qu'il n'est pas compte
-  queueReaction(bot, msg.chat.id, msg.message_id, "✍", "👌");
-  majMessageFusion(bot, msg);
-  return true;
-}
-
-// Le compteur du message de fusion, mis a jour une fois la rafale passee (un
-// album arrive en plusieurs messages : une seule edition pour tous).
-function majMessageFusion(bot, msg) {
-  const cle = cleFusion(msg);
-  clearTimeout(minuteursFusion.get(cle));
-  minuteursFusion.set(
-    cle,
-    setTimeout(() => {
-      minuteursFusion.delete(cle);
-      const etat = lisFusion(msg);
-      if (!etat?.messageId) return;
-      bot
-        .editMessageText(texteFusion(etat.fichiers.length), { chat_id: msg.chat.id, message_id: etat.messageId })
-        .catch(() => {});
-    }, 800)
-  );
-}
-
-async function handleStopFusion(bot, msg) {
-  if (!fusionPermise(msg)) return;
-  const etat = lisFusion(msg);
-  if (!etat) {
-    replyEphemeral(bot, msg, "Pas de fusion en cours. /fusion pour en commencer une.", {}, 8000);
-    return;
-  }
-  // fin du mode : les fichiers suivants redeviennent des colis
-  ecrisFusion(msg, null);
-  clearTimeout(minuteursFusion.get(cleFusion(msg)));
-  minuteursFusion.delete(cleFusion(msg));
-  if (etat.messageId) bot.deleteMessage(msg.chat.id, etat.messageId).catch(() => {});
-
-  // dans l'ordre d'envoi
-  const recus = [...etat.fichiers].sort((a, b) => a.messageId - b.messageId);
-  if (recus.length === 0) {
-    replyEphemeral(bot, msg, "Mode fusion arrete : aucun fichier recu.", {}, 8000);
-    return;
-  }
-
-  const progression = await startProgress(bot, msg.chat.id, recus.length, {
-    titre: "🔀 Fusion des colis",
-    unite: "recuperes",
-    threadId: msg.message_thread_id || null,
-  });
-  const lignes = recus.map((f, i) => ({
-    id: i + 1,
-    file_id: f.fileId,
-    file_kind: f.kind,
-    file_name: f.nom || `fichier ${i + 1}`,
-    type: "fusion",
-  }));
-  const { labels, missing } = await downloadLabels(bot, lignes, () => progression.step());
-  const { pdf, pages, failed } = await mergeLabels(labels);
-  progression.remove();
-
-  if (!pdf) {
-    bot
-      .sendMessage(msg.chat.id, `Fusion impossible : aucun des ${fichiers(recus.length)} n'a pu etre lu.`, threadOpts(msg))
-      .catch(() => {});
-    return;
-  }
-
-  const fusionnes = labels.length - failed.length;
-  journalise("fusion", `${fichiers(fusionnes)} fusionné${fusionnes > 1 ? "s" : ""} (/fusion)`, {
-    detail: "hors suivi : ne comptent pas",
-    nombre: fusionnes,
-  });
-  const caption =
-    `🔀 ${fichiers(fusionnes)} fusionne${fusionnes > 1 ? "s" : ""} · ${pages} page${pages > 1 ? "s" : ""}\n` +
-    `Ils ne comptent pas.` +
-    (missing.length > 0 ? `\n⚠️ ${fichiers(missing.length)} introuvable${missing.length > 1 ? "s" : ""} sur Telegram.` : "") +
-    (failed.length > 0 ? `\n⚠️ ${fichiers(failed.length)} illisible${failed.length > 1 ? "s" : ""}.` : "");
-  // l'heure de Paris dans le nom (le serveur est en UTC) : fusion-2026-10-05-16h31.pdf
-  const morceaux = Object.fromEntries(
-    new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-      .formatToParts(new Date())
-      .map((m) => [m.type, m.value])
-  );
-  const jour = `${morceaux.year}-${morceaux.month}-${morceaux.day}-${morceaux.hour}h${morceaux.minute}`;
-  await bot
-    .sendDocument(msg.chat.id, pdf, { caption, ...threadOpts(msg) }, { filename: `fusion-${jour}.pdf`, contentType: "application/pdf" })
-    .catch((err) => bot.sendMessage(msg.chat.id, `Envoi impossible : ${err.message}`, threadOpts(msg)).catch(() => {}));
-}
-
-// Recupere les fichiers aupres de Telegram. Un fichier introuvable (trop
-// vieux, message supprime) n'interrompt pas le lot : il est juste signale.
-async function downloadLabels(bot, rows, onStep) {
-  const labels = [];
-  const missing = [];
-
-  for (const row of rows) {
-    try {
-      // un 429 ou un 502 de Telegram, une coupure : on reessaie au lieu de
-      // sauter l'etiquette (elle manquait alors a la liasse sans bruit)
-      const bytes = await avecReessais(async () => {
-        const link = await bot.getFileLink(row.file_id);
-        const res = await fetch(link);
-        if (!res.ok) {
-          const err = new Error(`HTTP ${res.status}`);
-          err.response = { statusCode: res.status };
-          throw err;
-        }
-        return new Uint8Array(await res.arrayBuffer());
-      });
-      labels.push({
-        bytes,
-        kind: row.file_kind === "image" ? "image" : "pdf",
-        label: row.file_name || `colis #${row.id}`,
-        colisId: row.id,
-        // un special sort avec son numero de paire imprime en gros : c'est lui
-        // qu'on lit sur le colis devant le locker
-        numero: row.type === "special" ? paireDuColis(row.id)?.numero || null : null,
-      });
-    } catch (err) {
-      missing.push({ id: row.id, label: row.file_name || `colis #${row.id}`, reason: err.message });
-    }
-    if (onStep) await onStep();
-  }
-  return { labels, missing };
-}
-
-// Utilise par le dashboard (impression automatique et onglet Imprime) : meme
-// chaine que /imprime, sans Telegram autour. `roll` sort la mise en page du
-// rouleau 210 mm des LIT au lieu du format thermique 4x6.
-async function buildLabelsPdf(rows, { roll = false, onStep } = {}) {
-  if (!botInstance) throw new Error("bot non demarre");
-  const { labels, missing } = await downloadLabels(botInstance, rows, onStep);
-  const assembled = roll ? await buildRoll(labels) : await mergeLabels(labels);
-  const { pdf, failed } = assembled;
-  const printedIds = labels
-    .filter((l) => !failed.some((f) => f.colisId === l.colisId))
-    .map((l) => l.colisId);
-  return { ...assembled, pdf, printedIds, missing, failed };
-}
-
-// Barre de progression : un seul message, edite au fil des telechargements.
-// Telegram limite les editions, d'ou le pas minimum d'une seconde entre deux
-// mises a jour (la derniere etape est toujours affichee).
-const PROGRESS_SLOTS = 12;
-const PROGRESS_MIN_INTERVAL_MS = 1000;
-
-function progressBar(done, total) {
-  const ratio = total > 0 ? done / total : 1;
-  const filled = Math.round(ratio * PROGRESS_SLOTS);
-  return `${"█".repeat(filled)}${"░".repeat(PROGRESS_SLOTS - filled)} ${Math.round(ratio * 100)} %`;
-}
-
-async function startProgress(
-  bot,
-  chatId,
-  total,
-  { titre = "Preparation des etiquettes", unite = "recuperees", threadId = null } = {}
-) {
-  const text = (done, suffix) =>
-    `${titre}\n${progressBar(done, total)}\n${suffix || `${done}/${total} ${unite}`}`;
-
-  const opts = threadId ? { message_thread_id: threadId } : {};
-  const message = await bot.sendMessage(chatId, text(0), opts).catch(() => null);
-  let done = 0;
-  let lastEdit = 0;
-
-  const edit = async (suffix) => {
-    if (!message) return;
-    await bot
-      .editMessageText(text(done, suffix), { chat_id: chatId, message_id: message.message_id })
-      .catch(() => {});
-    lastEdit = Date.now();
-  };
-
-  return {
-    async step() {
-      done += 1;
-      const last = done >= total;
-      if (!last && Date.now() - lastEdit < PROGRESS_MIN_INTERVAL_MS) return;
-      await edit();
-    },
-    async finish(suffix) {
-      await edit(suffix);
-    },
-    remove() {
-      if (message) bot.deleteMessage(chatId, message.message_id).catch(() => {});
-    },
-  };
-}
-
-// Ce que contient le PDF, en une ligne : "🩷 6 MR · 🟤 3 UPS".
-function captionFor(rows, printedIds) {
-  const kept = new Set(printedIds);
-  const counts = new Map();
-  for (const row of rows) {
-    if (!kept.has(row.id)) continue;
-    const code = row.carrier_group || "Inconnu";
-    counts.set(code, (counts.get(code) || 0) + 1);
-  }
-  if (counts.size === 0) return "Aucune etiquette lisible.";
-
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([code, count]) => `${carrierDot(code)} ${count} ${code === "Inconnu" ? "?" : code}`)
-    .join("  ·  ");
-}
-
-// Nom affiche dans le menu de reimpression.
-function printerName(msg) {
-  const from = msg && msg.from;
-  if (!from) return "Inconnu";
-  return from.username ? `@${from.username}` : from.first_name || `#${from.id}`;
-}
-
 
 // Liste ce que le bot a appris, et permet de tout oublier si une regle s'avere
 // fausse.
@@ -2372,9 +1530,7 @@ async function handleBatchType(bot, msg, type) {
   let deplaces = 0;
   for (const item of colis) {
     // un fichier a la fois : c'est la file qui fixe la cadence
-    // eslint-disable-next-line no-await-in-loop
     if (await moveColis(bot, item, type)) deplaces += 1;
-    // eslint-disable-next-line no-await-in-loop
     if (progression) await progression.step();
   }
   if (progression) {
@@ -2629,6 +1785,20 @@ function planifieRecap({ ajoutes = 0, notifier = false } = {}) {
       .then(() => updateGroupStatsPhoto(botInstance, n > 0 ? n : null))
       .catch((err) => console.error("[bot] recapitulatif :", err.message));
   }, 800);
+}
+
+// Utilise par le dashboard (impression automatique et onglet Imprime) : meme
+// chaine que /imprime, sans Telegram autour. `roll` sort la mise en page du
+// rouleau 210 mm des LIT au lieu du format thermique 4x6.
+async function buildLabelsPdf(rows, { roll = false, onStep } = {}) {
+  if (!botInstance) throw new Error("bot non demarre");
+  const { labels, missing } = await downloadLabels(botInstance, rows, onStep);
+  const assembled = roll ? await buildRoll(labels) : await mergeLabels(labels);
+  const { pdf, failed } = assembled;
+  const printedIds = labels
+    .filter((l) => !failed.some((f) => f.colisId === l.colisId))
+    .map((l) => l.colisId);
+  return { ...assembled, pdf, printedIds, missing, failed };
 }
 
 // Appele par le dashboard apres chaque modification de colis : l'image postee

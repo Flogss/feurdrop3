@@ -9,3 +9,14 @@ IOS/DropKit/.build/
 IOS/DropKit/.swiftpm/
 xcuserdata/
 DerivedData/
+
+# Etiquettes, liasses et PDF fusionnes : ils portent les noms et adresses des
+# destinataires. Aucun PDF n'a sa place dans ce depot public.
+*.pdf
+# bases SQLite et leurs sauvegardes, ou qu'elles soient
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+# configuration de l'agent d'impression (contient son jeton)
+.drop-print.json

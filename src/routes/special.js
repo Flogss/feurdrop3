@@ -2,6 +2,7 @@ const express = require("express");
 const { listePaires, getPaire } = require("../specials");
 const { getBot, finiCodeSeul } = require("../bot");
 const { renduPng } = require("../rasterInk");
+const { routeAsync } = require("../http");
 
 // Mode locker : les codes-barres du topic special, dans l'ordre des numeros
 // imprimes sur les etiquettes. Devant le locker, on lit "#3" sur le colis et
@@ -40,7 +41,7 @@ router.post("/paires/:id/fini", (req, res) => {
 const cache = new Map(); // paireId -> { bytes, type }
 const CACHE_MAX = 60;
 
-router.get("/code/:id", async (req, res) => {
+router.get("/code/:id", routeAsync(async (req, res) => {
   const id = Number(req.params.id);
   const deja = cache.get(id);
   if (deja) {
@@ -79,6 +80,6 @@ router.get("/code/:id", async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
-});
+}));
 
 module.exports = router;

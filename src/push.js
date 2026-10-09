@@ -51,14 +51,23 @@ function loadVapidKeys() {
   return generated;
 }
 
-const keys = loadVapidKeys();
 // Apple et Google exigent un contact (mailto: ou https://) dans le JWT, sinon
 // ils refusent le push. Une URL du site fait l'affaire, pas besoin d'e-mail.
 const CONTACT = process.env.PUSH_CONTACT || "https://feurdrop3-production.up.railway.app";
-webpush.setVapidDetails(CONTACT, keys.publicKey, keys.privateKey);
+
+// Chargees (ou generees) au premier besoin, pas au chargement du module :
+// lire le code ne doit ni ouvrir la base ni creer de cles.
+let keys = null;
+function cles() {
+  if (!keys) {
+    keys = loadVapidKeys();
+    webpush.setVapidDetails(CONTACT, keys.publicKey, keys.privateKey);
+  }
+  return keys;
+}
 
 function getPublicKey() {
-  return keys.publicKey;
+  return cles().publicKey;
 }
 
 // Envoie une notification a tous les appareils abonnes. Les endpoints que le
@@ -69,6 +78,7 @@ function getPublicKey() {
 async function sendToAll(payload) {
   const subs = listSubscriptions();
   if (subs.length === 0) return { sent: 0, removed: 0 };
+  cles(); // les cles VAPID signent chaque envoi
 
   let sent = 0;
   let removed = 0;

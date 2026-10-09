@@ -1,0 +1,92 @@
+/* ==========================================================================
+   Historique (bas du dashboard)
+   Une ligne par evenement, groupees par jour : l'icone et sa couleur disent
+   la nature (recu, drop, impression...), a droite le montant et l'heure.
+   ========================================================================== */
+
+.journal-card .card-head { flex-wrap: wrap; row-gap: 10px; }
+.journal-filtres {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.04);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.journal-filtres::-webkit-scrollbar { display: none; }
+.journal-filtre {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-3);
+  font: 600 12.5px/1 var(--font-sans);
+  transition: background-color var(--t-2) var(--ease-out), color var(--t-2), box-shadow var(--t-3);
+}
+.journal-filtre.active {
+  background: rgb(var(--accent-rgb) / 0.22);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgb(var(--violet-300) / 0.35), 0 4px 14px -6px rgb(var(--accent-rgb) / 0.8);
+}
+@media (hover: hover) { .journal-filtre:not(.active):hover { color: var(--text-2); background: rgb(255 255 255 / 0.05); } }
+
+.journal-liste { display: flex; flex-direction: column; }
+.journal-jour {
+  position: sticky;
+  top: 0;
+  padding: 14px 0 6px;
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.journal-jour:first-child { padding-top: 2px; }
+.journal-ligne {
+  --c: var(--violet-400);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  margin: 0 -10px;
+  border-radius: var(--r-md);
+  transition: background-color var(--t-2) var(--ease-out);
+}
+@media (hover: hover) { .journal-ligne:hover { background: rgb(255 255 255 / 0.03); } }
+.journal-icone {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  color: rgb(var(--c));
+  background: rgb(var(--c) / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(var(--c) / 0.22), 0 0 18px -8px rgb(var(--c) / 0.9);
+}
+.journal-icone .icon { width: 17px; height: 17px; stroke-width: 2; }
+.journal-texte { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.journal-titre { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journal-detail { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journal-droite { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.journal-valeur { font-size: 13.5px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.journal-meta { font: 500 11px/1 var(--font-mono); color: var(--text-3); white-space: nowrap; }
+.journal-vide { padding: 22px 0; text-align: center; font-size: 13.5px; color: var(--text-3); }
+.journal-plus { margin-top: 8px; width: 100%; }
+
+.journal-ligne.k-recu, .journal-ligne.k-ajout { --c: var(--violet-400); }
+.journal-ligne.k-drop { --c: var(--teal-rgb); }
+.journal-ligne.k-drop.annule { --c: var(--warn-rgb); }
+.journal-ligne.k-impression { --c: var(--info-rgb); }
+.journal-ligne.k-retrait { --c: var(--danger-rgb); }
+.journal-ligne.k-modif, .journal-ligne.k-note { --c: var(--warn-rgb); }
+.journal-ligne.k-tournee { --c: var(--violet-300); }
+.journal-ligne.k-paiement { --c: 120 220 150; }
+.journal-ligne.k-stock, .journal-ligne.k-expediteur, .journal-ligne.k-reglage, .journal-ligne.k-fusion { --c: 190 184 210; }
+.journal-ligne.k-drop .journal-valeur { color: rgb(var(--teal-rgb)); }
+
+/* une ligne qui arrive glisse et se precise ; les autres ne bougent pas */
+.journal-ligne.is-new { animation: ligne-arrive 620ms var(--ease-out) both; }

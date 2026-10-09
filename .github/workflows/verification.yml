@@ -1,0 +1,23 @@
+# Verification automatique a chaque envoi sur GitHub : lint (variables non
+# definies, code mort) puis la suite de tests node:test, sur la meme version
+# de Node que le Dockerfile de production.
+name: verification
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  serveur:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # pdftoppm : le recadrage des etiquettes sur leur rendu (comme en prod)
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test

@@ -21,11 +21,8 @@ const { FORME_JETON } = require("./portailCommun");
 // Les colis restent ceux du dashboard (meme table, memes statuts) : il n'y a
 // pas de seconde base a tenir a jour.
 
-const senderColumns = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
-if (!senderColumns.includes("portail_jeton")) db.exec("ALTER TABLE senders ADD COLUMN portail_jeton TEXT");
-if (!senderColumns.includes("portail_cree_le")) db.exec("ALTER TABLE senders ADD COLUMN portail_cree_le TEXT");
-db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_senders_portail ON senders(portail_jeton) WHERE portail_jeton IS NOT NULL");
-db.exec("CREATE INDEX IF NOT EXISTS idx_colis_sender ON colis(sender_name, created_at)");
+// Les colonnes portail_jeton / portail_cree_le et leurs index : migration 4
+// (db/migrations.js).
 
 // "Autre" rassemble plusieurs expediteurs : un lien commun montrerait a chacun
 // les colis des autres.

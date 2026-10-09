@@ -52,14 +52,19 @@ public struct DropAPI: Sendable {
         return try await client.send(.post, "/api/tour/start", body: Corps(selection: selection))
     }
 
+    /// L'heure de depart de la tournee que l'ecran affiche : le serveur refuse
+    /// (409) de terminer ou d'annuler une tournee deja finie, ou une autre
+    /// commencee depuis, au lieu de dropper des colis qui n'etaient pas du sac.
+    private struct TourAffichee: Encodable, Sendable { let startedAt: String? }
+
     /// retour de tournee : ce qu'on avait emporte (et imprime) est drope
-    public func finishTour() async throws -> DropResult {
-        try await client.send(.post, "/api/tour/finish")
+    public func finishTour(startedAt: String? = nil) async throws -> DropResult {
+        try await client.send(.post, "/api/tour/finish", body: TourAffichee(startedAt: startedAt))
     }
 
     /// annulation : on referme sans rien dropper
-    public func cancelTour() async throws {
-        _ = try await client.raw(.post, "/api/tour/end")
+    public func cancelTour(startedAt: String? = nil) async throws {
+        _ = try await client.raw(.post, "/api/tour/end", body: TourAffichee(startedAt: startedAt))
     }
 
     public func dismissTourSummary() async throws {

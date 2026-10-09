@@ -1,15 +1,15 @@
 const express = require("express");
 const store = require("../suivi/store");
 const engine = require("../suivi/engine");
+const { routeAsync, echec: fail } = require("../http");
 
 // Lecture des verifications de numeros de suivi faites par le bot
 // suivi-colissimo. Rien ne s'ecrit ici : le dashboard regarde, le bot travaille.
 
 const router = express.Router();
 
-// une liste de 10 000 numeros fait dans les 140 ko : la limite par defaut
-// d'express (100 ko) la refuserait sans explication
-router.use(express.json({ limit: "8mb" }));
+// Le corps de POST /verifier (une liste de numeros, jusqu'a 8 Mo) est lu par
+// app.js, avant l'analyseur global limite a 100 Ko : voir LIMITE_LISTE_SUIVI.
 
 // Vue d'ensemble : de quoi peindre l'ecran d'un coup, sans multiplier les
 // allers-retours.
@@ -42,7 +42,7 @@ router.get("/recheck", (req, res) => {
 });
 
 // Relance les numeros d'une ou plusieurs categories non finales.
-router.post("/recheck", async (req, res) => {
+router.post("/recheck", routeAsync(async (req, res) => {
   const wanted = Array.isArray(req.body?.milestones) ? req.body.milestones : [];
   try {
     const numbers = store.numbersToRecheck(wanted);
@@ -55,10 +55,10 @@ router.post("/recheck", async (req, res) => {
   } catch (err) {
     fail(res, err);
   }
-});
+}));
 
 // Mise en attente d'une liste collee ou d'un fichier depose.
-router.post("/verifier", async (req, res) => {
+router.post("/verifier", routeAsync(async (req, res) => {
   try {
     const parsed = await engine.parse(req.body?.text);
     if (parsed.valid.length === 0) {
@@ -77,7 +77,7 @@ router.post("/verifier", async (req, res) => {
   } catch (err) {
     fail(res, err);
   }
-});
+}));
 
 router.post("/annuler", (req, res) => {
   res.json({ cancelled: engine.cancel() });
@@ -99,7 +99,7 @@ router.get("/search", (req, res) => {
 // Rien a voir avec l'adresse interne de la machine : un conteneur heberge sort
 // derriere une passerelle, et c'est CETTE adresse-la que La Poste compare a sa
 // liste d'IP autorisees.
-router.get("/ip-sortie", async (req, res) => {
+router.get("/ip-sortie", routeAsync(async (req, res) => {
   try {
     const answer = await fetch("https://api.ipify.org?format=json", {
       signal: AbortSignal.timeout(8000),
@@ -109,6 +109,6 @@ router.get("/ip-sortie", async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
-});
+}));
 
 module.exports = router;
