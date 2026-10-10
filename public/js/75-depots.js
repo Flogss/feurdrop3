@@ -1,9 +1,9 @@
 // --- Controle des depots ------------------------------------------------------------
 // Ce que les transporteurs disent des colis dropes. Le serveur interroge
 // l'API officielle La Poste (La Poste, Colissimo, Chronopost, DPD) a son
-// rythme, en file d'attente ; Mondial Relay, UPS et DHL refusent les
-// verifications automatiques : leurs colis se constatent a la main sur la page
-// officielle. Ouvrir la page ne fait que lire la base. Le statut FeurDrop et
+// rythme, en file d'attente ; UPS et DHL refusent les verifications
+// automatiques : leurs colis se constatent sur la page officielle. Mondial
+// Relay n'est pas controle (ses colis sont seulement comptes). Ouvrir la page ne fait que lire la base. Le statut FeurDrop et
 // ce que dit le transporteur restent deux colonnes distinctes.
 
 const depotsEtat = {
@@ -285,6 +285,7 @@ function rendLignesDepots() {
   });
   const pied = [];
   if (filtreActif) pied.push(`${pluriel(lignes.length, "colis affiché", "colis affichés")} sur ${entier(d.lignes.length)}`);
+  for (const h of d.compteurs.horsControle || []) pied.push(pluriel(h.colis, `colis ${h.nom} non contrôlé`, `colis ${h.nom} non contrôlés`));
   if (d.compteurs.sansNumero) pied.push(`${pluriel(d.compteurs.sansNumero, "colis dropé sans numéro de suivi lisible", "colis dropés sans numéro de suivi lisible")} (non contrôlables)`);
   $("depots-pied").textContent = pied.join(" · ");
 }

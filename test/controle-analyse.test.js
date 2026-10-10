@@ -84,18 +84,22 @@ test("numero invalide ; erreur ; ce qu'on savait reste", () => {
   assert.equal(garde.categorie, "confirme");
 });
 
-test("donnees anciennes : jamais une preuve, et c'est une anomalie", () => {
+test("scans anterieurs a la reception de l'etiquette : ils prouvent le depot, et c'est dit", () => {
   const r = analyse({ colis: colis(24, 48), evenements: [lp(2000, "DI1"), lp(2100, "PC1")] });
-  assert.equal(r.categorie, "anomalie");
-  assert.match(r.raison, /Suivi antérieur à FeurDrop/);
+  assert.equal(r.categorie, "confirme");
+  assert.equal(r.preuve.code, "PC1");
+  assert.match(r.raison, /antérieur à la réception de l'étiquette/);
+  // un incident d'un ancien parcours n'est pas une anomalie de ce depot
+  const ancienRetour = analyse({ colis: colis(24, 48), evenements: [lp(2000, "RE1", "Retourné à l'expéditeur"), lp(2100, "PC1")] });
+  assert.equal(ancienRetour.categorie, "confirme");
   // une etiquette creee avant la reception du fichier est normale
   const etiquette = analyse({ colis: colis(5, 30), evenements: [lp(200, "DR1")] });
   assert.equal(etiquette.categorie, "non_confirme");
 });
 
-test("scans anterieurs a la reception de l'etiquette : jamais une preuve (cas reel)", () => {
-  // 6B00017912600 : etiquette recue par FeurDrop le 09/10 a 17:20 UTC, mais
-  // La Poste l'avait deja en transit la veille et en point de retrait le matin
+test("cas reel : en point de retrait avant la reception de l'etiquette -> depot confirme, avec les deux dates", () => {
+  // 6B00017912600 : etiquette recue par FeurDrop le 09/10 a 17:20 UTC ; La
+  // Poste l'avait en transit la veille et en point de retrait le matin
   const r = analyseDepot({
     colis: { status: "dropped", created_at: "2026-10-09 17:20:59", dropped_at: "2026-10-09 18:44:15" },
     suivi: { trouve: 1 },
@@ -109,35 +113,26 @@ test("scans anterieurs a la reception de l'etiquette : jamais une preuve (cas re
     transporteur: LP,
     maintenant: Date.parse("2026-10-10T08:00:00Z"),
   });
-  assert.equal(r.categorie, "anomalie");
-  assert.equal(r.preuve, null);
-  assert.match(r.raison, /avant la réception/);
+  assert.equal(r.categorie, "confirme");
+  assert.equal(r.preuve.code, "ET1");
+  assert.match(r.raison, /08\/10 13:34 \(scan antérieur à la réception de l'étiquette, le 09\/10 19:20\)/);
 });
 
-test("boite jaune : l'ancien parcours n'est ni une preuve ni une anomalie", () => {
-  const bj = (evenements) =>
-    analyseDepot({
-      colis: { type: "bj", status: "dropped", created_at: "2026-10-09 12:50:15", dropped_at: "2026-10-09 14:47:15" },
-      suivi: { trouve: 1 },
-      evenements: evenements.map(versEvenement),
-      transporteur: LP,
-      maintenant: Date.parse("2026-10-09T20:00:00Z"),
-    });
-  // cas reel 6Y11147684428 : en point relais le matin, etiquette recue a 12:50 UTC
-  const ancien = [
-    { code: "AG1", label: "Votre colis est disponible dans votre point de retrait", date: "2026-10-09T10:57:00+02:00" },
-    { code: "MD1", label: "Votre colis est sur son site de distribution.", date: "2026-10-09T08:35:31+02:00" },
-    { code: "ET1", label: "Votre colis est en transit sur nos plateformes logistiques.", date: "2026-10-08T23:23:31+02:00" },
-    { code: "DR1", label: "Votre Colissimo va bientôt nous être confié !", date: "2026-10-08T20:11:00+02:00" },
-  ];
-  const r = bj(ancien);
-  assert.equal(r.categorie, "non_confirme");
-  assert.equal(r.preuve, null);
-  assert.match(r.raison, /ignorés/);
-  // de nouveau en transit apres le drop : depot confirme par CE scan
-  const apres = bj([{ code: "ET1", label: "Votre colis est en transit sur nos plateformes logistiques.", date: "2026-10-09T19:30:00+02:00" }, ...ancien]);
-  assert.equal(apres.categorie, "confirme");
-  assert.equal(apres.preuve.le, "2026-10-09T19:30:00+02:00");
+test("boite jaune : en point relais puis de nouveau en transit, depot confirme sans anomalie", () => {
+  const r = analyseDepot({
+    colis: { type: "bj", status: "dropped", created_at: "2026-10-09 12:50:15", dropped_at: "2026-10-09 14:47:15" },
+    suivi: { trouve: 1 },
+    evenements: [
+      { code: "ET1", label: "Votre colis est en transit sur nos plateformes logistiques.", date: "2026-10-09T19:30:00+02:00" },
+      { code: "AG1", label: "Votre colis est disponible dans votre point de retrait", date: "2026-10-09T10:57:00+02:00" },
+      { code: "MD1", label: "Votre colis est sur son site de distribution.", date: "2026-10-09T08:35:31+02:00" },
+      { code: "DR1", label: "Votre Colissimo va bientôt nous être confié !", date: "2026-10-08T20:11:00+02:00" },
+    ].map(versEvenement),
+    transporteur: LP,
+    maintenant: Date.parse("2026-10-09T20:00:00Z"),
+  });
+  assert.equal(r.categorie, "confirme");
+  assert.equal(r.preuve.code, "MD1");
 });
 
 test("incidents : retour, non distribuable ; un probleme resolu n'en est plus un", () => {
@@ -157,13 +152,13 @@ test("statut transporteur non reconnu : verification necessaire, pas une preuve"
 });
 
 test("transporteur sans verification automatique : bloque, jamais « non depose »", () => {
-  const mr = transporteur("MR");
-  const r = analyse({ colis: colis(30), transporteur: mr, suivi: null, evenements: [] });
+  const ups = transporteur("UPS");
+  const r = analyse({ colis: colis(30), transporteur: ups, suivi: null, evenements: [] });
   assert.equal(r.categorie, "bloque");
   assert.equal(r.libelle, "Vérification bloquée");
-  assert.match(r.raison, /Cloudflare/);
+  assert.match(r.raison, /Access Denied/);
   assert.equal(r.manuel, true);
-  assert.ok(mr.lien("1234567890").includes("1234567890"), "lien officiel avec le numero");
+  assert.ok(ups.lien("1Z999AA10123456784").includes("1Z999AA10123456784"), "lien officiel avec le numero");
 });
 
 test("transporteur en pause : bloque, et on dit jusqu'a quand", () => {
@@ -182,22 +177,22 @@ test("API La Poste non configuree : le dire", () => {
 });
 
 test("constats faits a la main sur la page officielle", () => {
-  const mr = transporteur("MR");
+  const ups = transporteur("UPS");
   const constat = (h, code, extra = {}) => ({ survenuLe: isoIlYa(h), code, source: "manuel", ...extra });
-  const pris = analyse({ colis: colis(30), transporteur: mr, evenements: [constat(1, "MANUEL_PRIS", { physique: true, etape: "in_transit" })] });
+  const pris = analyse({ colis: colis(30), transporteur: ups, evenements: [constat(1, "MANUEL_PRIS", { physique: true, etape: "in_transit" })] });
   assert.equal(pris.categorie, "confirme");
   assert.match(pris.raison, /constatée à la main/);
-  const pasEncore = analyse({ colis: colis(30), transporteur: mr, evenements: [constat(1, "MANUEL_PAS_ENCORE", { etape: "info_received" })] });
+  const pasEncore = analyse({ colis: colis(30), transporteur: ups, evenements: [constat(1, "MANUEL_PAS_ENCORE", { etape: "info_received" })] });
   assert.equal(pasEncore.categorie, "non_confirme");
-  const perime = analyse({ colis: colis(80), transporteur: mr, evenements: [constat(30, "MANUEL_PAS_ENCORE", { etape: "info_received" })] });
+  const perime = analyse({ colis: colis(80), transporteur: ups, evenements: [constat(30, "MANUEL_PAS_ENCORE", { etape: "info_received" })] });
   assert.match(perime.raison, /à revérifier/);
   assert.equal(perime.enRetard, true);
-  const probleme = analyse({ colis: colis(30), transporteur: mr, evenements: [constat(1, "MANUEL_PROBLEME", { incident: "Problème signalé", etape: "exception" })] });
+  const probleme = analyse({ colis: colis(30), transporteur: ups, evenements: [constat(1, "MANUEL_PROBLEME", { incident: "Problème signalé", etape: "exception" })] });
   assert.equal(probleme.categorie, "anomalie");
   // le dernier constat fait foi
   const corrige = analyse({
     colis: colis(30),
-    transporteur: mr,
+    transporteur: ups,
     evenements: [constat(1, "MANUEL_PRIS", { physique: true, etape: "in_transit" }), constat(5, "MANUEL_PAS_ENCORE", { etape: "info_received" })],
   });
   assert.equal(corrige.categorie, "confirme");

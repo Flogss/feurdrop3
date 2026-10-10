@@ -16,16 +16,15 @@
 //   bloque        "Verification bloquee" : le site du transporteur refuse les
 //                 verifications automatiques, ou il a demande une pause. Ce
 //                 n'est PAS "non depose" : rien n'a pu etre lu ;
-//   anomalie      retour, non distribuable, probleme signale, ou scans
-//                 anterieurs a la reception du colis (numero reutilise ?) --
-//                 sauf pour une boite jaune : son suivi montre souvent un
-//                 ancien parcours (deja en point relais, puis de nouveau en
-//                 transit), c'est attendu. Ces scans-la sont ignores, ils ne
-//                 prouvent rien et n'alertent pas.
+//   anomalie      retour, non distribuable, probleme signale (apres la
+//                 reception de l'etiquette).
 //
 // Regle d'or : jamais "confirme" sans un evenement physique date. Un code
 // inconnu ne prouve rien. "Livre" prouve que le colis a circule, mais la
 // preuve affichee reste le scan de prise en charge quand il existe.
+// Un scan physique ANTERIEUR a la reception de l'etiquette compte aussi
+// (courant chez FeurDrop : boites jaunes deja en point relais, puis de
+// nouveau en transit) ; la raison le dit, avec les deux dates.
 
 const { jourParis, ajouteJours, jourDeLaSemaine } = require("../dates");
 
@@ -48,11 +47,11 @@ const ETAPES_FR = {
 };
 
 const HEURE = 3600 * 1000;
-// Un scan physique AVANT que FeurDrop ait recu l'etiquette ne peut pas etre son
-// depot (numero reutilise, mauvais numero) : les dates La Poste portent leur
-// fuseau, la marge ne couvre que les ecarts d'horloge. (Vu sur un vrai colis :
-// "disponible au retrait" le matin, etiquette recue par FeurDrop l'apres-midi.)
+// "Avant la reception de l'etiquette" : les dates La Poste portent leur
+// fuseau, la marge ne couvre que les ecarts d'horloge.
 const MARGE_ANCIEN = 2 * HEURE;
+
+const PREUVE_FR = { in_transit: "Pris en charge", out_for_delivery: "En cours de livraison", available_for_pickup: "En point de retrait" };
 const CONSTAT_PERIME = 24 * HEURE; // un "pas encore pris en charge" constate a la main est a refaire le lendemain
 
 const sqlVersMs = (s) => (s ? Date.parse(`${String(s).replace(" ", "T")}Z`) : null);
@@ -110,15 +109,13 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     .map((e) => ({ ...e, ms: versMs(e.survenuLe) }))
     .sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity) || (b.ordre ?? 0) - (a.ordre ?? 0));
   const ancien = (e) => seuilAncien != null && e.ms != null && e.ms < seuilAncien;
-  const recents = tous.filter((e) => !ancien(e));
   // le constat manuel le plus recent fait foi parmi les constats
-  const constats = recents.filter((e) => e.source === "manuel");
-  const dernierConstat = constats[0] || null;
-  const transporteurs = recents.filter((e) => e.source !== "manuel");
-  const retenus = [...transporteurs, ...(dernierConstat ? [dernierConstat] : [])].sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity));
+  const dernierConstat = tous.find((e) => e.source === "manuel") || null;
+  const lusTransporteur = tous.filter((e) => e.source !== "manuel");
+  const retenus = [...lusTransporteur, ...(dernierConstat ? [dernierConstat] : [])].sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity));
 
-  const dernier = decrit(transporteurs[0] || tous.find((e) => e.source !== "manuel") || null);
-  const livre = transporteurs.some((e) => e.etape === "delivered" && !e.incident);
+  const dernier = decrit(lusTransporteur[0] || null);
+  const livre = lusTransporteur.some((e) => e.etape === "delivered" && !e.incident);
   const commun = {
     dernierEvenement: dernier,
     dernierStatut: dernier ? { etape: dernier.etape, libelle: ETAPES_FR[dernier.etape] || "Statut non reconnu" } : null,
@@ -132,7 +129,8 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   // --- incidents ----------------------------------------------------------------
   const preuves = retenus.filter((e) => e.ms != null && e.physique).sort((a, b) => a.ms - b.ms || (a.ordre ?? 0) - (b.ordre ?? 0));
   const preuve = decrit(preuves.find((e) => e.etape !== "delivered") || preuves[0]);
-  const incidents = retenus.filter((e) => e.incident);
+  // (un incident d'avant la reception de l'etiquette appartient a un ancien parcours)
+  const incidents = retenus.filter((e) => e.incident && !ancien(e));
   if (incidents.length) {
     const i = incidents[0];
     // un "probleme en cours" depasse par une suite normale (livraison,
@@ -149,21 +147,11 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     const p = preuves.find((e) => e.etape !== "delivered") || preuves[0];
     if (p.source === "manuel") return resultat("confirme", `Prise en charge constatée à la main sur la page officielle le ${heureLisible(p.ms)}.`, { preuve });
     const seulementLivre = preuves.every((e) => e.etape === "delivered");
+    const avant = ancien(p) ? ` (scan antérieur à la réception de l'étiquette, le ${heureLisible(recuMs)})` : "";
     const raison = seulementLivre
-      ? `Livré le ${heureLisible(preuve.ms)} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé.`
-      : `Pris en charge le ${heureLisible(preuve.ms)} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}.`;
+      ? `Livré le ${heureLisible(preuve.ms)}${avant} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé.`
+      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${heureLisible(preuve.ms)}${avant} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}.`;
     return resultat("confirme", raison, { preuve });
-  }
-
-  // --- incoherences -------------------------------------------------------------
-  const boiteJaune = colis.type === "bj";
-  const anciensPhysiques = tous.filter((e) => ancien(e) && e.physique && e.source !== "manuel");
-  if (anciensPhysiques.length && !boiteJaune) {
-    const n = anciensPhysiques.length;
-    return resultat(
-      "anomalie",
-      `Suivi antérieur à FeurDrop : ${n} scan${n > 1 ? "s" : ""} du transporteur avant la réception de l'étiquette (dernier le ${heureLisible(anciensPhysiques[0].ms)}, étiquette reçue le ${heureLisible(recuMs)}). Numéro réutilisé ou mauvais numéro ?`
-    );
   }
 
   // --- constat manuel "pas encore" ----------------------------------------------
@@ -177,17 +165,7 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   }
 
   // --- etiquette seulement ------------------------------------------------------
-  // (une etiquette creee AVANT que FeurDrop recoive le fichier est normale :
-  // l'expediteur l'imprime avant de l'envoyer -- elle compte, meme ancienne)
-  const lusTransporteur = tous.filter((e) => e.source !== "manuel");
   const informatifs = lusTransporteur.filter((e) => e.etape === "info_received");
-  if (boiteJaune && anciensPhysiques.length) {
-    const ignores = "les scans d'avant la réception de l'étiquette (ancien parcours, normal pour une boîte jaune) sont ignorés";
-    const raison = retard
-      ? `Aucun scan de prise en charge ${depuis} h après le drop ; ${ignores}.`
-      : `Pas encore de scan après le drop (il y a ${depuis ?? "?"} h : délai normal, premier scan attendu sous ${delaiHeures} h) ; ${ignores}.`;
-    return resultat("non_confirme", raison, { enRetard: retard });
-  }
   if (informatifs.length) {
     const raison = retard
       ? `Aucun scan de prise en charge ${depuis} h après le drop : le transporteur ne connaît que l'étiquette.`
@@ -222,4 +200,4 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   );
 }
 
-module.exports = { analyseDepot, enRetard, LIBELLES, ETAPES_FR, versMs, MARGE_ANCIEN };
+module.exports = { analyseDepot, enRetard, LIBELLES, ETAPES_FR, versMs };

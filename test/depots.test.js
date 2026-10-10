@@ -220,14 +220,12 @@ test("redemarrage : la file reprend la ou elle en etait", async () => {
   depots = relance;
 });
 
-test("Mondial Relay, UPS, DHL : jamais appeles, « Vérification bloquée » avec le lien officiel, constat a la main", async () => {
-  const mr = drope("12345678", { carrier: "MR", heures: 30 });
-  const ups = drope("1Z999AA10123456784", { carrier: "UPS" });
+test("UPS, DHL : jamais appeles, « Vérification bloquée » avec le lien officiel, constat a la main", async () => {
+  const ups = drope("1Z999AA10123456784", { carrier: "UPS", heures: 30 });
   const dhl = drope("JJD0146000128653732", { carrier: "DHL" });
   await depots.synchronise();
   assert.equal(faux.appels.length, 0);
   for (const [id, numero, raison] of [
-    [mr, "12345678", /Cloudflare/],
     [ups, "1Z999AA10123456784", /Access Denied/],
     [dhl, "JJD0146000128653732", /blocked/],
   ]) {
@@ -238,19 +236,33 @@ test("Mondial Relay, UPS, DHL : jamais appeles, « Vérification bloquée » ave
     assert.ok(l.lien.includes(numero), l.lien);
     assert.equal(suivi(numero).prochaine_le, null, "jamais dans la file automatique");
   }
-  assert.equal(ligne(mr).attention, true, "drope il y a 30 h : a constater");
-  assert.equal(ligne(ups).attention, false, "drope il y a 2 h : trop tot");
+  assert.equal(ligne(ups).attention, true, "drope il y a 30 h : a constater");
+  assert.equal(ligne(dhl).attention, false, "drope il y a 2 h : trop tot");
   assert.equal(depots.vue().compteurs.aConstater, 1);
-  assert.equal((await echec(depots.verifieColis(mr))).status, 409);
+  assert.equal((await echec(depots.verifieColis(ups))).status, 409);
 
-  assert.equal(depots.constate(mr, "pris").controle.categorie, "confirme");
-  assert.match(ligne(mr).controle.raison, /constatée à la main/);
+  assert.equal(depots.constate(ups, "pris").controle.categorie, "confirme");
+  assert.match(ligne(ups).controle.raison, /constatée à la main/);
   // le dernier constat fait foi (une erreur de clic se corrige)
-  assert.equal(depots.constate(mr, "pas_encore").controle.categorie, "non_confirme");
-  depots.constate(mr, "annule");
-  assert.equal(ligne(mr).controle.categorie, "bloque");
-  assert.equal(depots.constate(mr, "probleme").controle.categorie, "anomalie");
-  assert.equal((await echec(Promise.resolve().then(() => depots.constate(ups, "peut-etre")))).status, 400);
+  assert.equal(depots.constate(ups, "pas_encore").controle.categorie, "non_confirme");
+  depots.constate(ups, "annule");
+  assert.equal(ligne(ups).controle.categorie, "bloque");
+  assert.equal(depots.constate(ups, "probleme").controle.categorie, "anomalie");
+  assert.equal((await echec(Promise.resolve().then(() => depots.constate(dhl, "peut-etre")))).status, 400);
+  assert.equal(faux.appels.length, 0);
+});
+
+test("Mondial Relay n'est pas controle : ni ligne, ni appel, ni constat, seulement compte", async () => {
+  const mr = drope("4278870015", { carrier: "MR", heures: 30 });
+  drope("12345678", { carrier: "MR" });
+  await depots.synchronise();
+  const v = depots.vue();
+  assert.equal(v.lignes.length, 0);
+  assert.equal(v.compteurs.bloque, 0);
+  assert.equal(v.compteurs.aConstater, 0);
+  assert.deepEqual(v.compteurs.horsControle, [{ code: "MR", nom: "Mondial Relay", colis: 2 }]);
+  assert.equal((await echec(depots.verifieColis(mr))).status, 409);
+  assert.equal((await echec(Promise.resolve().then(() => depots.constate(mr, "pris")))).status, 409);
   assert.equal(faux.appels.length, 0);
 });
 
@@ -324,43 +336,35 @@ test("la table des colis n'est jamais modifiee", async () => {
   faux.comporte("6A93000000002", "invalide");
   const a = drope("6A93000000001", { heures: 30 });
   drope("6A93000000002");
-  const mr = drope("87654321", { carrier: "MR" });
+  const ups = drope("1Z999AA10123456785", { carrier: "UPS" });
   const photo = () => JSON.stringify(db.db.prepare("SELECT * FROM colis ORDER BY id").all());
   const avant = photo();
   await depots.synchronise();
   await depots.verifieColis(a);
-  depots.constate(mr, "pris");
+  depots.constate(ups, "pris");
   depots.relance();
   await depots.synchronise();
   assert.equal(ligne(a).controle.categorie, "anomalie");
   assert.equal(photo(), avant);
 });
 
-test("boite jaune : l'ancien parcours ne bloque rien, la verification continue jusqu'au scan apres le drop", async () => {
+test("boite jaune deja en point relais avant la reception de l'etiquette : depot confirme, et c'est dit", async () => {
   const c = db.addColis("Alice", { fileId: "F-BJ", fileKind: "pdf", type: "bj", fileName: "BOITEJAUNE6Y11147788515.pdf" });
   db.dropColis(c.id);
   db.db.prepare("UPDATE colis SET created_at = datetime('now', '-10 hours'), dropped_at = datetime('now', '-8 hours') WHERE id = ?").run(c.id);
-  // deja livre en point relais AVANT que FeurDrop recoive l'etiquette
-  faux.suivi("6Y11147788515", [ev(20, "DI1", "Votre colis a été livré"), ev(22, "AG1"), ev(30, "ET1"), ev(34, "DR1")], { isFinal: true });
+  faux.suivi("6Y11147788515", [ev(1, "ET1", "Votre colis est en transit"), ev(22, "AG1", "Votre Colissimo vous attend dans votre point de retrait."), ev(34, "DR1")]);
   await depots.synchronise();
   assert.equal(faux.appels.length, 1);
-  let l = ligne(c.id);
-  assert.equal(l.controle.categorie, "non_confirme");
-  assert.match(l.controle.raison, /boîte jaune/);
-  assert.ok(suivi("6Y11147788515").prochaine_le, "l'ancien parcours (livre) n'arrete pas les verifications");
-  // apres le drop : de nouveau en transit -- c'est la preuve
-  faux.suivi("6Y11147788515", [ev(2, "ET1", "Votre colis est en transit"), ev(20, "DI1", "Votre colis a été livré"), ev(22, "AG1"), ev(30, "ET1"), ev(34, "DR1")]);
-  rendDu();
-  await depots.synchronise();
-  l = ligne(c.id);
+  const l = ligne(c.id);
   assert.equal(l.controle.categorie, "confirme");
-  assert.equal(l.controle.preuve.code, "ET1");
+  assert.equal(l.controle.preuve.code, "AG1");
+  assert.match(l.controle.raison, /En point de retrait le .* antérieur à la réception de l'étiquette/);
 });
 
 test("les routes de la page", async () => {
   faux.suivi("6A94000000001", [ev(1, "PC1")]);
   const id = drope("6A94000000001");
-  const mr = drope("11223344", { carrier: "MR" });
+  const dhl = drope("JJD0146000128653733", { carrier: "DHL" });
   const app = await demarreApp();
   try {
     let r = await app.appel("/api/depots");
@@ -371,11 +375,11 @@ test("les routes de la page", async () => {
     r = await app.appel(`/api/depots/${id}/verifier`, { methode: "POST" });
     assert.equal(r.status, 200);
     assert.equal(r.json.controle.categorie, "confirme");
-    r = await app.appel(`/api/depots/${mr}/verifier`, { methode: "POST" });
+    r = await app.appel(`/api/depots/${dhl}/verifier`, { methode: "POST" });
     assert.equal(r.status, 409);
-    r = await app.appel(`/api/depots/${mr}/constat`, { methode: "POST", corps: { resultat: "pris" } });
+    r = await app.appel(`/api/depots/${dhl}/constat`, { methode: "POST", corps: { resultat: "pris" } });
     assert.equal(r.json.controle.categorie, "confirme");
-    r = await app.appel(`/api/depots/${mr}/constat`, { methode: "POST", corps: { resultat: "rien" } });
+    r = await app.appel(`/api/depots/${dhl}/constat`, { methode: "POST", corps: { resultat: "rien" } });
     assert.equal(r.status, 400);
     r = await app.appel("/api/depots/relancer", { methode: "POST" });
     assert.equal(r.status, 202);

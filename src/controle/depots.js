@@ -1,7 +1,7 @@
 const { db, transaction, getSetting, setSetting } = require("../db");
 const { suiviDuColis } = require("../suiviColis");
-const { transporteur: infoTransporteur, METHODES_AUTOMATIQUES } = require("./transporteurs");
-const { analyseDepot, versMs, MARGE_ANCIEN } = require("./analyse");
+const { transporteur: infoTransporteur, METHODES_AUTOMATIQUES, NON_CONTROLES } = require("./transporteurs");
+const { analyseDepot, versMs } = require("./analyse");
 const laposte = require("./laposte");
 
 // Controle des depots : pour chaque colis DROPE qui a un numero de suivi, ce
@@ -46,12 +46,14 @@ function colisDropes() {
     .all(`-${reglages().affichageJours} days`);
   const avec = [];
   let sansNumero = 0;
+  const horsControle = {};
   for (const colis of lignes) {
     const suivi = suiviDuColis(colis);
-    if (suivi) avec.push({ colis, suivi, transporteur: infoTransporteur(suivi.transporteur) });
-    else sansNumero += 1;
+    if (!suivi) sansNumero += 1;
+    else if (NON_CONTROLES[suivi.transporteur]) horsControle[suivi.transporteur] = (horsControle[suivi.transporteur] || 0) + 1;
+    else avec.push({ colis, suivi, transporteur: infoTransporteur(suivi.transporteur) });
   }
-  return { avec, sansNumero };
+  return { avec, sansNumero, horsControle };
 }
 
 function parNumero(liste) {
@@ -129,18 +131,12 @@ function metEnPause(methode, err) {
 
 // D'apres ce que l'on sait deja : rien de plus une fois livre ou en incident
 // definitif ; rarement une fois le depot prouve ; souvent tant qu'il ne l'est
-// pas (les premiers jours), puis plus calmement. Seuls comptent les evenements
-// posterieurs a la reception de l'etiquette : l'ancien parcours d'une boite
-// jaune (deja livre en point relais) ne doit pas arreter les verifications.
-function planifie(numero, { encoreAffiche = true, dropeMs = null, recuMs = null } = {}) {
+// pas (les premiers jours), puis plus calmement.
+function planifie(numero, { encoreAffiche = true, dropeMs = null } = {}) {
   if (!encoreAffiche) return null;
   const s = db.prepare("SELECT final FROM controle_suivis WHERE numero = ?").get(numero);
-  const seuil = recuMs ? new Date(recuMs - MARGE_ANCIEN).toISOString() : null;
-  const evts = db
-    .prepare("SELECT etape, physique, incident, code, survenu_utc FROM controle_evenements WHERE numero = ? AND source != 'manuel'")
-    .all(numero)
-    .filter((e) => !seuil || !e.survenu_utc || e.survenu_utc >= seuil);
-  const fini = (s?.final && evts.some((e) => e.physique)) || evts.some((e) => (e.etape === "delivered" && !e.incident) || ["RE1", "DI2"].includes(e.code));
+  const evts = db.prepare("SELECT etape, physique, incident, code FROM controle_evenements WHERE numero = ? AND source != 'manuel'").all(numero);
+  const fini = s?.final || evts.some((e) => (e.etape === "delivered" && !e.incident) || ["RE1", "DI2"].includes(e.code));
   if (fini) return null;
   const prouve = evts.some((e) => e.physique);
   const age = dropeMs ? Date.now() - dropeMs : 0;
@@ -179,7 +175,7 @@ function suiviDe(numero, { suivi, transporteur }) {
  * ignores (une relecture ne double rien) ; l'etat est toujours recalcule a
  * partir de TOUS les evenements gardes.
  */
-function enregistreLecture(numero, lecture, { encoreAffiche = true, dropeMs = null, recuMs = null } = {}) {
+function enregistreLecture(numero, lecture, { encoreAffiche = true, dropeMs = null } = {}) {
   return transaction(() => {
     const ajoute = db.prepare(
       `INSERT OR IGNORE INTO controle_evenements
@@ -210,7 +206,7 @@ function enregistreLecture(numero, lecture, { encoreAffiche = true, dropeMs = nu
       `UPDATE controle_suivis SET trouve = ?, final = ?, produit = COALESCE(?, produit), verifie_le = ?, essai_le = ?,
          essais = 0, erreur = NULL, code_erreur = NULL WHERE numero = ?`
     ).run(lecture.trouve ? 1 : 0, lecture.final ? 1 : 0, lecture.produit, maintenantSql(), maintenantSql(), numero);
-    db.prepare("UPDATE controle_suivis SET prochaine_le = ? WHERE numero = ?").run(planifie(numero, { encoreAffiche, dropeMs, recuMs }), numero);
+    db.prepare("UPDATE controle_suivis SET prochaine_le = ? WHERE numero = ?").run(planifie(numero, { encoreAffiche, dropeMs }), numero);
     return nouveaux;
   });
 }
@@ -231,11 +227,10 @@ async function verifieNumeros(methode, numeros, { bilan, affiches }) {
     const numero = numeros[i];
     const porteurs = affiches.get(numero) || [];
     const dropeMs = porteurs.length ? Math.min(...porteurs.map((p) => sqlVersMs(p.colis.dropped_at))) : null;
-    const recuMs = porteurs.length ? Math.min(...porteurs.map((p) => sqlVersMs(p.colis.created_at))) : null;
     if (i > 0) await attends(intervalleMs);
     try {
       const lecture = await adaptateur.verifie(numero);
-      bilan.nouveauxEvenements += enregistreLecture(numero, lecture, { encoreAffiche: porteurs.length > 0, dropeMs, recuMs });
+      bilan.nouveauxEvenements += enregistreLecture(numero, lecture, { encoreAffiche: porteurs.length > 0, dropeMs });
       bilan.verifies += 1;
       passageres = 0;
       noteReussite(methode);
@@ -329,6 +324,7 @@ function colisAvecSuivi(colisId) {
   if (colis.status !== "dropped") throw Object.assign(new Error("Ce colis n'est pas dropé : rien à contrôler"), { status: 409 });
   const suivi = suiviDuColis(colis);
   if (!suivi) throw Object.assign(new Error("Aucun numéro de suivi lisible pour ce colis"), { status: 409 });
+  if (NON_CONTROLES[suivi.transporteur]) throw Object.assign(new Error(NON_CONTROLES[suivi.transporteur]), { status: 409 });
   return { colis, suivi, transporteur: infoTransporteur(suivi.transporteur) };
 }
 
@@ -349,7 +345,7 @@ async function verifieColis(colisId) {
   if (!s?.verifie_le || Date.now() - sqlVersMs(s.verifie_le) > 2 * MINUTE) {
     try {
       const lecture = await adaptateur.verifie(x.suivi.numero);
-      enregistreLecture(x.suivi.numero, lecture, { dropeMs: sqlVersMs(x.colis.dropped_at), recuMs: sqlVersMs(x.colis.created_at) });
+      enregistreLecture(x.suivi.numero, lecture, { dropeMs: sqlVersMs(x.colis.dropped_at) });
       noteReussite(transporteur.methode);
     } catch (err) {
       if (err.type === "limite" || err.type === "bloque") metEnPause(transporteur.methode, err);
@@ -443,11 +439,13 @@ function contexte() {
 }
 
 function vue() {
-  const { avec, sansNumero } = colisDropes();
+  const { avec, sansNumero, horsControle } = colisDropes();
   const { suivis, evenements } = lignesSuivis(new Set(avec.map((x) => x.suivi.numero)));
   const { pauses, configure } = contexte();
   const lignes = avec.map((x) => ligneDe(x, suivis.get(x.suivi.numero), evenements.get(x.suivi.numero), pauses, configure));
   const compteurs = { confirme: 0, non_confirme: 0, a_verifier: 0, bloque: 0, anomalie: 0, nonConfirmeHorsDelai: 0, aConstater: 0, attention: 0, total: lignes.length, sansNumero };
+  // les transporteurs non controles (Mondial Relay) : seulement comptes
+  compteurs.horsControle = Object.entries(horsControle).map(([code, colis]) => ({ code, nom: infoTransporteur(code).nom, colis }));
   for (const l of lignes) {
     compteurs[l.controle.categorie] += 1;
     if (l.controle.categorie === "non_confirme" && l.controle.enRetard) compteurs.nonConfirmeHorsDelai += 1;
