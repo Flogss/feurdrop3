@@ -5,6 +5,7 @@
 
 const impColis = new Map(); // id -> colis tel que charge, pour pre-remplir
 let impTransporteurs = [];
+let impAFaire = null; // le dernier resume "a imprimer" (pour « Choisir »)
 // le dernier contenu de chaque categorie depliee : il s'affiche aussitot au
 // rafraichissement, sans repli ni squelette, puis se met a jour
 const impMemoire = new Map();
@@ -26,6 +27,7 @@ async function loadImprime() {
   }
 
   impTransporteurs = aFaire.transporteurs || [];
+  impAFaire = aFaire;
   $("imp-total").textContent =
     aFaire.total > 0
       ? `${pluriel(aFaire.total, "étiquette", "étiquettes")} à imprimer${aFaire.noted > 0 ? ` · ${pluriel(aFaire.noted, "annotée", "annotées")}` : ""}`
@@ -36,6 +38,7 @@ async function loadImprime() {
   // 210 mm, dans un PDF qui ne se melange pas au reste.
   const thermiques = aFaire.categories.filter((c) => !c.roll).reduce((sum, c) => sum + c.count, 0);
   $("imp-all").disabled = thermiques === 0;
+  $("imp-choisir").disabled = thermiques === 0;
   const compteur = $("imp-all-count");
   if (compteur.textContent !== (thermiques > 0 ? entier(thermiques) : "")) {
     compteur.textContent = thermiques > 0 ? entier(thermiques) : "";
@@ -522,4 +525,97 @@ async function lancerImpression(bouton, corps) {
 }
 
 $("imp-all").addEventListener("click", (e) => lancerImpression(e.currentTarget, { categorie: "*", scope: "new" }));
+
+// --- « Choisir » : les transporteurs a imprimer ----------------------------------
+// Une seule liasse avec les transporteurs coches (thermique 4x6 : les LIT
+// gardent leur categorie, ils sortent sur le rouleau). Le choix est retenu
+// d'une fois sur l'autre.
+const impChoix = { categories: [], selection: new Set() };
+
+function impChoixRetenu() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("imp-choix") || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function ouvreChoixImpression() {
+  impChoix.categories = (impAFaire?.categories || []).filter((c) => !c.roll && c.count > 0);
+  if (!impChoix.categories.length) return;
+  const codes = impChoix.categories.map((c) => c.code);
+  const retenu = [...impChoixRetenu()].filter((c) => codes.includes(c));
+  impChoix.selection = new Set(retenu.length ? retenu : codes);
+  rendChoixImpression();
+  const couche = $("imp-choix-sheet");
+  couche.classList.remove("closing");
+  couche.hidden = false;
+  haptique();
+  requestAnimationFrame(() => $("imp-choix-imprimer").focus({ preventScroll: true }));
+}
+
+function fermeChoixImpression() {
+  const couche = $("imp-choix-sheet");
+  if (couche.hidden) return;
+  couche.classList.add("closing");
+  setTimeout(() => {
+    couche.hidden = true;
+    couche.classList.remove("closing");
+  }, prefersReducedMotion ? 0 : 260);
+}
+
+function rendChoixImpression() {
+  const sel = impChoix.selection;
+  $("imp-choix-puces").innerHTML = impChoix.categories
+    .map(
+      (c) => `
+    <button class="tour-puce carrier" type="button" data-code="${escapeAttr(c.code)}" data-carrier="${escapeAttr(c.code)}" aria-pressed="${sel.has(c.code)}">
+      <i class="carrier-dot"></i><span>${escapeHtml(c.label)}</span><b>${entier(c.count)}</b>
+    </button>`
+    )
+    .join("");
+  const pris = impChoix.categories.filter((c) => sel.has(c.code));
+  const count = pris.reduce((n, c) => n + c.count, 0);
+  const notees = pris.reduce((n, c) => n + (c.noted || 0), 0);
+  $("imp-choix-tout").textContent = pris.length === impChoix.categories.length ? "Aucun" : "Tout";
+  $("imp-choix-resume").innerHTML = pris.length
+    ? `<b>${pluriel(count, "étiquette", "étiquettes")}</b> à imprimer${notees ? ` · ${pluriel(notees, "annotée", "annotées")} sur le dessus` : ""}`
+    : "Choisis au moins un transporteur.";
+  $("imp-choix-imprimer").disabled = pris.length === 0;
+}
+
+$("imp-choisir").addEventListener("click", ouvreChoixImpression);
+$("imp-choix-puces").addEventListener("click", (e) => {
+  const puce = e.target.closest(".tour-puce");
+  if (!puce) return;
+  const code = puce.dataset.code;
+  if (impChoix.selection.has(code)) impChoix.selection.delete(code);
+  else impChoix.selection.add(code);
+  haptique();
+  rendChoixImpression();
+});
+$("imp-choix-tout").addEventListener("click", () => {
+  const tous = impChoix.categories.map((c) => c.code);
+  impChoix.selection = new Set(impChoix.selection.size === tous.length ? [] : tous);
+  haptique();
+  rendChoixImpression();
+});
+$("imp-choix-sheet").addEventListener("click", (e) => {
+  if (e.target.closest("[data-imp-choix-fermer]")) fermeChoixImpression();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") fermeChoixImpression();
+});
+$("imp-choix-imprimer").addEventListener("click", () => {
+  const categories = impChoix.categories.map((c) => c.code).filter((c) => impChoix.selection.has(c));
+  if (!categories.length) return;
+  try {
+    localStorage.setItem("imp-choix", JSON.stringify(categories));
+  } catch {
+    /* navigation privee : le choix ne sera pas retenu */
+  }
+  fermeChoixImpression();
+  // (dans le meme geste que le clic : l'onglet du PDF n'est pas bloque)
+  lancerImpression($("imp-choisir"), { categories, scope: "new" });
+});
 

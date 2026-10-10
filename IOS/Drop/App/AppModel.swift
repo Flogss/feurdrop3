@@ -64,6 +64,7 @@ final class AppModel {
     @ObservationIgnored lazy var locker = LockerModel(app: self)
     @ObservationIgnored lazy var tracking = TrackingModel(app: self)
     @ObservationIgnored lazy var journal = JournalModel(app: self)
+    @ObservationIgnored lazy var depots = DepotsModel(app: self)
 
     init() {
         let enregistre = UserDefaults.standard.string(forKey: "drop.serveur").flatMap(URL.init(string:))
@@ -96,7 +97,10 @@ final class AppModel {
             async let colis: Void = dashboard.refresh()
             await locker.refresh()
             await colis
-        case .settings:
+        case .settings, .historique:
+            await dashboard.refresh()
+        case .depots:
+            // la page se relit elle-meme (toutes les 15 s) : ici, les colis seulement
             await dashboard.refresh()
         }
         #else

@@ -10,7 +10,8 @@ enum MacWindow {
 /// Les pages de la fenetre : trois onglets (comme le site), et les outils
 /// ouverts depuis les boutons de droite.
 enum MacPage: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, printing, stats, tracking, locker, settings
+    // (les deux derniers : ajoutes apres coup, pour garder les raccourcis)
+    case dashboard, printing, stats, tracking, locker, settings, depots, historique
 
     var id: String { rawValue }
 
@@ -24,6 +25,8 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
         case .tracking: "Suivi des colis"
         case .locker: "Mode locker"
         case .settings: "Réglages"
+        case .depots: "Contrôle des dépôts"
+        case .historique: "Historique"
         }
     }
 
@@ -35,6 +38,8 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
         case .tracking: "magnifyingglass"
         case .locker: "lock"
         case .settings: "gearshape"
+        case .depots: "flag"
+        case .historique: "clock"
         }
     }
 
@@ -55,6 +60,8 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
         case .tracking: "4"
         case .locker: "5"
         case .settings: "6"
+        case .depots: "7"
+        case .historique: "8"
         }
     }
 }
@@ -157,6 +164,20 @@ struct MacRootView: View {
                 LockerView()
                     .safeAreaInset(edge: .top, spacing: 0) { enTete("Mode locker", largeur: 1100) }
                     .frame(maxWidth: 1100)
+                    .frame(maxWidth: .infinity)
+            }
+        case .depots:
+            NavigationStack {
+                DepotsView()
+                    .safeAreaInset(edge: .top, spacing: 0) { enTete("Contrôle des dépôts", largeur: 1100) }
+                    .frame(maxWidth: 1100)
+                    .frame(maxWidth: .infinity)
+            }
+        case .historique:
+            NavigationStack {
+                HistoriqueView()
+                    .safeAreaInset(edge: .top, spacing: 0) { enTete("Historique", largeur: 820) }
+                    .frame(maxWidth: 820)
                     .frame(maxWidth: .infinity)
             }
         case .settings:

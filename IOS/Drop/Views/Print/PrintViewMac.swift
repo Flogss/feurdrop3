@@ -11,6 +11,7 @@ struct PrintViewMac: View {
     @Environment(AppModel.self) private var app
     @State private var edition: Parcel?
     @State private var aRetirer: Parcel?
+    @State private var choix = false
 
     private var model: PrintModel { app.printing }
 
@@ -20,6 +21,7 @@ struct PrintViewMac: View {
                 HStack(alignment: .bottom, spacing: 16) {
                     PageHeader("Imprimé")
                     Spacer()
+                    choisir
                     toutImprimer
                 }
                 Text(sousTitre)
@@ -59,6 +61,12 @@ struct PrintViewMac: View {
             ParcelEditSheet(parcel: colis)
                 .frame(minWidth: 480, minHeight: 540)
         }
+        .sheet(isPresented: $choix) {
+            PrintChoixSheet(categories: model.choixPossibles, retenu: model.choixRetenu) { codes in
+                Task { await model.printCarriers(codes) }
+            }
+            .frame(minWidth: 480, minHeight: 420)
+        }
         .confirmationDialog("Retirer ce colis ?", isPresented: Binding(get: { aRetirer != nil }, set: { if !$0 { aRetirer = nil } }), titleVisibility: .visible, presenting: aRetirer) { colis in
             Button("Retirer", role: .destructive) { Task { await model.delete(colis) } }
             Button("Annuler", role: .cancel) {}
@@ -69,6 +77,26 @@ struct PrintViewMac: View {
     }
 
     // MARK: En-tete
+
+    /// « Choisir » : les transporteurs a imprimer
+    private var choisir: some View {
+        let occupe = model.building.contains("choix")
+        return Button {
+            choix = true
+        } label: {
+            HStack(spacing: 8) {
+                if occupe { ProgressView().controlSize(.small) } else { Image(systemName: "square.stack.3d.up.fill") }
+                Text("Choisir")
+            }
+            .font(.headline)
+            .frame(height: 44)
+            .padding(.horizontal, 8)
+        }
+        .boutonVerre()
+        .disabled(model.thermalCount == 0 || occupe)
+        .help("Choisir les transporteurs à imprimer")
+        .padding(.bottom, 6)
+    }
 
     private var toutImprimer: some View {
         let n = model.thermalCount

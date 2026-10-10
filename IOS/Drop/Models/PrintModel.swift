@@ -47,6 +47,23 @@ final class PrintModel {
 
     var carriers: [CarrierOption] { pending?.transporteurs ?? [] }
 
+    /// ce que « Choisir » propose : la thermique en attente (sans les LIT)
+    var choixPossibles: [PrintCategory] {
+        pending?.categories.filter { !$0.roll && $0.count > 0 } ?? []
+    }
+
+    /// les transporteurs coches la derniere fois
+    var choixRetenu: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: "drop.impression.choix") ?? [])
+    }
+
+    /// « Choisir » : les transporteurs coches, dans une seule liasse
+    func printCarriers(_ codes: [String]) async {
+        guard !codes.isEmpty else { return }
+        UserDefaults.standard.set(codes, forKey: "drop.impression.choix")
+        await print(.carriers(codes), key: "choix")
+    }
+
     // MARK: Chargement
 
     func refresh() async {

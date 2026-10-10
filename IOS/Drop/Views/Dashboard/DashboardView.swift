@@ -11,6 +11,8 @@ enum Route: Hashable {
     case tracking
     case trackingLabel(TrackingLabel)
     case locker
+    case depots
+    case historique
 }
 
 struct DashboardView: View {
@@ -55,9 +57,6 @@ struct DashboardView: View {
                             .entrance(booted, index: 6)
                     }
 
-                    // tout en bas : l'historique de ce qui arrive aux colis
-                    HistoriqueCard()
-                        .entrance(booted, index: 7)
                 }
                 .padding(.horizontal, large ? 24 : 16)
                 .padding(.bottom, 24)
@@ -78,7 +77,7 @@ struct DashboardView: View {
         #if DEBUG
         // verification au simulateur : `-DropPage locker` ouvre une page
         .onAppear {
-            let pages: [String: Route] = ["settings": .settings, "prices": .prices, "merge": .mergeOther, "tracking": .tracking, "locker": .locker]
+            let pages: [String: Route] = ["settings": .settings, "prices": .prices, "merge": .mergeOther, "tracking": .tracking, "locker": .locker, "depots": .depots, "historique": .historique]
             if path.isEmpty, let nom = UserDefaults.standard.string(forKey: "DropPage"), let route = pages[nom] { path = [route] }
         }
         #endif
@@ -120,6 +119,8 @@ struct DashboardView: View {
             case .tracking: TrackingView()
             case .trackingLabel(let label): TrackingDetailView(label: label)
             case .locker: LockerView()
+            case .depots: DepotsView()
+            case .historique: HistoriqueView()
             }
         }
         .fondVivant()

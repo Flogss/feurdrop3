@@ -57,9 +57,13 @@ final class DashboardModel {
             app.reachedServer()
             applique(nouvelles)
             appliqueStock(stockServeur)
+            // l'historique (le dernier evenement, sous son bouton) et la pastille
+            // du controle des depots (au plus une fois par minute)
             async let historique: Void = app.journal.refresh()
+            async let depots: Void = app.depots.refreshResume()
             await app.locker.refreshCount()
             await historique
+            await depots
             markSeenIfNeeded()
         } catch {
             app.report(error)

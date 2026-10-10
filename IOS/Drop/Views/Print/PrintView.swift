@@ -106,9 +106,11 @@ struct PrintView: View {
     }
 }
 
-/// Le haut de l'onglet : combien d'etiquettes, et le grand bouton.
+/// Le haut de l'onglet : combien d'etiquettes, « Choisir » les transporteurs
+/// et le grand bouton.
 private struct PrintHeader: View {
     @Environment(AppModel.self) private var app
+    @State private var choix = false
 
     var body: some View {
         let model = app.printing
@@ -118,6 +120,25 @@ private struct PrintHeader: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.text2)
                 .contentTransition(.numericText())
+
+            HStack(spacing: 10) {
+            Button {
+                Haptics.selection()
+                choix = true
+            } label: {
+                Group {
+                    if model.building.contains("choix") {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "square.stack.3d.up.fill")
+                    }
+                }
+                .font(.headline)
+                .frame(width: 52, height: 52)
+            }
+            .boutonVerre(.rond)
+            .disabled(n == 0 || model.building.contains("choix"))
+            .accessibilityLabel("Choisir les transporteurs à imprimer")
 
             Button {
                 Task { await model.print(.allNew, key: "*") }
@@ -146,6 +167,14 @@ private struct PrintHeader: View {
             .boutonVerreFort(Theme.violetDeep)
             .disabled(n == 0 || model.building.contains("*"))
             .overlay { SparkBurst(trigger: model.celebration, count: 12).allowsHitTesting(false) }
+            }
+            .sheet(isPresented: $choix) {
+                PrintChoixSheet(categories: model.choixPossibles, retenu: model.choixRetenu) { codes in
+                    Task { await model.printCarriers(codes) }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
 
             if let pdf = model.lastPDF {
                 HStack(spacing: 10) {

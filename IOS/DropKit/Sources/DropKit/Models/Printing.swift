@@ -105,9 +105,12 @@ public struct ParcelPatchResult: Codable, Sendable, Equatable {
     public var appris: String?
 }
 
-/// `POST /api/print/build` : soit une categorie entiere, soit des colis precis.
+/// `POST /api/print/build` : une categorie entiere, plusieurs transporteurs
+/// choisis, ou des colis precis.
 public struct PrintRequest: Encodable, Sendable {
     public var categorie: String?
+    /// « Choisir » : les transporteurs coches, dans une seule liasse
+    public var categories: [String]? = nil
     public var ids: [Int]?
     public var scope: PrintScope
 
@@ -117,6 +120,11 @@ public struct PrintRequest: Encodable, Sendable {
 
     /// "Tout imprimer" : toute la thermique 4x6 (les LIT a part)
     public static let allNew = PrintRequest(categorie: "*", ids: nil, scope: .new)
+
+    /// les transporteurs choisis, jamais encore imprimes (thermique : sans les LIT)
+    public static func carriers(_ codes: [String]) -> PrintRequest {
+        PrintRequest(categorie: nil, categories: codes, ids: nil, scope: .new)
+    }
 
     public static func parcels(_ ids: [Int], scope: PrintScope) -> PrintRequest {
         PrintRequest(categorie: nil, ids: ids, scope: scope)

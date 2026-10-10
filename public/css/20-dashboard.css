@@ -465,6 +465,9 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
 .page-sub { margin-top: 5px; font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .page-titles { min-width: 0; }
 .page-cta { grid-column: 1 / -1; width: 100%; }
+/* Imprime : « Choisir » les transporteurs, a cote de « Tout imprimer » */
+.imp-ctas { display: flex; gap: 10px; }
+.imp-ctas #imp-all { flex: 1; }
 
 .back {
   position: relative;

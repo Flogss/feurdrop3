@@ -33,6 +33,8 @@ struct MacTopBar: View {
                     HStack(spacing: 10) {
                         LivePill(online: app.isOnline)
                         outil(.tracking, aide: "Suivi des colis (⌘4)")
+                        outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
+                        outil(.historique, aide: "Historique (⌘8)")
                         outil(.locker, aide: "Mode locker (⌘5)", pastille: app.locker.pairs.count)
                         outil(.settings, aide: "Réglages (⌘6)")
                     }
@@ -51,7 +53,7 @@ struct MacTopBar: View {
     }
 
     /// Un bouton rond en verre ; allume (teinte violette) quand sa page est ouverte.
-    private func outil(_ page: MacPage, aide: String, pastille: Int = 0) -> some View {
+    private func outil(_ page: MacPage, aide: String, pastille: Int = 0, teinte: Color = Theme.special) -> some View {
         let actif = selection == page
         return Button {
             selection = actif ? .dashboard : page
@@ -68,7 +70,7 @@ struct MacTopBar: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 5)
                             .frame(minWidth: 17, minHeight: 17)
-                            .background(Theme.special.gradient, in: .capsule)
+                            .background(teinte.gradient, in: .capsule)
                             .offset(x: 6, y: -4)
                             .transition(.scale.combined(with: .opacity))
                     }

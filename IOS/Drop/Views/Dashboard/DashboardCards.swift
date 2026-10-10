@@ -435,6 +435,11 @@ struct ToolsCard: View {
             outil(.tracking, symbole: "magnifyingglass", couleur: Theme.info, titre: "Suivi des colis",
                   sous: app.tracking.loaded ? Format.count(app.tracking.totalChecked, "numéro vérifié", "numéros vérifiés") : "Vérifier des numéros")
             Divider().padding(.leading, 62)
+            outil(.depots, symbole: "flag.fill", couleur: Theme.teal, titre: "Contrôle des dépôts", sous: sousDepots,
+                  pastille: app.depots.resume?.attention ?? 0, teintePastille: Theme.teal)
+            Divider().padding(.leading, 62)
+            outil(.historique, symbole: "clock.fill", couleur: Theme.violet, titre: "Historique", sous: sousHistorique)
+            Divider().padding(.leading, 62)
             outil(.locker, symbole: "lock.fill", couleur: Theme.special, titre: "Mode locker", sous: "Codes des spéciaux",
                   pastille: app.locker.pairs.count)
             Divider().padding(.leading, 62)
@@ -444,7 +449,21 @@ struct ToolsCard: View {
         .glassEffect(.regular.tint(.black.opacity(0.25)), in: .rect(cornerRadius: Theme.Radius.card))
     }
 
-    private func outil(_ route: Route, symbole: String, couleur: Color, titre: String, sous: String, pastille: Int = 0) -> some View {
+    /// la pastille dit combien de colis demandent un regard
+    private var sousDepots: String {
+        guard let c = app.depots.resume else { return "Preuves de prise en charge" }
+        if c.attention > 0 { return Format.count(c.attention, "colis à regarder", "colis à regarder") }
+        if c.total > 0 { return "\(Format.count(c.confirme, "dépôt confirmé", "dépôts confirmés")) sur \(Format.integer(c.total))" }
+        return "Preuves de prise en charge"
+    }
+
+    /// le dernier evenement, et quand
+    private var sousHistorique: String {
+        guard let e = app.journal.entrees.first else { return app.journal.loaded ? "Rien pour l'instant" : "Tout ce qui arrive aux colis" }
+        return "\(e.texte) · \(ilYa(e.at))"
+    }
+
+    private func outil(_ route: Route, symbole: String, couleur: Color, titre: String, sous: String, pastille: Int = 0, teintePastille: Color = Theme.special) -> some View {
         NavigationLink(value: route) {
             HStack(spacing: 14) {
                 Image(systemName: symbole)
@@ -455,7 +474,7 @@ struct ToolsCard: View {
                     .shadow(color: couleur.opacity(0.5), radius: 6)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(titre).font(.body.weight(.medium)).foregroundStyle(Theme.text)
-                    Text(sous).font(.caption).foregroundStyle(Theme.text3).contentTransition(.numericText())
+                    Text(sous).font(.caption).foregroundStyle(Theme.text3).lineLimit(1).contentTransition(.numericText())
                 }
                 Spacer()
                 if pastille > 0 {
@@ -464,7 +483,7 @@ struct ToolsCard: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Theme.special.gradient, in: .capsule)
+                        .background(teintePastille.gradient, in: .capsule)
                         .contentTransition(.numericText(value: Double(pastille)))
                 }
                 Image(systemName: "chevron.right")

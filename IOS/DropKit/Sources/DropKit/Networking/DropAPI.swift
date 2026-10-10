@@ -169,6 +169,41 @@ public struct DropAPI: Sendable {
         _ = try await client.raw(.delete, "/api/print/colis/\(id)")
     }
 
+    // MARK: - Controle des depots
+
+    /// La page : compteurs, etat de la file, lignes. Ne fait que lire la base
+    /// du serveur (aucun transporteur n'est interroge).
+    public func depots() async throws -> DepotsVue {
+        try await client.send(.get, "/api/depots", timeout: 30)
+    }
+
+    /// les compteurs seuls, pour la pastille du dashboard
+    public func depotsResume() async throws -> DepotsResume {
+        try await client.send(.get, "/api/depots/resume")
+    }
+
+    public func depot(_ colisID: Int) async throws -> DepotDetail {
+        try await client.send(.get, "/api/depots/\(colisID)")
+    }
+
+    /// « Vérifier » : une lecture tout de suite (refusee poliment si le
+    /// transporteur a demande une pause, ou s'il se verifie a la main)
+    public func verifieDepot(_ colisID: Int) async throws -> DepotDetail {
+        try await client.send(.post, "/api/depots/\(colisID)/verifier", timeout: 45)
+    }
+
+    /// ce qu'on a vu sur la page officielle (UPS, DHL...)
+    public func constateDepot(_ colisID: Int, _ choix: DepotConstatChoix) async throws -> DepotDetail {
+        struct Corps: Encodable, Sendable { let resultat: String }
+        return try await client.send(.post, "/api/depots/\(colisID)/constat", body: Corps(resultat: choix.rawValue))
+    }
+
+    /// « Relancer les vérifications en attente » : un passage en fond, au
+    /// rythme de La Poste ; la reponse part tout de suite.
+    public func relanceDepots() async throws {
+        _ = try await client.raw(.post, "/api/depots/relancer")
+    }
+
     // MARK: - Statistiques
 
     public func revenue() async throws -> RevenueSummary {

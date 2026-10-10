@@ -85,3 +85,44 @@ import Testing
     let rows = try d.decode(TrackingRows.self, from: Data(json.utf8))
     #expect(rows.rows.first?.milestone == .unknown)
 }
+
+// MARK: - Controle des depots et impression choisie
+
+@Test func controleDesDepotsSeDecode() throws {
+    // la forme exacte de GET /api/depots (cles en camelCase et en snake_case)
+    let json = """
+    {"etat":{"enCours":false,"derniereSynchro":"2026-10-10T01:05:00.000Z",
+      "dernierBilan":{"declencheur":"auto","verifies":12,"nouveauxEvenements":30,"erreurs":1,"reportes":0,"pauses":[]},
+      "derniereErreur":null,"file":{"enAttente":3},
+      "methodes":{"laposte":{"nom":"API La Poste (officielle)","configure":true,"pause":null,"derniereReussite":"2026-10-10 01:05:00"}},
+      "transporteurs":[{"code":"LP","nom":"La Poste","methode":"laposte","colis":2},{"code":"UPS","nom":"UPS","methode":"manuel","colis":1}],
+      "affichageJours":30,"delaiScanHeures":48},
+     "compteurs":{"confirme":1,"non_confirme":1,"a_verifier":0,"bloque":1,"anomalie":0,"nonConfirmeHorsDelai":0,"aConstater":1,"attention":1,"total":3,"sansNumero":2,
+      "horsControle":[{"code":"MR","nom":"Mondial Relay","colis":450}]},
+     "lignes":[{"colisId":7,"numero":"6A12345678901","expediteur":"Alice","transporteur":{"code":"LP","nom":"La Poste","methode":"laposte"},
+      "statutInterne":{"status":"dropped","libelle":"Dropé","dropeLe":"2026-10-09 18:44:15","imprimeLe":null,"paye":false},
+      "controle":{"categorie":"confirme","libelle":"Dépôt confirmé","raison":"Pris en charge le 09/10 20:30","enRetard":false,
+        "preuve":{"le":"2026-10-09T20:30:00+02:00","ms":1791570600000,"statut":"Votre colis a été déposé","lieu":null,"etape":"in_transit","code":"PC1","source":"laposte"},
+        "dernierEvenement":null,"dernierStatut":{"etape":"in_transit","libelle":"Pris en charge / en transit"},"constat":null,"livre":false},
+      "attention":false,"aConstater":false,"verifieLe":"2026-10-10 01:04:00","essaiLe":"2026-10-10 01:04:00","prochaineLe":null,"erreur":null,
+      "lien":"https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901"}]}
+    """
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let vue = try decoder.decode(DepotsVue.self, from: Data(json.utf8))
+    #expect(vue.compteurs.nonConfirme == 1)
+    #expect(vue.compteurs.nombre(.bloque) == 1)
+    #expect(vue.compteurs.horsControle?.first?.colis == 450)
+    #expect(vue.etat.laPoste?.configure == true)
+    #expect(vue.lignes.first?.controle.cat == .confirme)
+    #expect(vue.lignes.first?.controle.preuve?.code == "PC1")
+    #expect(vue.etat.transporteurs.last?.automatique == false)
+}
+
+@Test func impressionDesTransporteursChoisis() throws {
+    let data = try JSONEncoder().encode(PrintRequest.carriers(["MR", "LP"]))
+    let objet = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(objet["categories"] as? [String] == ["MR", "LP"])
+    #expect(objet["scope"] as? String == "new")
+    #expect(objet["categorie"] == nil)
+}

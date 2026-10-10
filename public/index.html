@@ -342,11 +342,17 @@
           <h1>Imprimé</h1>
           <p class="page-sub" id="imp-total">—</p>
         </div>
-        <button class="btn btn-primary btn-lg page-cta" id="imp-all" type="button">
-          <svg class="icon"><use href="#i-printer"/></svg>
-          <span>Tout imprimer</span>
-          <span class="btn-count" id="imp-all-count"></span>
-        </button>
+        <div class="page-cta imp-ctas">
+          <button class="btn btn-secondary btn-lg" id="imp-choisir" type="button" title="Choisir les transporteurs à imprimer">
+            <svg class="icon"><use href="#i-layers"/></svg>
+            <span>Choisir</span>
+          </button>
+          <button class="btn btn-primary btn-lg" id="imp-all" type="button">
+            <svg class="icon"><use href="#i-printer"/></svg>
+            <span>Tout imprimer</span>
+            <span class="btn-count" id="imp-all-count"></span>
+          </button>
+        </div>
       </header>
 
       <a class="banner banner-link" id="imp-last" href="#" target="_blank" rel="noopener" hidden></a>
@@ -826,6 +832,26 @@
       <button class="btn btn-secondary btn-lg" type="button" data-tour-fermer>Annuler</button>
       <button class="btn btn-primary btn-lg" type="button" id="tour-partir">
         <svg class="icon"><use href="#i-truck"/></svg><span>C'est parti</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Impression : les transporteurs a imprimer -->
+<div class="sheet-layer" id="imp-choix-sheet" hidden>
+  <div class="sheet-backdrop" data-imp-choix-fermer></div>
+  <div class="sheet tour-sheet" role="dialog" aria-modal="true" aria-labelledby="imp-choix-titre">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <div class="tour-sheet-head">
+      <h2 class="sheet-title" id="imp-choix-titre">Quoi imprimer ?</h2>
+      <button class="btn btn-sm btn-ghost" id="imp-choix-tout" type="button">Aucun</button>
+    </div>
+    <div class="tour-groupes"><div class="tour-choix" id="imp-choix-puces"></div></div>
+    <p class="tour-resume" id="imp-choix-resume" aria-live="polite"></p>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-lg" type="button" data-imp-choix-fermer>Annuler</button>
+      <button class="btn btn-primary btn-lg" type="button" id="imp-choix-imprimer">
+        <svg class="icon"><use href="#i-printer"/></svg><span>Imprimer</span>
       </button>
     </div>
   </div>

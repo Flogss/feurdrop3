@@ -115,24 +115,41 @@ router.get("/colis", (req, res) => {
 
 // --- Construction du PDF -----------------------------------------------------
 
-function rowsFor({ categorie, ids, scope }) {
+// Les annotes remontent en tete de la liasse entiere, pas seulement en tete
+// de leur transporteur : ce sont eux qu'on veut sur le dessus.
+const annotesDevant = (rows) => [...rows.filter((r) => r.note), ...rows.filter((r) => !r.note)];
+
+function rowsFor({ categorie, categories, ids, scope }) {
   if (Array.isArray(ids) && ids.length > 0) {
     return ids.map((id) => getColisById(Number(id))).filter((row) => row && row.file_id);
   }
+  if (Array.isArray(categories) && categories.length > 0) {
+    // « Choisir » : les transporteurs coches, dans une seule liasse. Les LIT
+    // sortent sur le rouleau 210 mm : ils ne se melangent pas au thermique.
+    const voulues = new Set(categories.map(String));
+    if (voulues.has("LIT")) throw new Error("les LIT sortent sur le rouleau : imprime-les à part");
+    return annotesDevant(
+      getPrintableSummary({ scope })
+        .filter((row) => voulues.has(row.carrier))
+        .flatMap((row) => getPrintableColis(row.carrier, { scope }))
+    );
+  }
   if (categorie === "LIT") return getLitPrintable({ scope });
   if (categorie === "*") {
-    const rows = getPrintableSummary({ scope }).flatMap((row) => getPrintableColis(row.carrier, { scope }));
-    // les annotes remontent en tete de la liasse entiere, pas seulement en
-    // tete de leur transporteur : ce sont eux qu'on veut sur le dessus
-    return [...rows.filter((r) => r.note), ...rows.filter((r) => !r.note)];
+    return annotesDevant(getPrintableSummary({ scope }).flatMap((row) => getPrintableColis(row.carrier, { scope })));
   }
   return getPrintableColis(categorie, { scope });
 }
 
 router.post("/build", routeAsync(async (req, res) => {
-  const { categorie = "*", ids = null, scope = "new" } = req.body || {};
+  const { categorie = "*", categories = null, ids = null, scope = "new" } = req.body || {};
+  let rows;
   try {
-    const rows = rowsFor({ categorie, ids, scope });
+    rows = rowsFor({ categorie, categories, ids, scope });
+  } catch (err) {
+    return fail(res, err);
+  }
+  try {
     if (rows.length === 0) return fail(res, new Error("aucune etiquette a imprimer"));
 
     // un lot de LIT sort sur le rouleau ; tout le reste au format thermique
@@ -153,7 +170,7 @@ router.post("/build", routeAsync(async (req, res) => {
     purge();
     // l'adresse du PDF suffit a le telecharger : un identifiant imprevisible
     const id = crypto.randomBytes(16).toString("base64url");
-    const nom = categorie === "*" ? "toutes" : String(categorie).toLowerCase();
+    const nom = Array.isArray(categories) && categories.length ? categories.join("-").toLowerCase() : categorie === "*" ? "toutes" : String(categorie).toLowerCase();
     // rien n'est marque ici : voir l'en-tete du fichier
     jobs.set(id, { pdf: built.pdf, name: `etiquettes-${nom}.pdf`, at: Date.now(), ids: built.printedIds, marque: false });
 
@@ -290,3 +307,5 @@ router.delete("/colis/:id", (req, res) => {
 });
 
 module.exports = router;
+// pour les tests : quelles etiquettes une demande d'impression prend
+module.exports.rowsFor = rowsFor;

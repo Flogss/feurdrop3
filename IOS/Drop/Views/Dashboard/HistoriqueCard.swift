@@ -1,11 +1,27 @@
 import SwiftUI
 import DropKit
 
-/// L'historique, tout en bas du dashboard : ce qui est arrive aux colis
-/// (recus, dropes, imprimes, retires, modifies...), du plus recent au plus
-/// ancien, groupe par jour. L'icone et sa couleur disent la nature ; a droite,
-/// le montant, l'heure et d'ou vient l'action (Telegram, site, app).
+/// L'historique, sur sa propre page (bouton « Historique » du dashboard) :
+/// ce qui est arrive aux colis (recus, dropes, imprimes, retires, modifies...),
+/// du plus recent au plus ancien, groupe par jour. L'icone et sa couleur
+/// disent la nature ; a droite, le montant, l'heure et d'ou vient l'action
+/// (Telegram, site, app).
+struct HistoriqueView: View {
+    var body: some View {
+        ScrollView {
+            HistoriqueCard(avecTitre: false)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+        }
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .navigationTitle("Historique")
+        .refreshable { await AppModel.shared.journal.refresh() }
+    }
+}
+
 struct HistoriqueCard: View {
+    /// sur sa page, le titre est celui de la page
+    var avecTitre = true
     @Environment(AppModel.self) private var app
 
     private var model: JournalModel { app.journal }
@@ -13,7 +29,7 @@ struct HistoriqueCard: View {
     var body: some View {
         @Bindable var model = app.journal
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader("Historique")
+            if avecTitre { SectionHeader("Historique") }
             filtres($model.filtre)
 
             if !model.loaded {
