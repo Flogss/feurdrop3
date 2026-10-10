@@ -48,7 +48,11 @@ window.addEventListener("focus", () => markSeen(true));
 // affiche. Les rafraichissements de fond n'animent jamais les graphiques : la
 // revelation des Stats ne se joue qu'en arrivant sur l'onglet.
 const CHARGEMENTS_PAR_VUE = {
-  dashboard: () => [loadStats(false), loadStock(), loadSpecialCount(), loadJournal()],
+  dashboard: () => [loadStats(false), loadStock(), loadSpecialCount(), loadDernierEvenement(), loadDepotsBadge()],
+  // la page de l'historique suit les nouveaux evenements comme le faisait la carte
+  historique: () => [loadJournal()],
+  // relu au plus toutes les 15 s : la page ne change qu'aux passages de la file
+  depots: () => [loadDepots(false)],
   // les chiffres d'abord : ils disent si les revenus ont pu changer
   stats: () => [loadStats(false).then(() => loadRevenueStats(false))],
   colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates()],

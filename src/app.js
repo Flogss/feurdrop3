@@ -14,6 +14,7 @@ function creeApp() {
   const specialRouter = require("./routes/special");
   const suiviRouter = require("./routes/suivi");
   const portail = require("./routes/portail");
+  const depots = require("./routes/depots");
   const { DOMAINE_PORTAIL } = require("./portail");
   const { gestionErreurs } = require("./http");
   const { entetesSecurite, entetesFichier } = require("./securite");
@@ -41,6 +42,8 @@ function creeApp() {
   // les colis d'un espace expediteur (son jeton est sa cle : voir portail.js),
   // demandes par le service du portail
   app.use("/api/portail", portail.router);
+  // controle des depots (verifications aupres des transporteurs)
+  app.use("/api/depots", depots.router);
   app.use("/api", apiRouter);
   app.use("/api/print", printRouter);
   app.use("/api/special", specialRouter);

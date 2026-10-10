@@ -911,10 +911,38 @@ $("journal-plus").addEventListener("click", async (e) => {
   });
 });
 
-document.querySelector(".journal-filtres").addEventListener("click", (e) => {
+// Sur le dashboard, l'historique n'est plus qu'un bouton : il dit le dernier
+// evenement ("3 colis reçus · il y a 5 min") et ouvre la page entiere.
+let dernierEvenementCharge = 0;
+async function loadDernierEvenement() {
+  if (Date.now() - dernierEvenementCharge < 10000) return;
+  dernierEvenementCharge = Date.now();
+  try {
+    const r = await fetchJSON("/api/journal?limite=1", {}, { essais: 1 });
+    const e = r.entrees[0];
+    const sous = $("historique-link-sub");
+    if (!e) {
+      sous.textContent = "Rien pour l'instant";
+      return;
+    }
+    const d = dateServeur(e.at);
+    const min = Math.round((Date.now() - d.getTime()) / 60000);
+    const quand =
+      min < 1 ? "à l'instant" : min < 60 ? `il y a ${min} min` : jourCle(d) === jourCle(new Date()) ? d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : libelleJour(d);
+    sous.textContent = `${e.texte} · ${quand}`;
+  } catch {
+    /* le bouton garde son texte */
+  }
+}
+
+$("historique-link").addEventListener("click", () => switchView("historique"));
+$("historique-back").addEventListener("click", () => switchView("dashboard"));
+
+// les filtres de CETTE carte seulement (d'autres pages ont les memes boutons)
+$("journal").querySelector(".journal-filtres").addEventListener("click", (e) => {
   const bouton = e.target.closest(".journal-filtre");
   if (!bouton || bouton.classList.contains("active")) return;
-  document.querySelectorAll(".journal-filtre").forEach((b) => {
+  $("journal").querySelectorAll(".journal-filtre").forEach((b) => {
     const actif = b === bouton;
     b.classList.toggle("active", actif);
     b.setAttribute("aria-selected", String(actif));

@@ -21,7 +21,7 @@ function baseTemporaire() {
 
 test("base neuve : toutes les migrations, puis plus rien a faire", () => {
   const db = baseTemporaire();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5]);
   assert.equal(versionDe(db), VERSION_SCHEMA);
   for (const c of ["type", "file_id", "printed_at", "note", "source_message_id", "price_locked"]) {
     assert.ok(colonnes(db, "colis").includes(c), c);
@@ -85,7 +85,7 @@ test("une migration qui echoue ne laisse rien a moitie fait", () => {
   ];
   assert.throws(
     () => appliqueMigrations(db, { journal: silencieux, migrations: essai, jusqua: VERSION_SCHEMA + 1 }),
-    /migration 5 \(essai\) impossible : panne au milieu/
+    new RegExp(`migration ${VERSION_SCHEMA + 1} \\(essai\\) impossible : panne au milieu`)
   );
   assert.equal(versionDe(db), VERSION_SCHEMA);
   assert.ok(!colonnes(db, "colis").includes("essai"));

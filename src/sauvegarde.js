@@ -57,6 +57,22 @@ const CATEGORIES = [
     garde: (l) => l.statut !== "fait",
   },
   {
+    // le controle des depots : la file (numeros, prochaine verification)...
+    table: "controle_suivis",
+    nom: "controleSuivis",
+    libelle: "suivis contrôlés",
+    ordre: "numero",
+  },
+  {
+    // ...et les constats faits a la main : eux ne se relisent nulle part
+    // (les evenements des transporteurs se relisent a la prochaine verification)
+    table: "controle_evenements",
+    nom: "constatsManuels",
+    libelle: "constats manuels",
+    ordre: "id",
+    garde: (l) => l.source === "manuel",
+  },
+  {
     // un appareil se reabonne tout seul a l'ouverture : on ne garde ni son
     // adresse de push ni ses cles, seulement ce qui sert au "+N"
     table: "push_subscriptions",
@@ -68,7 +84,9 @@ const CATEGORIES = [
 ];
 
 // tables internes de SQLite, rien a sauvegarder
-const TABLES_INTERNES = new Set(["sqlite_sequence"]);
+// ...et l'etat passager du controle des depots : les pauses des transporteurs
+// (les evenements lus chez La Poste se relisent a partir des numeros sauvegardes)
+const TABLES_INTERNES = new Set(["sqlite_sequence", "controle_transporteurs"]);
 
 const EXCLUSIONS = [
   "fichiers PDF et images des etiquettes (gardes chez Telegram : file_id dans les colis)",
@@ -78,6 +96,7 @@ const EXCLUSIONS = [
   "arrivees deja traitees (historique technique)",
   "sqlite_sequence (compteurs internes, recalcules a partir des identifiants)",
   "base du bot de suivi (suivi.db) : resultats de verification, regenerables",
+  "evenements des transporteurs du controle des depots (relus a la prochaine verification) et pauses des transporteurs",
   "variables d'environnement (seuls leurs noms sont listes)",
 ];
 

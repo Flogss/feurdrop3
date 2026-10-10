@@ -60,3 +60,5 @@ app.listen(PORT, () => {
 
 startBot();
 startSuiviBot();
+// controle des depots : verifications periodiques aupres des transporteurs
+require("./controle/depots").demarreControleAuto();

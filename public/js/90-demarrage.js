@@ -35,8 +35,12 @@ async function demarre() {
           ? loadSpecial()
           : initiale === "suivi"
             ? loadSuivi()
-            : refreshAll();
-  if (initiale === "imprime" || initiale === "special" || initiale === "suivi") refreshAll().catch(() => {});
+            : initiale === "depots"
+              ? loadDepots(true)
+              : initiale === "historique"
+                ? loadJournal()
+                : refreshAll();
+  if (["imprime", "special", "suivi", "depots", "historique"].includes(initiale)) refreshAll().catch(() => {});
 
   if (lancement) {
     await lancement.revelation;

@@ -301,6 +301,73 @@ const MIGRATIONS = [
       db.exec("CREATE INDEX IF NOT EXISTS idx_colis_sender ON colis(sender_name, created_at)");
     },
   },
+  {
+    version: 5,
+    nom: "controle des depots",
+    applique(db) {
+      // Les preuves des transporteurs, a cote des colis -- jamais a leur
+      // place : le statut de FeurDrop (pending, dropped) reste celui du metier.
+      //
+      // Un suivi par NUMERO de suivi (deux colis peuvent partager un numero) :
+      // sa methode (API officielle ou verification manuelle), sa derniere
+      // lecture et l'heure de la prochaine -- c'est la file d'attente, qui
+      // survit aux redemarrages.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS controle_suivis (
+          numero TEXT PRIMARY KEY,
+          transporteur TEXT,
+          methode TEXT NOT NULL,
+          trouve INTEGER,
+          final INTEGER NOT NULL DEFAULT 0,
+          produit TEXT,
+          cree_le TEXT NOT NULL DEFAULT (datetime('now')),
+          verifie_le TEXT,
+          essai_le TEXT,
+          essais INTEGER NOT NULL DEFAULT 0,
+          erreur TEXT,
+          code_erreur TEXT,
+          prochaine_le TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_controle_suivis_file ON controle_suivis(methode, prochaine_le);
+
+        -- les evenements du transporteur (brut compris) et les constats faits
+        -- a la main, une seule fois chacun
+        CREATE TABLE IF NOT EXISTS controle_evenements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          numero TEXT NOT NULL,
+          cle TEXT NOT NULL,
+          survenu_le TEXT,
+          survenu_utc TEXT,
+          ordre INTEGER,
+          code TEXT,
+          libelle TEXT,
+          lieu TEXT,
+          etape TEXT,
+          physique INTEGER NOT NULL DEFAULT 0,
+          incident TEXT,
+          resolu INTEGER NOT NULL DEFAULT 0,
+          source TEXT NOT NULL,
+          par TEXT,
+          brut TEXT,
+          recu_le TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (numero, cle)
+        );
+        CREATE INDEX IF NOT EXISTS idx_controle_evenements_numero ON controle_evenements(numero, survenu_utc);
+
+        -- les pauses de chaque methode automatique (limite, acces refuse)
+        CREATE TABLE IF NOT EXISTS controle_transporteurs (
+          code TEXT PRIMARY KEY,
+          bloque_jusqua TEXT,
+          motif TEXT,
+          type TEXT,
+          echecs INTEGER NOT NULL DEFAULT 0,
+          derniere_reussite TEXT,
+          derniere_erreur TEXT,
+          maj_le TEXT
+        );
+      `);
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

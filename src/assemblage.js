@@ -26,6 +26,7 @@ const PAQUETS = {
       "js/50-actions.js", // rafraichissement, gestes, notifications
       "js/60-suivi.js",
       "js/70-impression.js", // onglet Imprime, edition d'un colis
+      "js/75-depots.js", // controle des depots
       "js/80-locker.js",
       "js/90-demarrage.js",
     ],
@@ -37,6 +38,7 @@ const PAQUETS = {
       "css/10-composants.css", // briques communes, chiffres vivants
       "css/20-dashboard.css",
       "css/30-pages.css", // Imprime, Stats, Reglages, locker, suivi
+      "css/35-depots.css", // controle des depots
       "css/40-retours.css", // toasts, feuille de confirmation
       "css/50-adaptations.css", // petits ecrans, bureau, mouvement reduit
       "css/60-historique.css",

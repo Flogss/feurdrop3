@@ -296,6 +296,23 @@
             </span>
             <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
           </button>
+          <button class="tool" id="depots-link" type="button">
+            <span class="tool-icon tool-icon-teal"><svg class="icon"><use href="#i-flag"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Contrôle des dépôts</span>
+              <span class="tool-sub" id="depots-link-sub">Preuves de prise en charge</span>
+            </span>
+            <span class="tool-badge" id="depots-link-count"></span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
+          <button class="tool" id="historique-link" type="button">
+            <span class="tool-icon tool-icon-violet"><svg class="icon"><use href="#i-clock"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Historique</span>
+              <span class="tool-sub" id="historique-link-sub">Tout ce qui arrive aux colis</span>
+            </span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
           <button class="tool" id="special-link" type="button">
             <span class="tool-icon tool-icon-gold"><svg class="icon"><use href="#i-lock"/></svg></span>
             <span class="tool-text">
@@ -315,21 +332,6 @@
           </button>
         </nav>
 
-        <!-- L'historique : tout ce qui arrive aux colis, du plus recent au plus ancien. -->
-        <article class="card journal-card" id="journal">
-          <header class="card-head">
-            <h2>Historique</h2>
-            <div class="journal-filtres" role="tablist" aria-label="Filtrer l'historique">
-              <button class="journal-filtre active" data-filtre="" type="button" role="tab" aria-selected="true">Tout</button>
-              <button class="journal-filtre" data-filtre="recu" type="button" role="tab" aria-selected="false">Reçus</button>
-              <button class="journal-filtre" data-filtre="drop" type="button" role="tab" aria-selected="false">Drops</button>
-              <button class="journal-filtre" data-filtre="impression" type="button" role="tab" aria-selected="false">Impressions</button>
-              <button class="journal-filtre" data-filtre="autres" type="button" role="tab" aria-selected="false">Autres</button>
-            </div>
-          </header>
-          <div class="journal-liste" id="journal-liste" aria-live="polite"></div>
-          <button class="btn btn-sm btn-ghost journal-plus" id="journal-plus" type="button" hidden>Voir plus</button>
-        </article>
       </div>
     </section>
 
@@ -687,6 +689,121 @@
         <button class="btn btn-secondary btn-block" id="suivi-more" type="button" hidden>Afficher la suite</button>
       </article>
     </section>
+
+    <!-- ===================================================== HISTORIQUE -->
+    <!-- L'historique complet : tout ce qui arrive aux colis, du plus recent au
+         plus ancien. Le dashboard n'en garde qu'un bouton (le dernier evenement). -->
+    <section id="view-historique" class="view sub-view" aria-label="Historique">
+      <header class="page-head">
+        <button class="back" id="historique-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Historique</h1>
+          <p class="page-sub">Reçus, drops, impressions, tournées, stock, réglages</p>
+        </div>
+      </header>
+
+      <article class="card journal-card" id="journal">
+        <header class="card-head">
+          <div class="journal-filtres" role="tablist" aria-label="Filtrer l'historique">
+            <button class="journal-filtre active" data-filtre="" type="button" role="tab" aria-selected="true">Tout</button>
+            <button class="journal-filtre" data-filtre="recu" type="button" role="tab" aria-selected="false">Reçus</button>
+            <button class="journal-filtre" data-filtre="drop" type="button" role="tab" aria-selected="false">Drops</button>
+            <button class="journal-filtre" data-filtre="impression" type="button" role="tab" aria-selected="false">Impressions</button>
+            <button class="journal-filtre" data-filtre="autres" type="button" role="tab" aria-selected="false">Autres</button>
+          </div>
+        </header>
+        <div class="journal-liste" id="journal-liste" aria-live="polite"></div>
+        <button class="btn btn-sm btn-ghost journal-plus" id="journal-plus" type="button" hidden>Voir plus</button>
+      </article>
+    </section>
+
+    <!-- ===================================================== CONTROLE DES DEPOTS -->
+    <!-- Ce que les transporteurs disent des colis dropes (API La Poste, ou
+         constat sur la page officielle), a cote du statut FeurDrop : les deux
+         ne se melangent jamais. -->
+    <section id="view-depots" class="view sub-view" aria-label="Contrôle des dépôts">
+      <header class="page-head">
+        <button class="back" id="depots-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Contrôle des dépôts</h1>
+          <p class="page-sub" id="depots-sub">—</p>
+        </div>
+      </header>
+
+      <div class="depots-bandeau" id="depots-bandeau" hidden></div>
+
+      <div class="depots-compteurs">
+        <button class="card metric depot-metric cat-confirme" data-depots-filtre="confirme" type="button">
+          <span class="eyebrow">Dépôts confirmés</span>
+          <span class="metric-value" id="depots-n-confirme">0</span>
+          <span class="metric-sub">pris en charge par le transporteur</span>
+        </button>
+        <button class="card metric depot-metric cat-non_confirme" data-depots-filtre="non_confirme" type="button">
+          <span class="eyebrow">Dépôts non confirmés</span>
+          <span class="metric-value" id="depots-n-non_confirme">0</span>
+          <span class="metric-sub" id="depots-n-hors-delai">étiquette seule, pas de scan</span>
+        </button>
+        <button class="card metric depot-metric cat-a_verifier" data-depots-filtre="a_verifier" type="button">
+          <span class="eyebrow">Vérification nécessaire</span>
+          <span class="metric-value" id="depots-n-a_verifier">0</span>
+          <span class="metric-sub">inconnu, refusé ou ambigu</span>
+        </button>
+        <button class="card metric depot-metric cat-bloque" data-depots-filtre="bloque" type="button">
+          <span class="eyebrow">Vérification bloquée</span>
+          <span class="metric-value" id="depots-n-bloque">0</span>
+          <span class="metric-sub" id="depots-n-a-constater">site protégé ou en pause</span>
+        </button>
+        <button class="card metric depot-metric cat-anomalie" data-depots-filtre="anomalie" type="button">
+          <span class="eyebrow">Anomalies de suivi</span>
+          <span class="metric-value" id="depots-n-anomalie">0</span>
+          <span class="metric-sub">incident ou incohérence</span>
+        </button>
+      </div>
+
+      <article class="card depots-synchro">
+        <div class="depots-synchro-texte">
+          <span class="depots-synchro-titre"><span class="live-dot" id="depots-synchro-point"></span><span id="depots-synchro">Dernier passage : —</span></span>
+          <span class="depots-synchro-detail" id="depots-synchro-detail"></span>
+        </div>
+        <div class="depots-synchro-boutons">
+          <button class="btn btn-sm btn-secondary" id="depots-constater" type="button" hidden>
+            <svg class="icon"><use href="#i-edit"/></svg><span>Constater <b id="depots-constater-n">0</b> à la main</span>
+          </button>
+          <button class="btn btn-sm btn-secondary" id="depots-relancer" type="button">
+            <svg class="icon"><use href="#i-refresh"/></svg><span>Relancer les vérifications en attente</span>
+          </button>
+        </div>
+        <div class="depots-methodes" id="depots-methodes" aria-label="Méthode de vérification par transporteur" hidden></div>
+      </article>
+
+      <article class="card depots-carte">
+        <div class="depots-outils">
+          <div class="journal-filtres" role="tablist" aria-label="Filtrer les colis" id="depots-filtres">
+            <button class="journal-filtre active" data-filtre="tous" type="button" role="tab" aria-selected="true">Tous</button>
+            <button class="journal-filtre" data-filtre="attention" type="button" role="tab" aria-selected="false">À regarder</button>
+            <button class="journal-filtre" data-filtre="confirme" type="button" role="tab" aria-selected="false">Confirmés</button>
+            <button class="journal-filtre" data-filtre="non_confirme" type="button" role="tab" aria-selected="false">Non confirmés</button>
+            <button class="journal-filtre" data-filtre="a_verifier" type="button" role="tab" aria-selected="false">Vérif. nécessaire</button>
+            <button class="journal-filtre" data-filtre="bloque" type="button" role="tab" aria-selected="false">Bloquées</button>
+            <button class="journal-filtre" data-filtre="anomalie" type="button" role="tab" aria-selected="false">Anomalies</button>
+          </div>
+          <div class="depots-champs">
+            <input class="field field-sm" type="search" id="depots-recherche" placeholder="Numéro de suivi…" autocomplete="off" spellcheck="false" aria-label="Rechercher un numéro de suivi" />
+            <select class="field field-sm" id="depots-transporteur" aria-label="Transporteur"><option value="">Tous les transporteurs</option></select>
+            <select class="field field-sm" id="depots-expediteur" aria-label="Expéditeur"><option value="">Tous les expéditeurs</option></select>
+          </div>
+        </div>
+        <div class="depots-entete" aria-hidden="true">
+          <span>Colis</span><span>FeurDrop</span><span>Contrôle</span><span>Dernier statut transporteur</span><span>Vérifié</span><span></span>
+        </div>
+        <div class="depots-lignes" id="depots-lignes"></div>
+        <p class="depots-pied" id="depots-pied"></p>
+      </article>
+    </section>
   </main>
 </div>
 
@@ -709,6 +826,27 @@
       <button class="btn btn-secondary btn-lg" type="button" data-tour-fermer>Annuler</button>
       <button class="btn btn-primary btn-lg" type="button" id="tour-partir">
         <svg class="icon"><use href="#i-truck"/></svg><span>C'est parti</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Controle des depots : la chronologie d'un colis -->
+<div class="sheet-layer" id="depot-sheet" hidden>
+  <div class="sheet-backdrop" data-depot-fermer></div>
+  <div class="sheet depot-sheet" role="dialog" aria-modal="true" aria-labelledby="depot-sheet-titre">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <h2 class="sheet-title depot-sheet-titre"><span id="depot-sheet-titre">Suivi</span><span class="depot-serie" id="depot-sheet-serie"></span></h2>
+    <div class="depot-sheet-contenu" id="depot-sheet-contenu"></div>
+    <div class="sheet-actions">
+      <a class="btn btn-secondary btn-lg" id="depot-lien" href="#" target="_blank" rel="noopener noreferrer">
+        <svg class="icon"><use href="#i-external"/></svg><span>Suivi officiel</span>
+      </a>
+      <button class="btn btn-primary btn-lg" id="depot-verifier-un" type="button">
+        <svg class="icon"><use href="#i-refresh"/></svg><span>Vérifier maintenant</span>
+      </button>
+      <button class="btn btn-secondary btn-lg" id="depot-suivant" type="button" hidden>
+        <svg class="icon"><use href="#i-arrow-right"/></svg><span>Passer</span>
       </button>
     </div>
   </div>

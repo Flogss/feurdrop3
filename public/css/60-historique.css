@@ -77,6 +77,10 @@
 .journal-vide { padding: 22px 0; text-align: center; font-size: 13.5px; color: var(--text-3); }
 .journal-plus { margin-top: 8px; width: 100%; }
 
+/* le bouton du dashboard qui y mene */
+.tool-icon-violet { --c: var(--violet-400); }
+#historique-link-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .journal-ligne.k-recu, .journal-ligne.k-ajout { --c: var(--violet-400); }
 .journal-ligne.k-drop { --c: var(--teal-rgb); }
 .journal-ligne.k-drop.annule { --c: var(--warn-rgb); }

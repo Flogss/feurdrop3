@@ -1,0 +1,355 @@
+/* ==========================================================================
+   Controle des depots
+   Chaque categorie a sa teinte : confirme (sarcelle), non confirme (ambre),
+   verification necessaire (bleu), verification bloquee (lavande : rien n'a
+   pu etre lu, ce n'est pas une alerte), anomalie (rouge). Ce qui demande un
+   regard ressort par une barre et un voile de sa couleur ; le reste reste
+   calme.
+   ========================================================================== */
+
+.tool-icon-teal { --c: var(--teal-rgb); }
+
+.cat-confirme { --cat: var(--teal-rgb); }
+.cat-non_confirme { --cat: var(--warn-rgb); }
+.cat-a_verifier { --cat: var(--info-rgb); }
+.cat-bloque { --cat: var(--violet-300); }
+.cat-anomalie { --cat: var(--danger-rgb); }
+
+/* --- Bandeau (API non configuree, pause demandee, erreur) --------------------- */
+
+.depots-bandeau {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: var(--gap);
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: rgb(var(--warn-rgb) / 0.08);
+  box-shadow: inset 0 0 0 1px rgb(var(--warn-rgb) / 0.28);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  animation: fade-in var(--t-4) var(--ease-out) both;
+}
+.depots-bandeau .icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; color: var(--warn); }
+.depots-bandeau b { color: var(--text); font-weight: 650; }
+.depots-bandeau code { font: 600 12.5px/1 var(--font-mono); color: rgb(var(--violet-200)); }
+.depots-bandeau.is-info { background: rgb(var(--info-rgb) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--info-rgb) / 0.28); }
+.depots-bandeau.is-info .icon { color: var(--info); }
+
+/* --- Compteurs ---------------------------------------------------------------- */
+
+.depots-compteurs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+/* cinq compteurs sur deux colonnes : les confirmes en tete, sur toute la largeur */
+.depots-compteurs > :first-child { grid-column: 1 / -1; }
+.depot-metric { position: relative; isolation: isolate; }
+.depot-metric::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(120% 90% at 0% 0%, rgb(var(--cat) / 0.14), transparent 60%);
+  opacity: 0.7;
+  transition: opacity var(--t-3);
+}
+.depot-metric .metric-value { color: rgb(var(--cat)); text-shadow: 0 0 24px rgb(var(--cat) / 0.35); }
+.depot-metric .eyebrow { color: var(--text-2); }
+.depot-metric.active { box-shadow: inset 0 0 0 1.5px rgb(var(--cat) / 0.55), 0 10px 30px -14px rgb(var(--cat) / 0.7); }
+.depot-metric.active::before { opacity: 1; }
+
+/* --- Synchronisation ------------------------------------------------------------- */
+
+.depots-synchro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: var(--gap);
+  padding: 14px 16px;
+}
+.depots-synchro-texte { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.depots-synchro-titre { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.depots-synchro-detail { font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.depots-synchro-boutons { display: flex; flex-wrap: wrap; gap: 8px; }
+.depots-synchro .btn { flex-shrink: 0; }
+.depots-synchro .btn b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* une puce par transporteur : automatique, en pause, ou a la main */
+.depots-methodes { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line-2); }
+.depot-methode {
+  --m: var(--teal-rgb);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.03);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 12.5px;
+}
+.depot-methode.is-pause { --m: var(--warn-rgb); }
+.depot-methode.is-manuel { --m: var(--violet-300); }
+.depot-methode-etat { display: inline-flex; align-items: center; gap: 4px; color: rgb(var(--m)); font-weight: 600; }
+.depot-methode-etat .icon { width: 13px; height: 13px; }
+.depot-methode-n {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: rgb(var(--m) / 0.14);
+  color: rgb(var(--m));
+  font: 700 11.5px/22px var(--font-sans);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+#depots-synchro-point.is-busy { animation: depot-pulse 1100ms var(--ease-out) infinite; }
+@keyframes depot-pulse { 50% { transform: scale(1.6); opacity: 0.55; } }
+
+/* --- Outils (filtres, recherche) --------------------------------------------------- */
+
+.depots-carte { padding-bottom: 8px; }
+.depots-outils { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.depots-champs { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.depots-champs .field { width: 100%; min-width: 0; }
+#depots-recherche { font-family: var(--font-mono); letter-spacing: 0.02em; }
+
+/* --- Lignes ------------------------------------------------------------------------ */
+
+.depots-entete { display: none; }
+.depots-lignes { display: flex; flex-direction: column; }
+
+.depot-ligne {
+  --cat: var(--info-rgb);
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "colis verdict verdict"
+    "evenement evenement evenement"
+    "interne verifie actions";
+  gap: 6px 12px;
+  align-items: center;
+  margin: 0 -10px;
+  padding: 12px 12px 12px 16px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background-color var(--t-3) var(--ease-out);
+}
+.depot-ligne + .depot-ligne::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-2) 15%, var(--line-2) 85%, transparent);
+}
+/* tout ce qui n'est pas confirme porte sa couleur sur le bord */
+.depot-ligne:not(.cat-confirme)::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgb(var(--cat) / 0.55);
+}
+.depot-ligne.attention { background: linear-gradient(90deg, rgb(var(--cat) / 0.09), transparent 70%); }
+.depot-ligne.attention::after { background: rgb(var(--cat)); box-shadow: 0 0 12px rgb(var(--cat) / 0.7); }
+@media (hover: hover) { .depot-ligne:hover { background-color: rgb(255 255 255 / 0.035); } }
+.depot-ligne:active { background-color: rgb(255 255 255 / 0.05); }
+
+.depot-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.depot-colis { grid-area: colis; }
+.depot-verdict { grid-area: verdict; align-items: flex-end; text-align: right; }
+.depot-evenement { grid-area: evenement; }
+.depot-interne { grid-area: interne; flex-direction: row; align-items: baseline; gap: 6px; }
+.depot-verifie { grid-area: verifie; text-align: right; }
+.depot-actions { grid-area: actions; display: flex; justify-content: flex-end; gap: 2px; margin: -6px -6px -6px 0; }
+.depot-actions .icon-btn { color: var(--text-3); }
+@media (hover: hover) { .depot-actions .icon-btn:hover { color: var(--text); background: rgb(255 255 255 / 0.06); } }
+
+/* le numero est le bouton qui ouvre le detail (la ligne entiere l'ouvre aussi a la souris) */
+.depot-numero {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: 650 14.5px/1.2 var(--font-mono);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.depot-numero:focus-visible { outline: 2px solid rgb(var(--violet-400) / 0.9); outline-offset: 3px; border-radius: 4px; }
+.depot-sous {
+  font-size: 12.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.depot-transporteur { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+.depot-transporteur .carrier-dot { width: 7px; height: 7px; }
+.depot-interne-statut { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.depot-evenement-texte { font-size: 13.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.depot-erreur { display: inline-flex; align-items: center; gap: 3px; color: var(--danger); }
+.depot-erreur .icon { width: 12px; height: 12px; }
+
+.depot-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  background: rgb(var(--cat) / 0.13);
+  box-shadow: inset 0 0 0 1px rgb(var(--cat) / 0.32);
+  color: rgb(var(--cat));
+  font: 650 12px/1 var(--font-sans);
+  white-space: nowrap;
+}
+.depot-badge .icon { width: 13px; height: 13px; }
+
+.depots-pied { margin: 10px 0 2px; font-size: 12.5px; color: var(--text-3); text-align: center; }
+.depots-pied:empty { display: none; }
+
+/* --- Detail d'un colis (feuille) ---------------------------------------------------- */
+
+.depot-sheet { max-width: 560px; max-height: calc(100dvh - 24px); display: flex; flex-direction: column; }
+.depot-sheet-titre { font-family: var(--font-mono); letter-spacing: 0; }
+.depot-sheet-contenu { overflow-y: auto; margin: 0 -20px; padding: 0 20px; overscroll-behavior: contain; }
+.depot-sheet .sheet-actions { display: flex; margin-top: 16px; }
+.depot-sheet .sheet-actions > * { flex: 1 1 0; min-width: 0; }
+.depot-serie { margin-left: 10px; font: 600 12.5px/1 var(--font-sans); color: var(--text-3); font-variant-numeric: tabular-nums; vertical-align: 2px; }
+.depot-serie:empty { display: none; }
+.depot-detail-tete { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 12px 0 16px; }
+.depot-detail-raison { font-size: 14.5px; line-height: 1.5; color: var(--text-2); }
+.depot-detail-grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin-bottom: 18px; }
+.depot-detail-grille dt { font-size: 11.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.depot-detail-grille dd { margin: 3px 0 0; font-size: 14px; color: var(--text); }
+.depot-detail-erreur { grid-column: 1 / -1; }
+.depot-detail-erreur dd { color: var(--danger); }
+.depot-detail-titre { margin: 0 0 10px; font: 650 14px/1.3 var(--font-display); color: var(--text-2); }
+
+/* constat fait a la main sur la page officielle */
+.depot-constat {
+  margin: 0 0 18px;
+  padding: 14px;
+  border-radius: var(--r-md);
+  background: rgb(var(--violet-300) / 0.06);
+  box-shadow: inset 0 0 0 1px rgb(var(--violet-300) / 0.22);
+}
+.depot-constat-aide { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--text-2); }
+.depot-constat-choix { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.depot-constat-btn {
+  justify-content: center;
+  background: rgb(var(--cat) / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(var(--cat) / 0.32);
+  color: rgb(var(--cat));
+  font-weight: 650;
+}
+@media (hover: hover) { .depot-constat-btn:hover { background: rgb(var(--cat) / 0.2); } }
+.depot-constat-annule {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.depot-chrono { list-style: none; margin: 0; padding: 0 0 4px; }
+.depot-evt { position: relative; display: flex; gap: 12px; padding: 0 0 14px 2px; }
+.depot-evt::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--line-2);
+}
+.depot-evt:last-child::before { display: none; }
+.depot-evt-point {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--surface-4);
+  box-shadow: inset 0 0 0 2px var(--line-2);
+}
+.depot-evt:first-child .depot-evt-point { background: rgb(var(--violet-400)); box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.8); }
+.depot-evt.is-preuve .depot-evt-point { background: rgb(var(--teal-rgb)); box-shadow: 0 0 10px rgb(var(--teal-rgb) / 0.8); }
+.depot-evt.is-manuel .depot-evt-point { background: rgb(var(--violet-300)); box-shadow: 0 0 10px rgb(var(--violet-300) / 0.7); }
+.depot-evt.is-incident .depot-evt-point { background: var(--danger); box-shadow: 0 0 10px rgb(var(--danger-rgb) / 0.8); }
+.depot-evt-corps { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.depot-evt-statut { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.depot-evt-preuve {
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgb(var(--teal-rgb) / 0.14);
+  color: rgb(var(--teal-rgb));
+  font-size: 11px;
+  font-weight: 650;
+  vertical-align: 1px;
+}
+.depot-evt-meta { font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.depot-evt-code { font: 500 11.5px/1.3 var(--font-mono); color: var(--text-3); }
+
+/* --- Ecrans larges : un vrai tableau ------------------------------------------------ */
+
+@media (min-width: 640px) {
+  .depots-champs { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+@media (min-width: 960px) {
+  .depots-compteurs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .depots-compteurs > :first-child { grid-column: auto; }
+  .depots-outils { flex-direction: row; align-items: center; justify-content: space-between; }
+  .depots-champs { flex: 1; max-width: 560px; }
+  .depots-entete,
+  .depot-ligne {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 1.8fr) minmax(0, 0.8fr) 76px;
+    grid-template-areas: "colis interne verdict evenement verifie actions";
+  }
+  .depots-entete {
+    display: grid;
+    gap: 0 12px;
+    padding: 0 12px 8px 16px;
+    margin: 0 -10px;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .depot-ligne { gap: 0 12px; }
+  .depot-verdict { align-items: flex-start; text-align: left; }
+  .depot-interne { flex-direction: column; align-items: flex-start; gap: 3px; }
+  .depot-verifie { text-align: left; }
+  .depot-actions { margin: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #depots-synchro-point.is-busy { animation: none; }
+}

@@ -54,7 +54,7 @@ test("toutes les categories, avec leurs comptes exacts", () => {
   const json = contenuDe(s);
   assert.equal(json.format, "feurdrop-sauvegarde");
   assert.equal(json.versionFormat, 1);
-  assert.equal(json.versionSchema, 4);
+  assert.equal(json.versionSchema, require("../src/db/migrations").VERSION_SCHEMA);
   assert.match(s.fichier, /^feurdrop-backup-\d{4}-\d{2}-\d{2}-\d{2}h\d{2}\.json$/);
 
   const n = (sql) => db.db.prepare(sql).get().n;

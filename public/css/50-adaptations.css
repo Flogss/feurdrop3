@@ -106,8 +106,7 @@
       "hero     stock"
       "summary  summary"
       "carriers senders"
-      "tools    tools"
-      "journal  journal";
+      "tools    tools";
     align-items: start;
   }
   .dash:has(> .summary[hidden]) {
@@ -115,8 +114,7 @@
       "hero     metrics"
       "hero     stock"
       "carriers senders"
-      "tools    tools"
-      "journal  journal";
+      "tools    tools";
   }
   .hero { grid-area: hero; align-self: stretch; display: flex; flex-direction: column; }
   .hero-actions { margin-top: auto; padding-top: 24px; }
@@ -134,7 +132,6 @@
   .carriers-card { grid-area: carriers; }
   .senders-card { grid-area: senders; }
   .tools { grid-area: tools; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
-  .journal-card { grid-area: journal; }
 
   .imp-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
