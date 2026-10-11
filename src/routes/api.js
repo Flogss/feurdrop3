@@ -1,5 +1,4 @@
 const express = require("express");
-const crypto = require("crypto");
 const {
   db,
   transaction,
@@ -47,11 +46,8 @@ const {
   getPendingSummary,
   isAutoPrintEnabled,
   setAutoPrintEnabled,
-  getUnprintedLabels,
   countUnprintedLabels,
   countLitPrintable,
-  markPrinted,
-  getPrintToken,
   journalise,
   avecSource,
   getJournal,
@@ -60,9 +56,8 @@ const {
   arrondiCentimes,
 } = require("../db");
 const { getPublicKey, sendToAll, countSubscriptions, notifyTourStart, notifyTourEnd, euro } = require("../push");
-const { refreshGroupStats, buildLabelsPdf } = require("../bot");
+const { refreshGroupStats } = require("../bot");
 const { creePortail, retirePortail, infoPortail } = require("../portail");
-const { routeAsync } = require("../http");
 const { aujourdhuiParis } = require("../dates");
 
 // SMIC horaire NET francais, sert de point de comparaison apres une tournee :
@@ -77,7 +72,6 @@ const router = express.Router();
 // D'ou vient chaque action, pour le journal : l'agent d'impression, l'app
 // (iPhone, Mac : leurs requetes se presentent comme CFNetwork), ou le site.
 function sourceDe(req) {
-  if (req.path.startsWith("/print/")) return "imprimante";
   return /CFNetwork|Darwin|DropKit/i.test(req.get("user-agent") || "") ? "app" : "site";
 }
 router.use((req, res, next) => avecSource(sourceDe(req), next));
@@ -366,63 +360,8 @@ router.post("/tour/end", (req, res) => {
 });
 
 // --- Impression automatique -------------------------------------------------
-// Un agent tourne sur le Mac relie a l'imprimante : il demande regulierement
-// s'il y a du nouveau, recupere un PDF deja au format 4x6, l'imprime, puis
-// confirme. Le jeton evite que n'importe qui aspire les etiquettes. Il voyage
-// dans l'en-tete X-Print-Token, jamais dans l'adresse : une adresse finit dans
-// les journaux d'acces, les proxys et l'historique.
-function checkPrintToken(req, res) {
-  const provided = String(req.get("x-print-token") || "");
-  const expected = getPrintToken();
-  const ok =
-    provided.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
-  if (!ok) {
-    res.status(401).json({ error: "Jeton d'impression invalide" });
-    return false;
-  }
-  return true;
-}
-
-// Sondage de l'agent : volontairement minuscule, il tourne toutes les 20 s.
-router.get("/print/queue", (req, res) => {
-  if (!checkPrintToken(req, res)) return;
-  res.json({ enabled: isAutoPrintEnabled(), count: isAutoPrintEnabled() ? countUnprintedLabels() : 0 });
-});
-
-// Le PDF pret a imprimer. Les identifiants partent dans un en-tete : l'agent
-// ne confirmera qu'apres impression reussie, donc rien n'est perdu si le Mac
-// s'eteint au mauvais moment.
-router.get("/print/next", routeAsync(async (req, res) => {
-  if (!checkPrintToken(req, res)) return;
-  if (!isAutoPrintEnabled()) return res.status(409).json({ error: "Impression automatique desactivee" });
-
-  const rows = getUnprintedLabels();
-  if (rows.length === 0) return res.status(204).end();
-
-  try {
-    const { pdf, pages, printedIds } = await buildLabelsPdf(rows);
-    if (!pdf) return res.status(204).end();
-    res.set({
-      "Content-Type": "application/pdf",
-      "X-Drop-Colis-Ids": printedIds.join(","),
-      "X-Drop-Pages": String(pages),
-    });
-    res.send(pdf);
-  } catch (err) {
-    console.error("[print] preparation impossible :", err.message);
-    res.status(500).json({ error: err.message });
-  }
-}));
-
-router.post("/print/done", (req, res) => {
-  if (!checkPrintToken(req, res)) return;
-  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
-  // l'agent du Mac n'a pas d'utilisateur : il apparait comme tel dans le menu
-  // de reimpression
-  const job = markPrinted(ids, "Impression auto");
-  res.json({ ok: true, marked: ids.length, job });
-});
+// L'agent du Mac a ses propres routes, protegees par son jeton : voir
+// routes/agent.js. Ici, seulement l'interrupteur du dashboard.
 
 // Interrupteur depuis le dashboard (donc depuis le telephone).
 router.post("/print/auto", (req, res) => {

@@ -41,9 +41,20 @@ final class AppModel {
     var serverURL: URL {
         didSet {
             UserDefaults.standard.set(serverURL.absoluteString, forKey: "drop.serveur")
+            // un jeton par serveur : celui de ce serveur, s'il y en a un
             api = DropAPI(baseURL: serverURL)
+            connecte = api.client.jeton != nil
         }
     }
+
+    /// Une session est ouverte sur cet appareil (son jeton est dans le
+    /// trousseau). Le serveur reste juge : une session expiree (72 h) ou
+    /// revoquee repond 401, et l'ecran de connexion revient.
+    var connecte = false
+    /// pourquoi l'ecran de connexion est revenu ("Session expirée…")
+    var messageConnexion: String?
+    /// cette session : jusqu'a quand, combien d'appareils (les reglages)
+    private(set) var session: InfoSession?
 
     var tab: AppTab = .dashboard
     #if os(macOS)
@@ -71,6 +82,7 @@ final class AppModel {
         let adresse = enregistre ?? Self.defaultServer
         serverURL = adresse
         api = DropAPI(baseURL: adresse)
+        connecte = api.client.jeton != nil
         #if DEBUG
         // verification au simulateur : `-DropOnglet stats` ouvre un onglet
         if let depart = UserDefaults.standard.string(forKey: "DropOnglet"), let onglet = AppTab(rawValue: depart) {
@@ -79,8 +91,52 @@ final class AppModel {
         #endif
     }
 
+    // MARK: Connexion
+
+    /// Le mot de passe contre une session (72 h). Renvoie le message d'erreur
+    /// a afficher, ou nil si c'est bon.
+    func seConnecte(motDePasse: String) async -> String? {
+        do {
+            let s = try await api.connexion(motDePasse: motDePasse, appareil: Platform.nomAppareil)
+            Trousseau.garde(s.jeton, pour: serverURL)
+            api.client.definitJeton(s.jeton)
+            reachedServer()
+            messageConnexion = nil
+            withAnimation(Theme.spring) { connecte = true }
+            return nil
+        } catch {
+            if let erreur = error as? APIError, erreur.isNetwork { return "Serveur injoignable. Vérifie la connexion et réessaie." }
+            return (error as? LocalizedError)?.errorDescription ?? "Connexion impossible"
+        }
+    }
+
+    /// Se deconnecter (cet appareil), ou fermer toutes les sessions partout.
+    func seDeconnecte(partout: Bool = false) async {
+        if partout {
+            guard await perform({ try await api.deconnexionPartout() }) != nil else { return }
+        } else {
+            try? await api.deconnexion()
+        }
+        oublieSession(message: partout ? "Tous les appareils ont été déconnectés." : nil)
+    }
+
+    /// Le jeton ne vaut plus rien (ou plus du tout) : on l'oublie, et l'ecran
+    /// de connexion revient.
+    func oublieSession(message: String?) {
+        Trousseau.efface(pour: serverURL)
+        api.client.definitJeton(nil)
+        session = nil
+        messageConnexion = message
+        withAnimation(Theme.spring) { connecte = false }
+    }
+
+    func chargeSession() async {
+        if let s = await perform({ try await api.session() }) { session = s }
+    }
+
     /// Ce que l'onglet visible relit toutes les 5 secondes.
     func refreshVisible() async {
+        guard connecte else { return }
         #if os(macOS)
         switch pageMac {
         case .dashboard: await dashboard.refresh()
@@ -122,6 +178,11 @@ final class AppModel {
     /// retour aussi.
     func report(_ error: any Error) {
         if error is CancellationError { return }
+        // session expiree (72 h), revoquee, ou mot de passe change : la connexion
+        if let api = error as? APIError, api.exigeConnexion {
+            if connecte { oublieSession(message: "Ta session a expiré : entre le mot de passe pour continuer.") }
+            return
+        }
         if let api = error as? APIError, api.isNetwork {
             if isOnline {
                 isOnline = false

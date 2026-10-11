@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var source: Int?
     @State private var cible: Int?
     @State private var confirmeFusion = false
+    @State private var confirmeToutDeconnecter = false
     @State private var adresse = ""
     @AppStorage(ParcelWatch.newParcelsKey) private var notifColis = true
     @AppStorage(ParcelWatch.tourKey) private var notifTournee = true
@@ -24,6 +25,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            connexion
             notifications
             impressionAuto
             dettes
@@ -35,9 +37,16 @@ struct SettingsView: View {
         .toggleStyle(.switch)
         .navigationTitle("Réglages")
         .task { await model.refresh() }
+        .task { await app.chargeSession() }
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: model.celebration)
         .onAppear { adresse = app.serverURL.absoluteString }
+        .confirmationDialog("Déconnecter tous les appareils ?", isPresented: $confirmeToutDeconnecter, titleVisibility: .visible) {
+            Button("Tout déconnecter", role: .destructive) { Task { await app.seDeconnecte(partout: true) } }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("Toutes les sessions ouvertes (téléphones, ordinateurs, navigateurs) sont fermées tout de suite, celle-ci comprise. Le mot de passe sera redemandé partout.")
+        }
         .confirmationDialog("Activer l'impression auto ?", isPresented: $confirmeAuto, titleVisibility: .visible) {
             Button("Activer") { Task { await model.setAutoPrint(true) } }
             Button("Annuler", role: .cancel) {}
@@ -259,6 +268,29 @@ struct SettingsView: View {
             Text("Fusionner deux expéditeurs")
         } footer: {
             Text("La même personne qui a recréé un compte : tout passe sur le second.")
+        }
+    }
+
+    /// Cette session (72 h au plus), et la deconnexion.
+    private var connexion: some View {
+        Section {
+            if let s = app.session {
+                LabeledContent("Connecté jusqu'au", value: ServerDate.parse(s.expireLe).map { $0.formatted(.dateTime.weekday(.wide).day().month(.wide).hour().minute().locale(Locale(identifier: "fr_FR"))) } ?? "—")
+                if let n = s.appareils, n > 1 {
+                    LabeledContent("Appareils connectés", value: "\(n)")
+                }
+            }
+            Button("Se déconnecter", systemImage: "rectangle.portrait.and.arrow.right") {
+                Task { await app.seDeconnecte() }
+            }
+            Button("Déconnecter tous les appareils", systemImage: "lock.rotation", role: .destructive) {
+                Haptics.warning()
+                confirmeToutDeconnecter = true
+            }
+        } header: {
+            Text("Connexion")
+        } footer: {
+            Text("Le mot de passe est redemandé 72 heures après chaque connexion, sur chaque appareil.")
         }
     }
 

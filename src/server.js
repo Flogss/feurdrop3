@@ -25,6 +25,8 @@ const { getPrintToken, ouvreBase } = require("./db");
 // La base s'ouvre ici, avant tout le reste : migrations appliquees (ou
 // refus de demarrer si l'une echoue), diagnostic dans les logs.
 ouvreBase();
+// le dashboard est-il protege ? (jamais l'empreinte du mot de passe)
+require("./auth").annonce();
 const app = creeApp();
 
 // Adresses ou le site repond vraiment. localhost ne sert que sur cette

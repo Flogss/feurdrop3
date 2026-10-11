@@ -18,21 +18,37 @@ function environnementDeTest() {
   process.env.TELEGRAM_BOT_TOKEN = "000000:jeton-de-test";
   process.env.SUIVI_BOT_TOKEN = "";
   process.env.OKAPI_KEY = "";
+  // le mot de passe du dashboard, pour les tests seulement (empreinte
+  // Argon2id allegee, pour aller vite) ; jamais le vrai
+  process.env.DASHBOARD_PASSWORD_HASH = EMPREINTE_TEST;
+  delete process.env.NODE_ENV;
   return dossier;
 }
 
-// L'app du dashboard sur un port libre. `fetch` relatif a son adresse.
-async function demarreApp() {
+const MOT_DE_PASSE_TEST = "mot-de-passe-de-test";
+const EMPREINTE_TEST = "$argon2id$v=19$m=8192,p=1,t=2$Xd8x7wX5iSg89kikjCSLWw$BE/X36cKMHDTR0XEHzyHP/IvXAXSDUdHlcFKFpySRiY";
+
+// L'app du dashboard sur un port libre. `appel` : un fetch relatif a son
+// adresse, AUTHENTIFIE par defaut -- comme l'app iOS, avec un jeton de
+// session obtenu par une vraie connexion (mot de passe de test). Pour
+// appeler sans session : { anonyme: true }.
+async function demarreApp({ connecte = true } = {}) {
   const { creeApp } = require("../src/app");
   const app = creeApp();
   const serveur = await new Promise((resolve) => {
     const s = app.listen(0, "127.0.0.1", () => resolve(s));
   });
   const base = `http://127.0.0.1:${serveur.address().port}`;
-  const appel = async (chemin, { methode = "GET", corps, entetes = {} } = {}) => {
+  let jeton = null;
+  const appel = async (chemin, { methode = "GET", corps, entetes = {}, anonyme = false } = {}) => {
     const reponse = await fetch(base + chemin, {
       method: methode,
-      headers: { ...(corps !== undefined ? { "Content-Type": "application/json" } : {}), ...entetes },
+      redirect: "manual",
+      headers: {
+        ...(corps !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(jeton && !anonyme ? { Authorization: `Bearer ${jeton}` } : {}),
+        ...entetes,
+      },
       body: corps === undefined ? undefined : typeof corps === "string" ? corps : JSON.stringify(corps),
     });
     const texte = await reponse.text();
@@ -44,7 +60,12 @@ async function demarreApp() {
     }
     return { status: reponse.status, json, texte, entetes: reponse.headers };
   };
-  return { base, appel, ferme: () => new Promise((r) => serveur.close(r)) };
+  if (connecte) {
+    const r = await appel("/api/auth/connexion", { methode: "POST", corps: { motDePasse: MOT_DE_PASSE_TEST, mode: "app", appareil: "tests" } });
+    if (r.status !== 200) throw new Error(`connexion de test impossible : ${r.status} ${r.texte}`);
+    jeton = r.json.jeton;
+  }
+  return { base, appel, jeton, ferme: () => new Promise((r) => serveur.close(r)) };
 }
 
 // Remet la base a zero entre deux tests d'un meme fichier (le module de base
@@ -52,10 +73,11 @@ async function demarreApp() {
 function videBase() {
   const { db } = require("../src/db");
   const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'")
+    // (les sessions restent : la connexion de test sert a tout le fichier)
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('schema_migrations', 'sessions')")
     .all()
     .map((t) => t.name);
   for (const t of tables) db.prepare(`DELETE FROM "${t}"`).run();
 }
 
-module.exports = { environnementDeTest, demarreApp, videBase };
+module.exports = { environnementDeTest, demarreApp, videBase, MOT_DE_PASSE_TEST };

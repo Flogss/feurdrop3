@@ -50,6 +50,7 @@ final class DashboardModel {
     // MARK: Chargement
 
     func refresh() async {
+        guard app.connecte else { return }
         do {
             async let s = app.api.stats()
             async let k = app.api.stock()

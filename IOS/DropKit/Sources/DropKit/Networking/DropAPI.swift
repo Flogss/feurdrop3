@@ -13,6 +13,38 @@ public struct DropAPI: Sendable {
         self.init(client: APIClient(baseURL: baseURL))
     }
 
+    // MARK: - Connexion
+
+    /// Le mot de passe du dashboard contre un jeton de session (72 h au plus,
+    /// a garder dans le trousseau). Erreurs : `.nonConnecte("Mot de passe
+    /// incorrect")`, `.server(429, "Trop d'essais...")`.
+    public func connexion(motDePasse: String, appareil: String) async throws -> SessionApp {
+        struct Corps: Encodable, Sendable {
+            let motDePasse: String
+            let mode: String
+            let appareil: String
+        }
+        return try await client.send(.post, "/api/auth/connexion", body: Corps(motDePasse: motDePasse, mode: "app", appareil: appareil), timeout: 30)
+    }
+
+    /// Ferme cette session cote serveur (le jeton ne vaudra plus rien).
+    public func deconnexion() async throws {
+        _ = try await client.raw(.post, "/api/auth/deconnexion")
+    }
+
+    /// Ferme toutes les sessions, sur tous les appareils (celle-ci comprise).
+    @discardableResult
+    public func deconnexionPartout() async throws -> Int {
+        struct Reponse: Decodable, Sendable { let fermees: Int }
+        let r: Reponse = try await client.send(.post, "/api/auth/deconnexion-partout")
+        return r.fermees
+    }
+
+    /// Cette session : jusqu'a quand, et combien d'appareils sont connectes.
+    public func session() async throws -> InfoSession {
+        try await client.send(.get, "/api/auth/session")
+    }
+
     // MARK: - Dashboard
 
     public func stats() async throws -> Stats {

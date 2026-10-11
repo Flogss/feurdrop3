@@ -55,7 +55,7 @@ const CHARGEMENTS_PAR_VUE = {
   depots: () => [loadDepots(false)],
   // les chiffres d'abord : ils disent si les revenus ont pu changer
   stats: () => [loadStats(false).then(() => loadRevenueStats(false))],
-  colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates()],
+  colis: () => [loadStats(false), loadDebts(), loadSenders(), loadMergeCandidates(), loadSecurite()],
   // ailleurs, on guette seulement les nouveaux colis (et la pastille)
   imprime: () => [verifieCommandes()],
   special: () => [verifieCommandes()],

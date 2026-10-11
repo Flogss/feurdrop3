@@ -16,9 +16,24 @@ struct RootView: View {
     @State private var lancement = true
     @State private var arrivee = TabArrivalState()
 
+    /// Sans session (premiere ouverture, 72 h ecoulees, deconnexion) :
+    /// l'ecran de connexion, et rien d'autre ne se charge.
     var body: some View {
-        @Bindable var app = app
         ZStack {
+            if app.connecte {
+                contenu
+                    .transition(.opacity)
+            } else {
+                ConnexionView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        .animation(Theme.spring, value: app.connecte)
+    }
+
+    private var contenu: some View {
+        @Bindable var app = app
+        return ZStack {
             // le fond de la charpente ne sert qu'au lancement : ensuite chaque
             // onglet a le sien, et celui-ci, cache dessous, se dessinait pour rien
             if !booted {

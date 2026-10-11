@@ -5,7 +5,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
 const { spawn } = require("child_process");
-const { environnementDeTest, demarreApp, videBase } = require("./aide");
+const { environnementDeTest, demarreApp, videBase, MOT_DE_PASSE_TEST } = require("./aide");
 
 environnementDeTest();
 
@@ -31,11 +31,18 @@ test("suivi : une liste sans numero valide ne fait pas tomber le serveur", async
   let sortiCode = null;
   enfant.on("exit", (code) => (sortiCode = code));
   t.after(() => enfant.kill());
+  // l'API du suivi est privee : on se connecte d'abord, comme l'app
+  const connexion = await fetch(`${base}/api/auth/connexion`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ motDePasse: MOT_DE_PASSE_TEST, mode: "app" }),
+  }).then((r) => r.json());
+  const session = { Authorization: `Bearer ${connexion.jeton}` };
 
   for (const corps of [{ text: "" }, { text: "pas un numero\nni celui-ci" }, {}]) {
     const r = await fetch(`${base}/api/suivi/verifier`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...session },
       body: JSON.stringify(corps),
     }).catch((err) => ({ status: `erreur reseau : ${err.cause?.code || err.message}` }));
     assert.equal(r.status, 400, `reponse attendue 400, recu ${r.status}\n${erreurs()}`);
@@ -46,7 +53,7 @@ test("suivi : une liste sans numero valide ne fait pas tomber le serveur", async
   // relance d'une categorie vide : meme chemin d'erreur
   const relance = await fetch(`${base}/api/suivi/recheck`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...session },
     body: JSON.stringify({ milestones: ["in_transit"] }),
   }).catch((err) => ({ status: `erreur reseau : ${err.cause?.code || err.message}` }));
   assert.ok([400, 503].includes(relance.status), `relance : recu ${relance.status}\n${erreurs()}`);
@@ -54,7 +61,7 @@ test("suivi : une liste sans numero valide ne fait pas tomber le serveur", async
   // le serveur repond toujours
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(sortiCode, null, `le serveur s'est arrete (code ${sortiCode})\n${erreurs()}`);
-  const vivant = await fetch(`${base}/api/config`);
+  const vivant = await fetch(`${base}/api/config`, { headers: session });
   assert.equal(vivant.status, 200);
 });
 

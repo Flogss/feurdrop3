@@ -21,6 +21,15 @@ extension Image {
 }
 
 enum Platform {
+    /// le nom de cet appareil dans la liste des sessions ("App iPhone", "App Mac")
+    static var nomAppareil: String {
+        #if os(macOS)
+        "App Mac"
+        #else
+        "App \(UIDevice.current.model)"
+        #endif
+    }
+
     static var isMac: Bool {
         #if os(macOS)
         true

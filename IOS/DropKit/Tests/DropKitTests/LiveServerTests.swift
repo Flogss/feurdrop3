@@ -3,10 +3,13 @@ import Testing
 @testable import DropKit
 
 // Decodage des VRAIES reponses du serveur, en lecture seule (aucune ecriture).
-// Lance avec : DROP_API_URL=https://feurdrop3-production.up.railway.app swift test
+// Le dashboard est protege par mot de passe : il faut un jeton de session
+// (celui de l'app, ou un obtenu par POST /api/auth/connexion en mode app).
+// Lance avec : DROP_API_URL=https://… DROP_API_JETON=… swift test
 
 private let adresse = ProcessInfo.processInfo.environment["DROP_API_URL"].flatMap(URL.init(string:))
-private var api: DropAPI { DropAPI(baseURL: adresse!) }
+private let jetonDeTest = ProcessInfo.processInfo.environment["DROP_API_JETON"]
+private var api: DropAPI { DropAPI(client: APIClient(baseURL: adresse!, jeton: .some(jetonDeTest))) }
 
 @Suite(.enabled(if: adresse != nil, "DROP_API_URL non defini"))
 struct ServeurReel {

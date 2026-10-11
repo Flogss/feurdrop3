@@ -368,6 +368,30 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 6,
+    nom: "sessions du dashboard",
+    applique(db) {
+      // Une ligne par appareil connecte (navigateur ou app). Le jeton lui-meme
+      // n'est jamais garde : seulement son empreinte SHA-256 -- une copie de
+      // la base ne donne acces a rien. L'expiration est ABSOLUE (72 h apres
+      // la connexion) et ne bouge jamais ; `mdp` est la version du mot de
+      // passe en vigueur a la connexion (le changer ferme tout).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          appareil TEXT,
+          cree_le INTEGER NOT NULL,
+          expire_le INTEGER NOT NULL,
+          vu_le INTEGER,
+          revoque_le INTEGER,
+          mdp TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire_le);
+      `);
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

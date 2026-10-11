@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Connexion · DROP.ctrl</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
+<meta name="theme-color" content="#08070b" />
+<meta name="color-scheme" content="dark" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="DROP" />
+<!-- le systeme de design du dashboard ; ce qui est propre a cette page suit -->
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  .connexion { position: relative; z-index: 1; display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; padding: 24px 18px calc(24px + env(safe-area-inset-bottom)); }
+  .connexion-carte { width: 100%; max-width: 400px; padding: 30px 26px 26px; animation: connexion-entree 700ms var(--ease-out) both; }
+  .connexion .brand { display: inline-flex; margin: 0 0 26px; padding: 0; pointer-events: none; }
+  .connexion-cadenas {
+    display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 16px; border-radius: 16px;
+    background: linear-gradient(180deg, rgb(var(--violet-500) / 0.28), rgb(var(--violet-700) / 0.18));
+    box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.35), 0 10px 30px -12px rgb(var(--violet-500) / 0.9);
+    color: rgb(var(--violet-200));
+  }
+  .connexion-cadenas .icon { width: 24px; height: 24px; }
+  .connexion h1 { margin: 0 0 6px; font: 760 28px/1.1 var(--font-display); letter-spacing: -0.035em; }
+  .connexion-sous { margin: 0 0 22px; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
+  .connexion label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+  .connexion-champ { position: relative; }
+  .connexion-champ .field { width: 100%; height: 52px; padding-right: 52px; font-size: 16px; }
+  .connexion-oeil {
+    position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 40px; height: 40px;
+    border: 0; border-radius: 12px; background: transparent; color: var(--text-3); cursor: pointer;
+  }
+  .connexion-oeil:hover { color: var(--text); background: rgb(255 255 255 / 0.05); }
+  .connexion-oeil .icon { width: 19px; height: 19px; }
+  .connexion-erreur { min-height: 20px; margin: 10px 2px 0; color: var(--danger); font-size: 13.5px; line-height: 1.4; }
+  .connexion-erreur:empty { min-height: 0; margin: 0; }
+  .connexion .btn { width: 100%; margin-top: 18px; }
+  .connexion-note { margin: 18px 2px 0; color: var(--text-3); font-size: 12.5px; line-height: 1.5; text-align: center; }
+  .connexion-carte.secoue { animation: connexion-secoue 420ms var(--ease-out); }
+  @keyframes connexion-entree { from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.98); filter: blur(6px); } }
+  @keyframes connexion-secoue { 20% { transform: translateX(-8px); } 40% { transform: translateX(7px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(3px); } }
+  @media (prefers-reduced-motion: reduce) { .connexion-carte, .connexion-carte.secoue { animation: none; } }
+</style>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3.5v10.5M7.5 9.5 12 14l4.5-4.5"/><path d="M4.5 14.5v3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></symbol>
+  <symbol id="i-oeil" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
+
+<!-- le meme fond vivant que le dashboard -->
+<div class="ambient" aria-hidden="true">
+  <span class="blob blob-1"></span>
+  <span class="blob blob-2"></span>
+  <span class="blob blob-3"></span>
+  <canvas class="particules" id="particules"></canvas>
+  <span class="grain"></span>
+</div>
+
+<main class="connexion">
+  <form class="card connexion-carte" id="connexion" novalidate>
+    <div class="brand">
+      <span class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></span>
+      <span class="brand-word">DROP<span class="brand-ext">.ctrl</span></span>
+    </div>
+    <div class="connexion-cadenas"><svg class="icon"><use href="#i-lock"/></svg></div>
+    <h1>Connexion</h1>
+    <p class="connexion-sous">Entre le mot de passe pour ouvrir le dashboard sur cet appareil.</p>
+
+    <label for="mot-de-passe">Mot de passe</label>
+    <div class="connexion-champ">
+      <input class="field" id="mot-de-passe" name="password" type="password" autocomplete="current-password" required autofocus
+             autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256" />
+      <button class="connexion-oeil" id="voir" type="button" aria-label="Afficher le mot de passe" aria-pressed="false">
+        <svg class="icon"><use href="#i-oeil"/></svg>
+      </button>
+    </div>
+    <p class="connexion-erreur" id="erreur" role="alert" aria-live="assertive"></p>
+
+    <button class="btn btn-primary btn-lg" id="entrer" type="submit">
+      <span>Se connecter</span>
+    </button>
+    <p class="connexion-note">Cet appareil restera connecté 72 heures, puis le mot de passe sera redemandé.</p>
+  </form>
+</main>
+
+<script src="/connexion.js"></script>
+</body>
+</html>

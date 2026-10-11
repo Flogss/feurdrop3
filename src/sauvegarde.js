@@ -86,11 +86,14 @@ const CATEGORIES = [
 // tables internes de SQLite, rien a sauvegarder
 // ...et l'etat passager du controle des depots : les pauses des transporteurs
 // (les evenements lus chez La Poste se relisent a partir des numeros sauvegardes)
-const TABLES_INTERNES = new Set(["sqlite_sequence", "controle_transporteurs"]);
+// ...et les sessions du dashboard : rien a restaurer (on se reconnecte), et
+// rien a laisser trainer dans un fichier
+const TABLES_INTERNES = new Set(["sqlite_sequence", "controle_transporteurs", "sessions"]);
 
 const EXCLUSIONS = [
   "fichiers PDF et images des etiquettes (gardes chez Telegram : file_id dans les colis)",
-  "reglages secrets : print_token, vapid_private_key, vapid_public_key, portail_secret (regeneres au demarrage)",
+  "reglages secrets : print_token, vapid_private_key, vapid_public_key, portail_secret, session_secret (regeneres au demarrage)",
+  "sessions du dashboard (on se reconnecte apres une restauration)",
   "senders.portail_jeton (lien prive : a recreer depuis le dashboard)",
   "push_subscriptions.endpoint/p256dh/auth (les appareils se reabonnent a l'ouverture)",
   "arrivees deja traitees (historique technique)",
@@ -103,6 +106,7 @@ const EXCLUSIONS = [
 // Les variables dont la sauvegarde liste le NOM (jamais la valeur) : de quoi
 // savoir quoi redefinir lors d'une remise en route.
 const VARIABLES_CONNUES = [
+  "DASHBOARD_PASSWORD_HASH",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_ALLOWED_USERS",
   "TELEGRAM_GROUP_MEMBERS",

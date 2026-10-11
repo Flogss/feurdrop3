@@ -79,9 +79,24 @@ struct MacRootView: View {
     @State private var cadreMarque: CGRect?
     @State private var marquePosee = false
 
+    /// Sans session : l'ecran de connexion, et rien d'autre ne se charge.
     var body: some View {
+        ZStack {
+            if app.connecte {
+                contenu
+                    .transition(.opacity)
+            } else {
+                ConnexionView()
+                    .ignoresSafeArea()
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        .animation(Theme.spring, value: app.connecte)
+    }
+
+    private var contenu: some View {
         @Bindable var app = app
-        ZStack(alignment: .top) {
+        return ZStack(alignment: .top) {
             AmbientBackground()
 
             ZStack {

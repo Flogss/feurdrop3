@@ -60,6 +60,32 @@ const easeOutBack = (p, s = 1.5) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.
 
 class ErreurReseau extends Error {}
 
+// La session : un cookie HttpOnly que cette page ne voit pas. Ce qu'elle voit,
+// c'est le jeton anti-CSRF (un second cookie, signe par le serveur) : toute
+// ecriture vers le serveur le renvoie en en-tete, sans quoi elle est refusee.
+// Une session expiree (72 h) ou revoquee renvoie a la page de connexion.
+const jetonCsrf = () => (/(?:^|;\s*)(?:__Host-)?feurdrop_csrf=([^;]+)/.exec(document.cookie) || [])[1] || "";
+let sessionPerdue = false;
+{
+  const fetchServeur = window.fetch.bind(window);
+  window.fetch = async (ressource, opts = {}) => {
+    const url = new URL(typeof ressource === "string" ? ressource : ressource.url, location.href);
+    const ici = url.origin === location.origin;
+    const methode = String(opts.method || ressource.method || "GET").toUpperCase();
+    if (ici && methode !== "GET" && methode !== "HEAD") {
+      const entetes = new Headers(opts.headers || {});
+      entetes.set("X-CSRF-Token", jetonCsrf());
+      opts = { ...opts, headers: entetes };
+    }
+    const reponse = await fetchServeur(ressource, opts);
+    if (ici && reponse.status === 401 && url.pathname.startsWith("/api/") && !sessionPerdue) {
+      sessionPerdue = true;
+      location.replace("/connexion");
+    }
+    return reponse;
+  };
+}
+
 async function fetchJSON(url, opts = {}, { delai = 12000, essais } = {}) {
   const lecture = !opts.method || opts.method === "GET";
   const maxEssais = essais ?? (lecture ? 2 : 1);

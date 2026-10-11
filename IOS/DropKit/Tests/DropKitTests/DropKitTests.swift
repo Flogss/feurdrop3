@@ -126,3 +126,49 @@ import Testing
     #expect(objet["scope"] as? String == "new")
     #expect(objet["categorie"] == nil)
 }
+
+// MARK: - Connexion : le jeton part, un 401 ramene a la connexion
+
+/// Un faux serveur : retient la derniere requete, repond ce qu'on lui dit.
+final class FauxServeur: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var derniere: URLRequest?
+    nonisolated(unsafe) static var reponse: (Int, String) = (200, "{}")
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.derniere = request
+        let (statut, corps) = Self.reponse
+        let http = HTTPURLResponse(url: request.url!, statusCode: statut, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(corps.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Test func jetonEnvoyeEt401CommeNonConnecte() async throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [FauxServeur.self]
+    let client = APIClient(baseURL: URL(string: "https://exemple.test")!, session: URLSession(configuration: config), jeton: .some("jeton-de-test"))
+    let api = DropAPI(client: client)
+
+    FauxServeur.reponse = (200, #"{"normal":3,"bj":1,"lowThreshold":10}"#)
+    _ = try? await api.stock()
+    #expect(FauxServeur.derniere?.value(forHTTPHeaderField: "Authorization") == "Bearer jeton-de-test")
+
+    FauxServeur.reponse = (401, #"{"error":"Connexion requise"}"#)
+    do {
+        _ = try await api.stats()
+        Issue.record("aurait du echouer")
+    } catch let erreur as APIError {
+        #expect(erreur.exigeConnexion)
+        #expect(erreur.errorDescription == "Connexion requise")
+    }
+
+    // deconnecte : plus d'en-tete du tout
+    client.definitJeton(nil)
+    FauxServeur.reponse = (401, #"{"error":"Connexion requise"}"#)
+    _ = try? await api.stock()
+    #expect(FauxServeur.derniere?.value(forHTTPHeaderField: "Authorization") == nil)
+}

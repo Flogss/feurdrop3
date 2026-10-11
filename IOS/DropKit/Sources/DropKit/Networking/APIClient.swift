@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Ce qui peut mal tourner en parlant au serveur, dit pour l'ecran.
 public enum APIError: LocalizedError, Sendable, Equatable {
@@ -8,6 +9,9 @@ public enum APIError: LocalizedError, Sendable, Equatable {
     case timeout
     /// le serveur a refuse : son message tel quel ("Cet expediteur existe deja")
     case server(status: Int, message: String)
+    /// pas (ou plus) de session valable : mot de passe a (re)saisir (401).
+    /// Le message est celui du serveur ("Mot de passe incorrect", "Connexion requise").
+    case nonConnecte(String)
     /// la reponse n'a pas la forme attendue
     case decoding(String)
     case invalidURL
@@ -17,6 +21,7 @@ public enum APIError: LocalizedError, Sendable, Equatable {
         case .offline: "Connexion impossible"
         case .timeout: "Le serveur met trop de temps à répondre"
         case let .server(_, message): message
+        case let .nonConnecte(message): message
         case let .decoding(detail): "Réponse inattendue du serveur (\(detail))"
         case .invalidURL: "Adresse du serveur invalide"
         }
@@ -24,6 +29,12 @@ public enum APIError: LocalizedError, Sendable, Equatable {
 
     /// une coupure reseau, par opposition a une requete refusee
     public var isNetwork: Bool { self == .offline || self == .timeout }
+
+    /// la session a expire (72 h), a ete revoquee, ou n'existe pas
+    public var exigeConnexion: Bool {
+        if case .nonConnecte = self { return true }
+        return false
+    }
 }
 
 /// Le client HTTP. Une seule instance, partagee : toute la conversation avec le
@@ -36,10 +47,15 @@ public final class APIClient: Sendable {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    /// le jeton de session (Bearer), lu dans le trousseau a la creation :
+    /// tout client -- y compris celui des verifications en arriere-plan --
+    /// part donc connecte s'il y a une session
+    private let jetonCourant: Mutex<String?>
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    public init(baseURL: URL, session: URLSession = .shared, jeton: String?? = nil) {
         self.baseURL = baseURL
         self.session = session
+        self.jetonCourant = Mutex(jeton ?? Trousseau.jeton(pour: baseURL))
         let decoder = JSONDecoder()
         // le serveur melange camelCase et snake_case ("sender_name") :
         // la conversion laisse le camelCase intact
@@ -49,6 +65,14 @@ public final class APIClient: Sendable {
     }
 
     public enum Method: String, Sendable { case get = "GET", post = "POST", put = "PUT", patch = "PATCH", delete = "DELETE" }
+
+    /// Le jeton de session en cours (nil : pas connecte).
+    public var jeton: String? { jetonCourant.withLock { $0 } }
+
+    /// Apres une connexion (le jeton recu) ou une deconnexion (nil).
+    public func definitJeton(_ jeton: String?) {
+        jetonCourant.withLock { $0 = jeton }
+    }
 
     /// Appel JSON -> JSON.
     public func send<Response: Decodable & Sendable>(
@@ -93,6 +117,7 @@ public final class APIClient: Sendable {
         var requete = URLRequest(url: url, timeoutInterval: timeout)
         requete.httpMethod = method.rawValue
         requete.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let jeton { requete.setValue("Bearer \(jeton)", forHTTPHeaderField: "Authorization") }
         if let body {
             requete.setValue("application/json", forHTTPHeaderField: "Content-Type")
             requete.httpBody = try encoder.encode(body)
@@ -112,7 +137,9 @@ public final class APIClient: Sendable {
                 let (data, reponse) = try await session.data(for: requete)
                 guard let http = reponse as? HTTPURLResponse else { throw APIError.offline }
                 guard (200..<300).contains(http.statusCode) else {
-                    throw APIError.server(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
+                    let message = Self.message(from: data, status: http.statusCode)
+                    if http.statusCode == 401 { throw APIError.nonConnecte(message) }
+                    throw APIError.server(status: http.statusCode, message: message)
                 }
                 return data
             } catch let erreur as APIError {

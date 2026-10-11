@@ -364,3 +364,39 @@ document.querySelectorAll("[data-stock-form]").forEach((form) => {
   });
 });
 
+
+// --- Connexion : cet appareil, les autres ----------------------------------------
+// La session de cet appareil expire 72 h apres la connexion, quoi qu'il
+// arrive ; « Déconnecter tous les appareils » ferme toutes les sessions cote
+// serveur (celle-ci comprise).
+async function loadSecurite() {
+  try {
+    const s = await fetchJSON("/api/auth/session");
+    const fin = new Date(s.expireLe);
+    const quand = fin.toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+    $("securite-etat").textContent = `Connecté jusqu'à ${quand}${s.appareils > 1 ? ` · ${pluriel(s.appareils, "appareil connecté", "appareils connectés")}` : ""}`;
+  } catch {
+    /* la ligne garde son texte */
+  }
+}
+
+$("deconnexion").addEventListener("click", (e) =>
+  agir(e.currentTarget, async () => {
+    await postJSON("/api/auth/deconnexion");
+    location.replace("/connexion");
+  })
+);
+
+$("deconnexion-partout").addEventListener("click", async (e) => {
+  const ok = await confirmer({
+    titre: "Déconnecter tous les appareils ?",
+    message: "Toutes les sessions ouvertes (téléphones, ordinateurs, app) sont fermées tout de suite, celle-ci comprise. Le mot de passe sera redemandé partout.",
+    action: "Tout déconnecter",
+    danger: true,
+  });
+  if (!ok) return;
+  agir(e.currentTarget, async () => {
+    await postJSON("/api/auth/deconnexion-partout");
+    location.replace("/connexion");
+  });
+});
