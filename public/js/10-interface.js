@@ -440,14 +440,32 @@ const BLOCS = ".dash > *, :scope > .card, .stats-top > *, .stats-duo > *, .imp-c
 // `affichee` : la page etait deja a l'ecran (il faut alors relancer ses
 // animations d'un recalcul) ; sinon elle apparait et ses animations partent
 // d'elles-memes, sans recalcul force.
-function entreePage(page, riche, affichee = true) {
-  page.classList.remove("entree-riche", "entree-legere");
+function entreePage(page, riche, affichee = true, onde = null) {
+  page.classList.remove("entree-riche", "entree-legere", "entree-onde");
   page.querySelectorAll(".a-reveler, .revele").forEach((el) => el.classList.remove("a-reveler", "revele"));
   if (prefersReducedMotion) return;
   if (affichee) void page.offsetWidth;
-  page.classList.add(riche ? "entree-riche" : "entree-legere");
+  let duree = 1500;
+  if (riche && onde) {
+    // au lancement : chaque bloc entre quand l'onde de la meteorite
+    // l'atteint (un peu avant, pour qu'il naisse dans sa lumiere)
+    let dernier = 0;
+    for (const bloc of page.querySelectorAll(BLOCS)) {
+      const r = bloc.getBoundingClientRect();
+      const ms = Math.max(0, Math.round(onde(r.left + r.width / 2, r.top + Math.min(r.height / 2, 120)) - 140));
+      bloc.style.setProperty("--delai-onde", `${ms}ms`);
+      dernier = Math.max(dernier, ms);
+    }
+    page.classList.add("entree-onde");
+    duree = dernier + 1100;
+  } else {
+    page.classList.add(riche ? "entree-riche" : "entree-legere");
+  }
   clearTimeout(page._entree);
-  page._entree = setTimeout(() => page.classList.remove("entree-riche", "entree-legere"), 1500);
+  page._entree = setTimeout(() => {
+    page.classList.remove("entree-riche", "entree-legere", "entree-onde");
+    page.querySelectorAll(BLOCS).forEach((b) => b.style.removeProperty("--delai-onde"));
+  }, duree);
 
   if (!riche || !("IntersectionObserver" in window)) return;
   observateur?.disconnect();
@@ -624,12 +642,23 @@ function rendListe(box, items, { cle, html, videHtml }) {
 }
 
 // --- Chiffres vivants ----------------------------------------------------------
-// Un montant qui change prend le temps de monter : la duree croit avec
-// l'ecart (+5 va vite, +1000 prend son temps), sans jamais faire attendre.
-function dureeComptage(ecart) {
+// La duree d'un comptage suit l'ampleur du changement (un +1 roule vite,
+// +10 colis se voit monter), plafonnee pour que le site reste vif. L'argent
+// prend plus de temps : on doit le voir grimper.
+function dureeComptage(ecart, argent = false) {
   const d = Math.abs(ecart);
   if (!d) return 0;
-  return Math.min(2600, 520 + Math.log10(d + 1) * 640);
+  return argent ? Math.min(3200, 1150 + Math.log10(d + 1) * 600) : Math.min(2400, 620 + Math.log10(d + 1) * 680);
+}
+
+// Au lancement : quand une carte a fini de naitre derriere l'onde de la
+// meteorite (ms), pour que ses chiffres se mettent a compter a ce moment-la.
+function delaiApresOnde(el, apres = 460) {
+  const l = window.lancementDrop;
+  if (!l) return 780;
+  const r = el?.getBoundingClientRect();
+  if (!r || !r.width) return l.reste() + 780;
+  return l.atteint(r.left + r.width / 2, r.top + r.height / 2) + apres;
 }
 
 function compte(el, valeur, { format = entier, depuis, delai = 0, bulle, duree, onFin } = {}) {
@@ -650,7 +679,7 @@ function compte(el, valeur, { format = entier, depuis, delai = 0, bulle, duree, 
     return;
   }
   el.textContent = format(avant);
-  const total = duree ?? dureeComptage(cible - avant);
+  const total = duree ?? dureeComptage(cible - avant, format !== entier);
   const courbe = format === entier ? easeOutCubic : easeOutQuart;
   if (bulle && cible > avant) afficheDelta(el, bulle(cible - avant), delai);
 

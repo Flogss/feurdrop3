@@ -16,46 +16,186 @@
 <!-- le systeme de design du dashboard ; ce qui est propre a cette page suit -->
 <link rel="stylesheet" href="/styles.css" />
 <style>
-  .connexion { position: relative; z-index: 1; display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; padding: 24px 18px calc(24px + env(safe-area-inset-bottom)); }
-  .connexion-carte { width: 100%; max-width: 400px; padding: 30px 26px 26px; animation: connexion-entree 700ms var(--ease-out) both; }
+  @property --angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+
+  .connexion { position: relative; z-index: 2; display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; padding: 24px 18px calc(24px + env(safe-area-inset-bottom)); perspective: 1400px; }
+
+  /* --- le decor : un horizon violet (le bord d'une planete eclairee), une
+     etoile filante de temps en temps */
+  .horizon {
+    position: fixed; z-index: 1; left: 50%; bottom: -118vmax; width: 170vmax; height: 140vmax; translate: -50% 0; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(closest-side, rgb(10 8 16) 97.6%, transparent 100%);
+    box-shadow: 0 -2px 0 rgb(var(--violet-300) / 0.35), 0 -10px 40px rgb(var(--accent-rgb) / 0.35), 0 -60px 160px rgb(var(--accent-rgb) / 0.22);
+    animation: horizon-leve 1600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes horizon-leve { from { opacity: 0; transform: translateY(8vh); } }
+  .filante {
+    position: fixed; z-index: 1; top: 12%; left: 62%; width: 180px; height: 1.5px; border-radius: 2px; pointer-events: none; opacity: 0;
+    background: linear-gradient(90deg, transparent, rgb(var(--violet-300) / 0.7), #fff);
+    box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.9);
+    rotate: 152deg; transform-origin: right center;
+    animation: filante 9s linear 2.4s infinite;
+  }
+  .filante + .filante { top: 30%; left: 18%; width: 120px; animation-delay: 6.2s; animation-duration: 11s; }
+  @keyframes filante {
+    0% { opacity: 0; transform: translateX(0) scaleX(0.2); }
+    1.5% { opacity: 1; }
+    6% { opacity: 0; transform: translateX(-46vmax) scaleX(1); }
+    100% { opacity: 0; transform: translateX(-46vmax) scaleX(1); }
+  }
+
+  /* --- la carte : du verre, un reflet qui suit le pointeur, une legere
+     inclinaison en relief */
+  .connexion-carte {
+    --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 0%;
+    width: 100%; max-width: 410px; padding: 30px 26px 26px; border-radius: 30px;
+    background: linear-gradient(165deg, rgb(255 255 255 / 0.085), rgb(255 255 255 / 0.025) 38%, rgb(14 11 22 / 0.62));
+    border: 1px solid rgb(255 255 255 / 0.09);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 40px 90px -36px rgb(0 0 0 / 0.9), 0 0 140px -50px rgb(var(--accent-rgb) / 0.55);
+    backdrop-filter: blur(26px) saturate(1.6);
+    -webkit-backdrop-filter: blur(26px) saturate(1.6);
+    transform: rotateX(var(--rx)) rotateY(var(--ry));
+    transform-style: preserve-3d;
+    transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: connexion-entree 1100ms cubic-bezier(0.16, 1, 0.3, 1) 120ms backwards;
+  }
+  .connexion-carte::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: radial-gradient(520px circle at var(--mx) var(--my), rgb(255 255 255 / 0.07), transparent 45%);
+  }
+  /* le liseré de la carte s'allume sous le pointeur */
+  .connexion-carte::after {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+    background: radial-gradient(260px circle at var(--mx) var(--my), rgb(var(--violet-300) / 0.55), transparent 60%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+  @keyframes connexion-entree { from { opacity: 0; transform: translate3d(0, 34px, -60px) rotateX(10deg) scale(0.96); filter: blur(10px); } }
+  .connexion-carte > * { animation: connexion-monte 900ms cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(260ms + var(--n, 0) * 60ms); }
+  @keyframes connexion-monte { from { opacity: 0; transform: translate3d(0, 12px, 0); } }
+
   .connexion .brand { display: inline-flex; margin: 0 0 26px; padding: 0; pointer-events: none; }
   .connexion-cadenas {
-    display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 16px; border-radius: 16px;
-    background: linear-gradient(180deg, rgb(var(--violet-500) / 0.28), rgb(var(--violet-700) / 0.18));
-    box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.35), 0 10px 30px -12px rgb(var(--violet-500) / 0.9);
+    position: relative; display: grid; place-items: center; width: 54px; height: 54px; margin-bottom: 18px; border-radius: 17px;
+    background: linear-gradient(180deg, rgb(var(--violet-500) / 0.3), rgb(var(--violet-700) / 0.18));
+    box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.2), 0 12px 34px -12px rgb(var(--violet-500) / 0.95);
     color: rgb(var(--violet-200));
+    transition: transform 500ms var(--ease-spring), box-shadow 400ms;
   }
   .connexion-cadenas .icon { width: 24px; height: 24px; }
-  .connexion h1 { margin: 0 0 6px; font: 760 28px/1.1 var(--font-display); letter-spacing: -0.035em; }
-  .connexion-sous { margin: 0 0 22px; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
-  .connexion label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
-  .connexion-champ { position: relative; }
-  .connexion-champ .field { width: 100%; height: 52px; padding-right: 52px; font-size: 16px; }
-  .connexion-oeil {
-    position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 40px; height: 40px;
-    border: 0; border-radius: 12px; background: transparent; color: var(--text-3); cursor: pointer;
+  .connexion-cadenas .anse { transition: transform 420ms var(--ease-spring); transform-origin: 16px 10.5px; }
+  .connexion-carte.ouvre .connexion-cadenas .anse { transform: translateY(-2.2px) rotate(-18deg); }
+  .connexion-carte.ouvre .connexion-cadenas { transform: scale(1.08); box-shadow: inset 0 0 0 1px rgb(var(--violet-300) / 0.6), 0 0 44px -6px rgb(var(--accent-rgb) / 1); }
+  .connexion h1 { margin: 0 0 6px; font: 760 29px/1.1 var(--font-display); letter-spacing: -0.035em; background: linear-gradient(180deg, #fff, rgb(var(--violet-200))); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .connexion-sous { margin: 0 0 24px; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
+  .connexion label { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); transition: color 300ms; }
+  .connexion-carte:focus-within label { color: rgb(var(--violet-300)); }
+
+  /* --- le champ : un anneau de lumiere tourne autour quand il a le focus,
+     chaque frappe fait respirer sa lueur */
+  .connexion-champ {
+    position: relative; display: flex; align-items: center; height: 56px; border-radius: 17px;
+    background: rgb(0 0 0 / 0.28); border: 1px solid rgb(255 255 255 / 0.09);
+    box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.35);
+    transition: border-color 300ms, background-color 300ms, box-shadow 400ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .connexion-oeil:hover { color: var(--text); background: rgb(255 255 255 / 0.05); }
+  .connexion-champ::before {
+    content: ""; position: absolute; inset: -1.5px; border-radius: 18px; padding: 1.5px; pointer-events: none; opacity: 0;
+    background: conic-gradient(from var(--angle), transparent 0deg, rgb(var(--violet-300)) 50deg, #fff 70deg, rgb(var(--violet-400)) 95deg, transparent 150deg, transparent 200deg, rgb(var(--violet-400) / 0.7) 260deg, transparent 320deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+    transition: opacity 400ms;
+    animation: anneau 3.4s linear infinite;
+  }
+  @keyframes anneau { to { --angle: 360deg; } }
+  .connexion-champ:focus-within { border-color: transparent; background: rgb(var(--accent-rgb) / 0.07); box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.3), 0 0 0 5px rgb(var(--accent-rgb) / 0.12), 0 0 36px -8px rgb(var(--accent-rgb) / 0.8); }
+  .connexion-champ:focus-within::before { opacity: 1; }
+  .connexion-champ.frappe { animation: frappe 320ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes frappe { 40% { box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.3), 0 0 0 6px rgb(var(--accent-rgb) / 0.2), 0 0 44px -6px rgb(var(--accent-rgb) / 1); } }
+  .connexion-champ > .icon { width: 18px; height: 18px; margin-left: 16px; color: var(--text-3); flex-shrink: 0; transition: color 300ms, transform 400ms var(--ease-spring); }
+  .connexion-champ:focus-within > .icon { color: rgb(var(--violet-300)); transform: scale(1.08); }
+  .connexion-champ input {
+    flex: 1; min-width: 0; height: 100%; padding: 0 10px 0 12px; border: 0; background: transparent; color: var(--text);
+    font: 500 17px/1 var(--font-sans); letter-spacing: 0.04em; caret-color: rgb(var(--violet-300)); outline: none;
+  }
+  .connexion-champ input[type="password"] { letter-spacing: 0.16em; }
+  .connexion-champ input::placeholder { color: var(--text-3); letter-spacing: 0; }
+  .connexion-oeil {
+    display: grid; place-items: center; width: 42px; height: 42px; margin-right: 7px; flex-shrink: 0;
+    border: 0; border-radius: 12px; background: transparent; color: var(--text-3); cursor: pointer;
+    transition: color 200ms, background-color 200ms, transform 300ms var(--ease-spring);
+  }
+  .connexion-oeil:hover { color: var(--text); background: rgb(255 255 255 / 0.06); }
+  .connexion-oeil:active { transform: scale(0.9); }
   .connexion-oeil .icon { width: 19px; height: 19px; }
-  .connexion-erreur { min-height: 20px; margin: 10px 2px 0; color: var(--danger); font-size: 13.5px; line-height: 1.4; }
-  .connexion-erreur:empty { min-height: 0; margin: 0; }
-  .connexion .btn { width: 100%; margin-top: 18px; }
+  .connexion-oeil .barre { stroke-dasharray: 26; stroke-dashoffset: 26; transition: stroke-dashoffset 300ms var(--ease-out); }
+  .connexion-oeil[aria-pressed="true"] .barre { stroke-dashoffset: 0; }
+
+  /* --- l'erreur : le champ vibre a peine, se teinte, le message glisse,
+     puis tout revient au calme */
+  .connexion-champ.erreur { border-color: rgb(var(--danger-rgb) / 0.7); background: rgb(var(--danger-rgb) / 0.06); box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.3), 0 0 0 5px rgb(var(--danger-rgb) / 0.12), 0 0 30px -10px rgb(var(--danger-rgb) / 0.8); animation: champ-refus 460ms cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+  .connexion-champ.erreur::before { opacity: 0; }
+  .connexion-champ.erreur > .icon { color: rgb(var(--danger-rgb)); }
+  @keyframes champ-refus { 15% { transform: translateX(-6px); } 35% { transform: translateX(5px); } 55% { transform: translateX(-3px); } 75% { transform: translateX(1.5px); } }
+  .connexion-erreur {
+    display: flex; align-items: flex-start; gap: 8px; min-height: 0; max-height: 0; margin: 0 2px; overflow: hidden; opacity: 0;
+    color: rgb(var(--danger-rgb)); font-size: 13.5px; line-height: 1.4;
+    transition: max-height 380ms cubic-bezier(0.22, 1, 0.36, 1), margin 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms;
+  }
+  .connexion-erreur.visible { max-height: 60px; margin-top: 11px; opacity: 1; }
+  .connexion-erreur .icon { width: 16px; height: 16px; margin-top: 1px; flex-shrink: 0; }
+  .connexion-erreur.attente { color: var(--warn); }
+
+  /* --- le bouton : il se contracte en sphere pendant la verification ; si
+     c'est bon, la sphere devient le coeur de la meteorite */
+  .connexion-actions { display: grid; justify-items: center; margin-top: 20px; }
+  .connexion .btn-entrer {
+    width: 100%; height: 54px; border-radius: 17px; font-size: 16px; overflow: hidden;
+    transition: width 520ms cubic-bezier(0.65, 0, 0.35, 1), border-radius 520ms cubic-bezier(0.65, 0, 0.35, 1), transform 300ms var(--ease-spring), box-shadow 400ms, filter 300ms;
+  }
+  .connexion .btn-entrer:not(:disabled):hover { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4), 0 16px 36px -12px rgb(var(--accent-rgb) / 1), 0 0 0 1px rgb(var(--violet-300) / 0.4); filter: brightness(1.06); }
+  .connexion .btn-entrer:not(:disabled):active { transform: scale(0.975); }
+  .connexion .btn-entrer .texte { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; transition: opacity 220ms, transform 300ms var(--ease-out); }
+  .connexion .btn-entrer .texte .icon { width: 18px; height: 18px; transition: transform 300ms var(--ease-spring); }
+  .connexion .btn-entrer:not(:disabled):hover .texte .icon { transform: translateX(3px); }
+  .connexion .btn-entrer .sphere { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; opacity: 0; transition: opacity 300ms; }
+  .connexion .btn-entrer .sphere::before {
+    content: ""; width: 26px; height: 26px; border-radius: 50%;
+    background: conic-gradient(from var(--angle), transparent 10%, #fff 40%, transparent 70%);
+    -webkit-mask: radial-gradient(circle, transparent 9px, #000 10px); mask: radial-gradient(circle, transparent 9px, #000 10px);
+    animation: anneau 800ms linear infinite;
+  }
+  .connexion .btn-entrer.envoi { width: 54px; border-radius: 27px; pointer-events: none; }
+  .connexion .btn-entrer.envoi .texte { opacity: 0; transform: scale(0.9); }
+  .connexion .btn-entrer.envoi .sphere { opacity: 1; }
+  .connexion .btn-entrer.envoi::before { display: none; }
+  .connexion .btn-entrer.attente { filter: saturate(0.4) brightness(0.8); }
   .connexion-note { margin: 18px 2px 0; color: var(--text-3); font-size: 12.5px; line-height: 1.5; text-align: center; }
-  .connexion-carte.secoue { animation: connexion-secoue 420ms var(--ease-out); }
-  @keyframes connexion-entree { from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.98); filter: blur(6px); } }
-  @keyframes connexion-secoue { 20% { transform: translateX(-8px); } 40% { transform: translateX(7px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(3px); } }
-  @media (prefers-reduced-motion: reduce) { .connexion-carte, .connexion-carte.secoue { animation: none; } }
+
+  /* --- la sortie : la carte se dissout dans la sphere, l'ecran s'eteint sur
+     le graphite du lancement */
+  .noir { position: fixed; inset: 0; z-index: 5; background: #07060a; opacity: 0; pointer-events: none; }
+  .orbe {
+    position: fixed; z-index: 6; left: 0; top: 0; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle at 42% 38%, #fff 0, rgb(232 222 255) 18%, rgb(var(--violet-300)) 42%, rgb(var(--violet-500)) 70%, rgb(var(--violet-700)) 100%);
+    box-shadow: 0 0 24px 6px rgb(var(--accent-rgb) / 0.9), 0 0 90px 20px rgb(var(--accent-rgb) / 0.45);
+  }
+  .poussiere { position: fixed; z-index: 6; left: 0; top: 0; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; pointer-events: none; background: rgb(var(--violet-200)); box-shadow: 0 0 8px 1px rgb(var(--accent-rgb)); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connexion-carte, .connexion-carte > *, .horizon, .filante, .connexion-champ.erreur { animation: none; }
+    .connexion-carte { transform: none; }
+  }
 </style>
 </head>
 <body>
 
 <svg class="sprite" aria-hidden="true" focusable="false">
   <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3.5v10.5M7.5 9.5 12 14l4.5-4.5"/><path d="M4.5 14.5v3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
-  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></symbol>
-  <symbol id="i-oeil" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-cle" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M16.5 6.5l2.5 2.5M14 9l2 2"/></symbol>
+  <symbol id="i-fleche" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-alerte" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
 </svg>
 
-<!-- le meme fond vivant que le dashboard -->
+<!-- le meme fond vivant que le dashboard, un horizon, des etoiles filantes -->
 <div class="ambient" aria-hidden="true">
   <span class="blob blob-1"></span>
   <span class="blob blob-2"></span>
@@ -63,33 +203,42 @@
   <canvas class="particules" id="particules"></canvas>
   <span class="grain"></span>
 </div>
+<div class="horizon" aria-hidden="true"></div>
+<span class="filante" aria-hidden="true"></span><span class="filante" aria-hidden="true"></span>
 
 <main class="connexion">
   <form class="card connexion-carte" id="connexion" novalidate>
-    <div class="brand">
+    <div class="brand" style="--n: 0">
       <span class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></span>
       <span class="brand-word">DROP<span class="brand-ext">.ctrl</span></span>
     </div>
-    <div class="connexion-cadenas"><svg class="icon"><use href="#i-lock"/></svg></div>
-    <h1>Connexion</h1>
-    <p class="connexion-sous">Entre le mot de passe pour ouvrir le dashboard sur cet appareil.</p>
+    <div class="connexion-cadenas" style="--n: 1">
+      <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path class="anse" d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></svg>
+    </div>
+    <h1 style="--n: 2">Connexion</h1>
+    <p class="connexion-sous" style="--n: 3">Entre le mot de passe pour ouvrir le dashboard sur cet appareil.</p>
 
-    <label for="mot-de-passe">Mot de passe</label>
-    <div class="connexion-champ">
-      <input class="field" id="mot-de-passe" name="password" type="password" autocomplete="current-password" required autofocus
-             autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256" />
+    <label for="mot-de-passe" style="--n: 4">Mot de passe</label>
+    <div class="connexion-champ" id="champ" style="--n: 5">
+      <svg class="icon" aria-hidden="true"><use href="#i-cle"/></svg>
+      <input id="mot-de-passe" name="password" type="password" autocomplete="current-password" required autofocus
+             autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256" placeholder="••••••••••••" />
       <button class="connexion-oeil" id="voir" type="button" aria-label="Afficher le mot de passe" aria-pressed="false">
-        <svg class="icon"><use href="#i-oeil"/></svg>
+        <svg class="icon" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path class="barre" d="M4 4l16 16"/></svg>
       </button>
     </div>
-    <p class="connexion-erreur" id="erreur" role="alert" aria-live="assertive"></p>
+    <p class="connexion-erreur" id="erreur" role="alert" aria-live="assertive"><svg class="icon" aria-hidden="true"><use href="#i-alerte"/></svg><span id="erreur-texte"></span></p>
 
-    <button class="btn btn-primary btn-lg" id="entrer" type="submit">
-      <span>Se connecter</span>
-    </button>
-    <p class="connexion-note">Cet appareil restera connecté 72 heures, puis le mot de passe sera redemandé.</p>
+    <div class="connexion-actions" style="--n: 6">
+      <button class="btn btn-primary btn-lg btn-entrer" id="entrer" type="submit">
+        <span class="texte">Se connecter <svg class="icon"><use href="#i-fleche"/></svg></span>
+        <span class="sphere" aria-hidden="true"></span>
+      </button>
+    </div>
+    <p class="connexion-note" style="--n: 7">Cet appareil restera connecté 72 heures, puis le mot de passe sera redemandé.</p>
   </form>
 </main>
+<div class="noir" id="noir" aria-hidden="true"></div>
 
 <script src="/connexion.js"></script>
 </body>

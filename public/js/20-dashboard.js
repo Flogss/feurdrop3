@@ -22,7 +22,9 @@ async function loadStats(animate, force, riche) {
   };
   // au lancement, on attend que la carte ait fini d'entrer pour compter (et,
   // pendant la meteorite, que son onde ait ouvert l'interface)
-  const delai = premier ? 780 + (window.lancementDrop?.reste() ?? 0) : 0;
+  const delai = premier ? delaiApresOnde($("stat-pending")) : 0;
+  const delaiJour = premier ? delaiApresOnde($("stat-today")) : 0;
+  const delaiGagne = premier ? delaiApresOnde($("stat-earned")) : 0;
   const colis = depart("pending", s.pendingCount);
   const jour = depart("today", s.todayValue, true);
   const gagne = depart("earned", s.droppedValue);
@@ -44,7 +46,7 @@ async function loadStats(animate, force, riche) {
   compte(today, s.todayValue, {
     format: euroCompact,
     depuis: jour.depuis,
-    delai: delai + 140,
+    delai: delaiJour,
     bulle: jour.nouveau ? (d) => `+${euroCompact(d)}` : undefined,
   });
   $("stat-today-count").textContent = pluriel(s.todayCount, "colis dropé", "colis dropés");
@@ -54,7 +56,7 @@ async function loadStats(animate, force, riche) {
   compte(earned, s.droppedValue, {
     format: euroCompact,
     depuis: gagne.depuis,
-    delai: delai + 220,
+    delai: delaiGagne,
     bulle: gagne.nouveau ? (d) => `+${euroCompact(d)}` : undefined,
   });
   $("stat-earned-count").textContent = pluriel(s.droppedCount, "colis dropé", "colis dropés");
@@ -92,12 +94,48 @@ function majPastilleImprime(n) {
   if (n > avant && avant > 0) rejoue(pastille, "is-bump", 650);
 }
 
+// La liste des expediteurs : tous ceux que le serveur connait, filtres ici
+// (recherche, "a poster" ou "tous") sans redemander quoi que ce soit.
+const expediteurs = { lignes: [], filtre: "attente", recherche: "" };
+const sansAccents = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
 function renderSenders(rows) {
-  rendListe($("sender-rows"), rows, {
+  expediteurs.lignes = rows || [];
+  const enAttente = expediteurs.lignes.filter((r) => r.pending_count > 0);
+  $("sender-n-attente").textContent = entier(enAttente.length);
+  $("sender-n-tous").textContent = entier(expediteurs.lignes.length);
+  $("sender-meta").textContent = expediteurs.lignes.length ? `· ${entier(expediteurs.lignes.length)}` : "";
+  // rien a poster : "A poster" serait vide, on montre tout
+  if (!enAttente.length && expediteurs.filtre === "attente" && !expediteurs.choisi) choisisFiltre("tous", false);
+  afficheExpediteurs();
+}
+
+function choisisFiltre(filtre, parUtilisateur = true) {
+  expediteurs.filtre = filtre;
+  if (parUtilisateur) expediteurs.choisi = true;
+  document.querySelectorAll(".senders-filter .seg").forEach((b) => {
+    const on = b.dataset.filtre === filtre;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+}
+
+function afficheExpediteurs() {
+  const q = sansAccents(expediteurs.recherche.trim());
+  let rows = expediteurs.lignes;
+  if (expediteurs.filtre === "attente" && !q) rows = rows.filter((r) => r.pending_count > 0);
+  if (q) rows = rows.filter((r) => sansAccents(r.sender_name).includes(q));
+  const box = $("sender-rows");
+  if (q && !rows.length) {
+    box._signatures = new Map();
+    box.innerHTML = vide("search", "Aucun expéditeur trouvé", `Rien ne correspond à « ${escapeHtml(expediteurs.recherche.trim())} ».`);
+    return;
+  }
+  rendListe(box, rows, {
     cle: (r) => r.sender_name,
     videHtml: vide("package", "Aucun colis pour le moment", "Les fichiers envoyés au bot apparaîtront ici."),
     html: (r) => `
-      <div class="lrow sender" data-key="${escapeAttr(r.sender_name)}">
+      <div class="lrow sender${r.pending_count > 0 ? " a-poster" : ""}" data-key="${escapeAttr(r.sender_name)}">
         ${avatar(r.sender_name)}
         <div class="lrow-main">
           <div class="lrow-title">${escapeHtml(r.sender_name)}</div>
@@ -119,6 +157,56 @@ function renderSenders(rows) {
       </div>`,
   });
 }
+
+(() => {
+  const champ = $("sender-search");
+  const efface = $("sender-search-clear");
+  const scroll = $("sender-scroll");
+  let minuteur = 0;
+  champ.addEventListener("input", () => {
+    efface.hidden = !champ.value;
+    clearTimeout(minuteur);
+    minuteur = setTimeout(() => {
+      expediteurs.recherche = champ.value;
+      afficheExpediteurs();
+      scroll.scrollTop = 0;
+    }, 60);
+  });
+  champ.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && champ.value) {
+      e.preventDefault();
+      champ.value = "";
+      champ.dispatchEvent(new Event("input"));
+    }
+  });
+  efface.addEventListener("click", () => {
+    champ.value = "";
+    champ.dispatchEvent(new Event("input"));
+    champ.focus();
+  });
+  document.querySelector(".senders-filter").addEventListener("click", (e) => {
+    const b = e.target.closest(".seg");
+    if (!b || b.dataset.filtre === expediteurs.filtre) return;
+    choisisFiltre(b.dataset.filtre);
+    afficheExpediteurs();
+    scroll.scrollTop = 0;
+  });
+  // les bords de la zone de defilement s'estompent quand il reste a voir
+  const bords = () => {
+    scroll.classList.toggle("a-haut", scroll.scrollTop > 4);
+    scroll.classList.toggle("a-bas", scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 4);
+  };
+  scroll.addEventListener("scroll", bords, { passive: true });
+  new ResizeObserver(bords).observe(scroll);
+  new MutationObserver(bords).observe($("sender-rows"), { childList: true });
+  // « / » : chercher un expediteur (hors d'un champ)
+  addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.metaKey || e.ctrlKey || currentView !== "dashboard") return;
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    champ.focus();
+  });
+})();
 
 function renderCarriers(byCarrier) {
   const box = $("carrier-rows");

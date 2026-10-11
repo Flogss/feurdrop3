@@ -241,9 +241,9 @@ body.boot .ambient { animation: fond-leve 1.1s var(--ease-out) both; }
 /* jamais d'animation sur .topbar elle-meme : un transform ou un filtre sur
    elle capturerait la barre d'onglets (position fixe) qu'elle contient */
 body.boot .topbar > .brand,
-body.boot .topbar > .topbar-end { animation: boot-haut var(--t-5) var(--ease-out) 80ms both; }
-body.boot .topbar > .topbar-end { animation-delay: 160ms; }
-body.boot .tabbar { animation: boot-barre 900ms var(--ease-spring) 220ms both; }
+body.boot .topbar > .topbar-end { animation: boot-haut var(--t-5) var(--ease-out) var(--delai-onde, 80ms) both; }
+body.boot .topbar > .topbar-end { animation-delay: var(--delai-onde, 160ms); }
+body.boot .tabbar { animation: boot-barre 900ms var(--ease-spring) var(--delai-onde, 220ms) both; }
 @keyframes fond-leve { from { opacity: 0; } }
 @keyframes boot-haut { from { opacity: 0; transform: translate3d(0, -14px, 0); filter: blur(6px); } }
 @keyframes boot-barre { from { opacity: 0; transform: translate3d(0, 40px, 0) scale(0.86); } }
@@ -684,6 +684,28 @@ main { position: relative; margin-top: 8px; }
   60% { filter: blur(0); }
 }
 @keyframes entre-leger { from { opacity: 0; transform: translate3d(0, 10px, 0); } }
+
+/* Au lancement : chaque bloc nait quand l'onde de la meteorite l'atteint
+   (--delai-onde, calcule par entreePage) -- encore flou et surexpose par sa
+   lumiere, un peu en retrait, puis il se pose. */
+.entree-onde .dash > *,
+.entree-onde > .page-head,
+.entree-onde > .card,
+.entree-onde > .stats-top > *,
+.entree-onde > .stats-duo > *,
+.entree-onde > .imp-columns > *,
+.entree-onde > .special-list > *,
+.entree-onde > .settings-grid > .settings-col > *,
+.entree-onde > .suivi-grid > * {
+  animation: entre-onde 980ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--delai-onde, 0ms);
+}
+@keyframes entre-onde {
+  from { opacity: 0; transform: translate3d(0, 22px, 0) scale(0.94); filter: blur(14px) brightness(1.9) saturate(1.5); }
+  35% { opacity: 1; filter: blur(4px) brightness(1.35) saturate(1.2); }
+  70% { filter: blur(0) brightness(1.06); }
+  to { opacity: 1; transform: none; filter: none; }
+}
 
 .a-reveler { opacity: 0; }
 .revele { animation: entre-riche 760ms var(--ease-out) both !important; animation-delay: 0ms !important; }

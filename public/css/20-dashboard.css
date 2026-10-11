@@ -380,6 +380,122 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
 /* au telephone, la place va au nom et aux boutons plutot qu'a la pastille */
 @media (max-width: 479px) { .sender .avatar { display: none; } }
 
+/* --- Expediteurs : recherche, filtre, zone de defilement ------------------- */
+
+/* les fondus des bords de la zone de defilement glissent (50-adaptations) */
+@property --haut { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --bas { syntax: "<length>"; inherits: false; initial-value: 0px; }
+
+.senders-card .card-head h2 { display: inline-flex; align-items: baseline; gap: 6px; }
+/* les en-tetes de « A poster » et « Expediteurs » sur la meme ligne, au pixel */
+.carriers-card > .card-head, .senders-card > .card-head { min-height: 36px; }
+.senders-tools { display: flex; gap: 8px; margin: 2px 0 8px; }
+.senders-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: rgb(255 255 255 / 0.03);
+  transition: border-color var(--t-2) var(--ease-out), box-shadow var(--t-3) var(--ease-out), background-color var(--t-2);
+}
+.senders-search > .icon { width: 17px; height: 17px; color: var(--text-3); flex-shrink: 0; transition: color var(--t-2); }
+.senders-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  /* 16 px : en dessous, Safari zoome sur le champ */
+  font-size: 16px;
+  outline: none;
+}
+.senders-search input::-webkit-search-cancel-button { display: none; }
+.senders-search input::placeholder { color: var(--text-3); }
+.senders-search:focus-within {
+  border-color: rgb(var(--violet-400) / 0.65);
+  background: rgb(var(--accent-rgb) / 0.06);
+  box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.14), 0 0 22px -8px rgb(var(--accent-rgb) / 0.7);
+}
+.senders-search:focus-within > .icon { color: rgb(var(--violet-300)); }
+.senders-search-clear {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  color: var(--text-2);
+  cursor: pointer;
+  animation: pop 260ms var(--ease-spring);
+}
+.senders-search-clear .icon { width: 14px; height: 14px; }
+
+.segmented {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.25);
+  border: 1px solid var(--line);
+}
+.segmented .seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  font: 600 13px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--t-3) var(--ease-out), color var(--t-2), box-shadow var(--t-3) var(--ease-out);
+}
+.segmented .seg b { font-weight: 650; color: var(--text-3); font-variant-numeric: tabular-nums; transition: color var(--t-2); }
+.segmented .seg.is-on {
+  background: linear-gradient(180deg, rgb(var(--accent-rgb) / 0.32), rgb(var(--accent-rgb) / 0.18));
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 0 0 1px rgb(var(--violet-400) / 0.35), 0 6px 18px -8px rgb(var(--accent-rgb) / 0.9);
+}
+.segmented .seg.is-on b { color: rgb(var(--violet-200)); }
+@media (hover: hover) { .segmented .seg:not(.is-on):hover { color: var(--text); background: rgb(255 255 255 / 0.05); } }
+
+/* un expediteur qui a des colis a poster : un liseré violet, son nom en
+   clair ; les autres restent lisibles mais en retrait */
+.sender.a-poster::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--grad-accent);
+  box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.7);
+}
+.sender:not(.a-poster) .lrow-title { color: var(--text-2); }
+.sender:not(.a-poster) .avatar { opacity: 0.7; }
+
+.senders-scroll { position: relative; }
+.senders-scroll > .list { padding: 0 2px; }
+@media (max-width: 479px) {
+  .senders-tools { flex-direction: column; }
+  .senders-search { flex: none; height: 44px; }
+  .senders-filter { align-self: stretch; }
+  .senders-filter .seg { flex: 1; justify-content: center; }
+}
+
 /* --- Outils ------------------------------------------------------------------ */
 
 .tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }

@@ -1,40 +1,123 @@
-/* La sequence de lancement du site, la meme que l'app : une meteorite violette
-   plonge du fond de l'espace, s'ecrase au centre, ses fragments reviennent
-   dessiner le symbole de DROP, la lumiere se condense en logo, puis une onde
-   ouvre l'interface et le logo rejoint sa place dans la barre.
+/* La sequence de lancement du site, la meme que l'app : au loin une lumiere
+   violette, un point s'allume ; la meteorite se met en route, accelere,
+   passe tout pres en traversant l'ecran, freine et s'immobilise au centre.
+   Elle se fissure, la lumiere monte dans ses failles, elle se fragmente ;
+   ses eclats deviennent energie et viennent un par un tracer le symbole de
+   DROP, qui se condense en logo. Une onde part du logo et ouvre
+   l'interface : chaque carte entre au moment ou l'onde l'atteint, et le
+   logo rejoint sa place dans la barre.
+
+   Trois entrees :
+   - "complet" : la scene entiere (premiere visite, ou plus de 6 h apres) ;
+   - "retour"  : une page rechargee -- l'energie se rassemble en logo puis
+                 l'onde (environ 1 s) ;
+   - "connexion" : juste apres le mot de passe -- la page de connexion a
+                 deja amene le coeur lumineux au centre ; la roche s'y
+                 fissure, puis la suite.
+   `?intro=complet|retour|connexion` force une entree.
 
    La lumiere est dessinee en WebGL dans un worker (lancement-worker.js) :
    la page se construit dessous sans la faire hoqueter. Ici : le calendrier,
-   le logo (un element de la page, net) et son vol jusqu'a la marque.
-   Toucher l'ecran passe directement au logo. `?introFige=1.3` arrete la
-   sequence a cet instant (pour les photos). */
+   le logo (un element de la page, net) et son vol jusqu'a la marque, et
+   l'heure a laquelle l'onde atteint chaque point (les cartes s'y calent).
+   Toucher l'ecran (ou une touche) passe directement au logo.
+   `?introFige=3.1` arrete la sequence a cet instant (pour les photos). */
 
 (() => {
   "use strict";
 
-  const S = { point: 0.12, depart: 0.3, impact: 1.3, logo: 2.12, revelation: 2.45, dureeRevelation: 0.8, vol: 0.62, fin: 3.3 };
+  const S = { point: 0.3, depart: 0.7, arrivee: 2.3, eclat: 2.72, attraction: 2.94, logo: 3.72, revelation: 4.0, dureeRevelation: 0.95, vol: 0.66, fin: 5.05, retour: 2.95, connexion: 2.58 };
   const toileDepart = document.getElementById("lancement");
   const params = new URLSearchParams(location.search);
   const fige = params.has("introFige") ? parseFloat(params.get("introFige")) : null;
   const reduit = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const maintenant = () => performance.timeOrigin + performance.now();
 
+  // --- quelle entree
+  const CLE = "drop-lancement-complet";
+  const DELAI_COMPLET = 6 * 3600 * 1000;
+  function choisitEntree() {
+    const forcee = params.get("intro");
+    if (["complet", "retour", "connexion"].includes(forcee)) return forcee;
+    let depuisConnexion = false;
+    try {
+      depuisConnexion = sessionStorage.getItem("drop-entree") === "connexion";
+      sessionStorage.removeItem("drop-entree");
+    } catch {
+      /* stockage indisponible : entree complete */
+    }
+    if (depuisConnexion) return "connexion";
+    try {
+      const dernier = Number(localStorage.getItem(CLE) || 0);
+      if (Date.now() - dernier < DELAI_COMPLET) return "retour";
+    } catch {
+      /* idem */
+    }
+    return "complet";
+  }
+  const entree = fige !== null ? "complet" : choisitEntree();
+  if (entree === "complet" && fige === null) {
+    try {
+      localStorage.setItem(CLE, String(Date.now()));
+    } catch {
+      /* rien */
+    }
+  }
+  // mouvements reduits : pas de meteorite, le logo puis l'onde
+  const instantDepart = reduit ? S.logo - 0.15 : entree === "retour" ? S.retour : entree === "connexion" ? S.connexion : 0;
+
   let revele, finit;
   const revelation = new Promise((r) => (revele = r));
   const fin = new Promise((r) => (finit = r));
-  // mouvements reduits : pas de meteorite, le logo puis l'onde
-  let debut = maintenant() - (reduit ? S.logo * 1000 : 0);
+  let debut = maintenant() - instantDepart * 1000;
   let ouverte = false;
 
+  let toile = toileDepart;
+  const taille = () => ({ w: toile?.clientWidth || innerWidth, h: toile?.clientHeight || innerHeight });
+  // la meme geometrie que le rendu
+  const geometrie = () => {
+    const { w, h } = taille();
+    const petit = Math.min(w, h);
+    return {
+      w, h,
+      centre: [0.5 * w, (w > h ? 0.47 : 0.42) * h],
+      cote: Math.min(Math.max(petit * 0.3, 96), 150),
+      k: Math.min(Math.max(petit / 400, 0.9), 1.7),
+    };
+  };
+  // le rayon de l'onde a l'instant t (le meme calcul que le rendu)
+  function rayonOnde(t) {
+    const g = geometrie();
+    const s = Math.min(Math.max((t - S.revelation) / S.dureeRevelation, 0), 1);
+    const e = 1 - Math.pow(1 - s, 1.8);
+    const bord = (80 + 160 * e) * g.k;
+    const coin = Math.hypot(Math.max(g.centre[0], g.w - g.centre[0]), Math.max(g.centre[1], g.h - g.centre[1]));
+    return g.cote * 0.6 + e * (coin + bord * 1.3) - bord * 0.6;
+  }
+
   window.lancementDrop = {
+    entree,
     revelation,
     fin,
     /** le temps (ms) avant que l'onde ouvre l'interface */
     reste: () => (ouverte ? 0 : Math.max(0, debut + S.revelation * 1000 - maintenant())),
+    /** le temps (ms) avant que l'onde atteigne ce point de l'ecran */
+    atteint(x, y) {
+      const g = geometrie();
+      const dist = Math.hypot(x - g.centre[0], y - g.centre[1]);
+      let a = S.revelation, b = S.revelation + S.dureeRevelation;
+      if (rayonOnde(b) < dist) return Math.max(0, debut + b * 1000 - maintenant());
+      for (let i = 0; i < 18; i++) {
+        const m = (a + b) / 2;
+        if (rayonOnde(m) < dist) a = m;
+        else b = m;
+      }
+      return Math.max(0, debut + b * 1000 - maintenant());
+    },
   };
 
   const sansSequence = () => {
-    toileDepart?.remove();
+    toile?.remove();
     document.body.classList.remove("lancement", "lancement-marque");
     ouverte = true;
     revele();
@@ -45,19 +128,12 @@
     return;
   }
 
-  let toile = toileDepart;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const taille = () => ({ w: toile.clientWidth || innerWidth, h: toile.clientHeight || innerHeight });
-  // la meme geometrie que le rendu
-  const geometrie = () => {
-    const { w, h } = taille();
-    const petit = Math.min(w, h);
-    return {
-      centre: [0.5 * w, (w > h ? 0.47 : 0.42) * h],
-      cote: Math.min(Math.max(petit * 0.3, 96), 150),
-      k: Math.min(Math.max(petit / 400, 0.9), 1.7),
-    };
-  };
+  // la definition de la toile : celle de l'ecran (2 au plus), dans un budget
+  // de pixels -- sur un tres grand ecran, une lumiere douce n'a pas besoin de
+  // 8 millions de points, et la meteorite garde ses 60 images par seconde
+  const BUDGET = 4.2e6;
+  const definition = (w, h) => Math.max(1, Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(BUDGET / Math.max(w * h, 1))));
+  let dpr = definition(innerWidth, innerHeight);
 
   // --- le rendu : dans un worker si possible, sinon sur le fil principal
 
@@ -84,6 +160,7 @@
       }
       const { w, h } = taille();
       rendu.taille(w, h, dpr);
+      rendu.entree(instantDepart);
       let premiere = true;
       const image = () => {
         rendu.image(fige ?? (maintenant() - debut) / 1000);
@@ -126,7 +203,7 @@
           worker = null;
           surFilPrincipal();
         };
-        worker.postMessage({ type: "init", toile: ecran, w, h, dpr, debut, fige, mesure: params.has("introMesure") }, [ecran]);
+        worker.postMessage({ type: "init", toile: ecran, w, h, dpr, debut, fige, entree: instantDepart, mesure: params.has("introMesure") }, [ecran]);
         return;
       } catch {
         worker?.terminate();
@@ -136,8 +213,8 @@
     surFilPrincipal();
   }
 
-  // --- le logo : il se condense, un reflet le traverse, puis il vole jusqu'a
-  // la marque (ou se dissout s'il n'y en a pas)
+  // --- le logo : il se condense dans la lumiere du symbole, un reflet le
+  // traverse, puis il vole jusqu'a la marque (ou se dissout s'il n'y en a pas)
 
   const logo = document.createElement("div");
   logo.className = "lancement-logo";
@@ -165,11 +242,15 @@
   };
 
   function montreLogo(deja = 0) {
-    joue(logo, [{ opacity: 0, transform: "scale(0.86)" }, { opacity: 1, transform: "scale(1)" }], {
-      duration: 240, easing: "cubic-bezier(0.22, 1, 0.36, 1)", delay: -deja,
-    });
+    // la matiere du logo se condense sous les traits de lumiere : flou,
+    // surexpose, puis net
+    joue(logo, [
+      { opacity: 0, transform: "scale(0.9)", filter: "blur(10px) brightness(2.2)" },
+      { opacity: 1, transform: "scale(1.02)", filter: "blur(2px) brightness(1.5)", offset: 0.55 },
+      { opacity: 1, transform: "scale(1)", filter: "blur(0) brightness(1)" },
+    ], { duration: 360, easing: "cubic-bezier(0.22, 1, 0.36, 1)", delay: -deja });
     joue(logo.querySelector(".lancement-reflet"), [{ transform: "translateX(-140%) rotate(20deg)" }, { transform: "translateX(260%) rotate(20deg)" }], {
-      duration: 420, easing: "ease-in-out", delay: 120 - deja,
+      duration: 460, easing: "ease-in-out", delay: 140 - deja,
     });
   }
 
@@ -187,12 +268,12 @@
       const dy = r.top + r.height / 2 - g.centre[1];
       const s = r.width / g.cote;
       const etapes = [];
-      for (let i = 0; i <= 10; i++) {
-        const f = i / 10;
+      for (let i = 0; i <= 12; i++) {
+        const f = i / 12;
         const arc = Math.sin(Math.PI * f);
         etapes.push({
           offset: f,
-          transform: `translate(${dx * f}px, ${dy * f - arc * 50 * g.k}px) scale(${(1 + (s - 1) * f) * (1 + 0.06 * arc)})`,
+          transform: `translate(${dx * f}px, ${dy * f - arc * 56 * g.k}px) scale(${(1 + (s - 1) * f) * (1 + 0.07 * arc)}) rotate(${-8 * arc}deg)`,
         });
       }
       const vol = joue(logo, etapes, { duration: S.vol * 1000, easing: "cubic-bezier(0.65, 0, 0.35, 1)", delay: -deja });
@@ -233,19 +314,24 @@
     quand(S.fin, termine);
   }
 
-  // toucher pendant la sequence : on passe au logo
+  // toucher pendant la sequence (ou une touche) : on passe au logo
   function accelere() {
     if (fige !== null) return;
-    if ((maintenant() - debut) / 1000 < S.logo - 0.05) {
-      debut = maintenant() - S.logo * 1000;
+    if ((maintenant() - debut) / 1000 < S.logo - 0.25) {
+      debut = maintenant() - (S.logo - 0.25) * 1000;
       worker?.postMessage({ type: "debut", debut });
       planifie();
     }
   }
   toile.addEventListener("pointerdown", accelere);
+  addEventListener("keydown", function touche(e) {
+    if (ouverte) return removeEventListener("keydown", touche);
+    if (!e.metaKey && !e.ctrlKey) accelere();
+  });
 
   addEventListener("resize", () => {
     const { w, h } = taille();
+    dpr = definition(w, h);
     if (worker) worker.postMessage({ type: "taille", w, h, dpr });
     else rendu?.taille(w, h, dpr);
     if (!ouverte) placeLogo();

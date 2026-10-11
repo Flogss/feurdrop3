@@ -275,7 +275,7 @@ function afficheStock(kind, { premier = false } = {}) {
     roule(el, entier(value), value - avant);
   } else {
     el._texte = entier(value);
-    compte(el, value, { depuis: premier && nouvelleSession ? 0 : undefined, delai: premier ? 520 : 0 });
+    compte(el, value, { depuis: premier && nouvelleSession ? 0 : undefined, delai: premier ? delaiApresOnde(el, 380) : 0 });
   }
   $(s.boite).classList.toggle("is-low", value <= LOW_STOCK_THRESHOLD);
 }

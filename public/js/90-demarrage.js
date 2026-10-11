@@ -53,8 +53,16 @@ async function demarre() {
   // les barres arrivent (CSS body.boot), le contenu entre en cascade
   document.body.classList.add("boot");
   page.classList.remove("attente");
-  entreePage(page, true);
-  setTimeout(() => document.body.classList.remove("boot"), 2200);
+  // les barres du haut et du bas naissent aussi quand l'onde les atteint
+  const onde = lancement && lancement.entree !== undefined ? (x, y) => lancement.atteint(x, y) : null;
+  if (onde) {
+    for (const el of document.querySelectorAll(".topbar > .brand, .topbar > .topbar-end, .tabbar")) {
+      const r = el.getBoundingClientRect();
+      el.style.setProperty("--delai-onde", `${Math.max(0, Math.round(onde(r.left + r.width / 2, r.top + r.height / 2) - 120))}ms`);
+    }
+  }
+  entreePage(page, true, true, onde);
+  setTimeout(() => document.body.classList.remove("boot"), onde ? 2600 : 2200);
 }
 
 initPush();

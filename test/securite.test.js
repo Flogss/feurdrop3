@@ -160,7 +160,10 @@ test("3. la session est memorisee sur l'appareil (cookie persistant, HttpOnly, S
   assert.match(session, /HttpOnly/);
   assert.match(session, /SameSite=Lax/);
   assert.match(session, /Path=\//);
-  assert.match(session, /Max-Age=259200/, "72 h, persistant : survit a la fermeture du navigateur");
+  // 72 h, arrondies a la seconde inferieure (jamais au-dela de la fin de la
+  // session) : 259200, ou 259199 si une milliseconde s'est ecoulee
+  const maxAge = Number(session.match(/Max-Age=(\d+)/)?.[1]);
+  assert.ok(maxAge >= 259198 && maxAge <= 259200, `72 h, persistant : survit a la fermeture du navigateur (Max-Age=${maxAge})`);
   const csrf = r.setCookie.find((c) => c.startsWith("feurdrop_csrf="));
   assert.ok(!/HttpOnly/.test(csrf), "le jeton anti-CSRF est lisible par la page");
 

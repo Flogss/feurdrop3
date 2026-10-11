@@ -17,7 +17,7 @@ function image(ts) {
   // le temps absolu (le meme que la page) : timeOrigin + horloge du worker
   const t = fige ?? (performance.timeOrigin + ts - debut) / 1000;
   rendu.image(t);
-  if (mesure && t < 3.2) mesure.push(ts);
+  if (mesure && t < 4.9) mesure.push([ts, t]);
   if (premiere) {
     premiere = false;
     self.postMessage({ type: "premiere", geometrie: rendu.geometrie() });
@@ -34,6 +34,7 @@ self.onmessage = (e) => {
       return;
     }
     rendu.taille(m.w, m.h, m.dpr);
+    rendu.entree(m.entree || 0);
     debut = m.debut;
     fige = m.fige;
     if (m.mesure) mesure = [];
@@ -44,10 +45,12 @@ self.onmessage = (e) => {
     debut = m.debut;
   } else if (m.type === "fin") {
     if (mesure && mesure.length > 2) {
-      const ecarts = mesure.slice(1).map((v, i) => v - mesure[i]).sort((a, b) => a - b);
+      const ecarts = mesure.slice(1).map(([v], i) => v - mesure[i][0]).sort((a, b) => a - b);
+      // les images lentes, avec l'instant de la sequence ou elles tombent
+      const lentes = mesure.slice(1).map(([v, t], i) => [t, v - mesure[i][0]]).filter(([, e]) => e > 20).map(([t, e]) => `${t.toFixed(2)}s:${e.toFixed(0)}ms`);
       self.postMessage({
         type: "mesure",
-        texte: `lancement : ${mesure.length} images en ${((mesure.at(-1) - mesure[0]) / 1000).toFixed(2)} s, moyenne ${(ecarts.reduce((a, b) => a + b, 0) / ecarts.length).toFixed(1)} ms, p95 ${ecarts[Math.floor((ecarts.length - 1) * 0.95)].toFixed(1)} ms, pire ${ecarts.at(-1).toFixed(1)} ms, >20 ms : ${ecarts.filter((e) => e > 20).length}`,
+        texte: `lancement : ${mesure.length} images en ${((mesure.at(-1)[0] - mesure[0][0]) / 1000).toFixed(2)} s, moyenne ${(ecarts.reduce((a, b) => a + b, 0) / ecarts.length).toFixed(1)} ms, p95 ${ecarts[Math.floor((ecarts.length - 1) * 0.95)].toFixed(1)} ms, pire ${ecarts.at(-1).toFixed(1)} ms, >20 ms : ${ecarts.filter((e) => e > 20).length}${lentes.length ? ` (${lentes.join(", ")})` : ""}`,
       });
     }
     enCours = false;

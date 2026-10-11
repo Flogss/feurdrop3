@@ -278,13 +278,28 @@
 
         <article class="card senders-card">
           <header class="card-head">
-            <h2>Expéditeurs</h2>
+            <h2>Expéditeurs <span class="card-meta" id="sender-meta"></span></h2>
             <div class="card-actions">
               <button class="btn btn-sm btn-ghost drop-except-lit-btn" type="button">Tout sauf LIT</button>
               <button class="btn btn-sm btn-secondary drop-all-btn" type="button">Tout dropé</button>
             </div>
           </header>
-          <div id="sender-rows" class="list"></div>
+          <!-- beaucoup d'expediteurs : une recherche, et le choix entre ceux
+               qui ont des colis a poster et tous -->
+          <div class="senders-tools">
+            <label class="senders-search">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" id="sender-search" placeholder="Rechercher un expéditeur" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Rechercher un expéditeur" />
+              <button type="button" class="senders-search-clear" id="sender-search-clear" aria-label="Effacer la recherche" hidden><svg class="icon"><use href="#i-x"/></svg></button>
+            </label>
+            <div class="segmented senders-filter" role="radiogroup" aria-label="Expéditeurs affichés">
+              <button type="button" role="radio" class="seg is-on" data-filtre="attente" aria-checked="true">À poster <b id="sender-n-attente">0</b></button>
+              <button type="button" role="radio" class="seg" data-filtre="tous" aria-checked="false">Tous <b id="sender-n-tous">0</b></button>
+            </div>
+          </div>
+          <div class="senders-scroll" id="sender-scroll">
+            <div id="sender-rows" class="list"></div>
+          </div>
         </article>
 
         <nav class="tools" aria-label="Outils">
