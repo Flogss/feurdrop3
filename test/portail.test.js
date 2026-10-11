@@ -41,7 +41,7 @@ test("rien du dashboard : ni prix, ni identifiant interne, ni fichier", async ()
   db.setColisNote(c.id, "note interne");
   const r = await app.appel(`/api/portail/${espace("Alice")}`);
   const colis = r.json.colis[0];
-  assert.deepEqual(Object.keys(colis).sort(), ["boiteJaune", "dropeLe", "etape", "imprimeLe", "recuLe", "ref", "suivi", "transporteur"]);
+  assert.deepEqual(Object.keys(colis).sort(), ["boiteJaune", "depot", "dropeLe", "etape", "imprimeLe", "recuLe", "ref", "suivi", "transporteur"]);
   for (const interdit of ["secret-file-id", "legende privee", "note interne", '"price"', `"id":${c.id}`]) {
     assert.ok(!r.texte.includes(interdit), `fuite : ${interdit}`);
   }

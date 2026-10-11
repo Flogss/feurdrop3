@@ -263,6 +263,12 @@
 .p-colis-tr .carrier-dot { width: 7px; height: 7px; box-shadow: none; }
 .p-groupe .p-colis-tr { display: none; }
 .p-bj { font-weight: 650; color: rgb(var(--c-bj)); }
+/* apres le drop : ce que dit le transporteur */
+.p-depot { --d: var(--e-drope); font-weight: 650; color: rgb(var(--d)); }
+.p-depot[data-depot="pas_encore"] { --d: 255 176 72; }
+.p-depot[data-depot="verification"] { --d: 168 166 196; font-weight: 600; }
+.p-depot[data-depot="pris"]::after,
+.p-depot[data-depot="livre"]::after { content: " ✓"; }
 .p-colis-l2 > :not([hidden]) ~ :not([hidden])::before { content: "·"; margin-right: 6px; color: var(--text-3); font-weight: 400; }
 /* la progression : quatre segments */
 .p-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; max-width: 220px; margin-top: 5px; }

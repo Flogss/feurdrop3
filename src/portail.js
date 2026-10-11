@@ -3,6 +3,7 @@ const { db, getSetting, setSetting, tourScope, journalise } = require("./db");
 const { suiviDuColis, transporteurDuColis } = require("./suiviColis");
 const { carrierLabel } = require("./carrier");
 const { FORME_JETON } = require("./portailCommun");
+const { depotsPourPortail } = require("./controle/depots");
 
 // L'espace prive d'un expediteur : une adresse a lui ou il voit ses colis et
 // ou ils en sont, rien d'autre. En ligne, elle est sur le domaine du portail
@@ -111,8 +112,9 @@ function idsDuSac() {
 }
 
 // Uniquement ce qui sert a l'expediteur : ni prix, ni paiement, ni note, ni
-// fichier, ni legende, ni rien du dashboard.
-function vueColis(colis, dansLeSac) {
+// fichier, ni legende, ni rien du dashboard. `depot` : ce que dit le
+// controle des depots, en une etape simple (voir controle/depots.js).
+function vueColis(colis, dansLeSac, depot = null) {
   const suivi = suiviDuColis(colis);
   const code = suivi ? suivi.transporteur : transporteurDuColis(colis);
   return {
@@ -124,6 +126,7 @@ function vueColis(colis, dansLeSac) {
     recuLe: colis.created_at,
     imprimeLe: colis.printed_at || null,
     dropeLe: colis.dropped_at || null,
+    depot,
   };
 }
 
@@ -167,7 +170,9 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
     .get(jeton).c;
 
   const sac = idsDuSac();
-  const colis = lignes.map((l) => vueColis(l, sac));
+  // pris en charge ? (a la visite, les colis La Poste pas encore prouves sont relus)
+  const depots = depotsPourPortail(lignes, { cle: jeton });
+  const colis = lignes.map((l) => vueColis(l, sac, depots.get(l.id) || null));
   const compte = { a_imprimer: 0, imprime: 0, en_drop: 0, drope: 0 };
   for (const c of colis) if (c.etape !== "drope") compte[c.etape] += 1;
   // les dropes se comptent sur tout l'historique, pas seulement la page

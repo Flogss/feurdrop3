@@ -1131,6 +1131,81 @@ function etat(lignes = null) {
   };
 }
 
+// --- Le portail des expediteurs ------------------------------------------------------------
+
+// Ce qu'un expediteur voit de ses colis dropes, sans rien d'interne (ni
+// raison, ni methode, ni erreur) :
+//   "pris"         pris en charge par le transporteur (preuve lue ou constatee)
+//   "livre"        pris en charge, puis livre
+//   "pas_encore"   le transporteur ne l'a pas encore scanne
+//   "verification" une lecture La Poste est en cours (ouverture de la page)
+//   null           rien a dire de plus que « Drop » (a regarder, bloque,
+//                  retire, ou transporteur sans lecture)
+// A la visite, les colis lus par une API officielle (La Poste, Colissimo,
+// Chronopost, DPD ; UPS et DHL si leurs cles sont posees) et pas encore
+// prouves sont relus -- au plus une fois toutes les 10 minutes par
+// expediteur, au rythme de la file. Les autres montrent ce qui est deja su :
+// les pages lues sur le Mac et les constats faits a la main.
+const VISITE_MS = () => Number(process.env.CONTROLE_PORTAIL_MINUTES || 10) * MINUTE;
+const visites = new Map(); // cle de l'espace -> dernier declenchement
+
+function depotsPourPortail(colisListe, { cle = null } = {}) {
+  const sortie = new Map();
+  const coupees = lectureCoupee();
+  const dropes = [];
+  for (const colis of colisListe) {
+    if (colis.status !== "dropped") continue;
+    const suivi = suiviDuColis(colis);
+    if (!suivi || NON_CONTROLES[suivi.transporteur]) continue;
+    dropes.push({ colis, suivi, transporteur: infoTransporteurBrut(suivi.transporteur, { lectureCoupee: coupees }) });
+  }
+  if (!dropes.length) return sortie;
+  const { suivis, evenements } = lignesSuivis(new Set(dropes.map((x) => x.suivi.numero)));
+  const ctx = contexte();
+  const fenetre = Date.now() - reglages().affichageJours * 24 * HEURE;
+  const aLire = [];
+  for (const x of dropes) {
+    const s = suivis.get(x.suivi.numero);
+    const dansLaFenetre = sqlVersMs(x.colis.dropped_at) >= fenetre;
+    // un vieux colis jamais controle : rien a dire
+    if (!s && !dansLaFenetre) continue;
+    const c = ligneDe(x, s, evenements.get(x.suivi.numero), ctx).controle;
+    const api = estServeur(x.transporteur.methode) && ctx.configure[x.transporteur.methode] && !ctx.pauses[x.transporteur.methode];
+    let etat = null;
+    if (s?.archive_le) etat = null;
+    else if (c.categorie === "confirme") etat = c.livre ? "livre" : "pris";
+    else if (c.categorie === "non_confirme") etat = "pas_encore";
+    else if (c.categorie === "en_attente" && api) etat = "verification";
+    if (etat) sortie.set(x.colis.id, { etat, le: etat === "pris" || etat === "livre" ? c.preuve?.le || null : null, constate: c.preuve?.source === "manuel" });
+    if (api && dansLaFenetre && c.categorie !== "confirme" && !s?.archive_le && s?.code_erreur !== "invalide") aLire.push(x);
+  }
+  if (cle && aLire.length) lisALaVisite(cle, aLire);
+  return sortie;
+}
+
+function lisALaVisite(cle, aLire) {
+  const derniere = visites.get(cle) || 0;
+  if (Date.now() - derniere < VISITE_MS()) return;
+  visites.set(cle, Date.now());
+  if (visites.size > 5000) visites.delete(visites.keys().next().value);
+  let marques = 0;
+  for (const x of aLire) {
+    suiviDe(x.suivi.numero, x);
+    // (lu il y a moins de 10 minutes : la reponse serait la meme)
+    marques += db
+      .prepare(
+        `UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE numero = ? AND archive_le IS NULL
+           AND (verifie_le IS NULL OR verifie_le <= datetime('now', '-10 minutes'))`
+      )
+      .run(x.suivi.numero).changes;
+  }
+  if (!marques) return;
+  // un passage en cours : le suivant prend ces numeros des qu'il est fini
+  const lance = () => synchronise({ declencheur: "portail" }).catch(() => {});
+  if (enCours) enCours.then(lance, lance);
+  else lance();
+}
+
 // --- Minuterie ---------------------------------------------------------------------------
 
 let minuteur = null;
@@ -1168,4 +1243,5 @@ module.exports = {
   agent,
   recoitResultats,
   coupeLecture,
+  depotsPourPortail,
 };

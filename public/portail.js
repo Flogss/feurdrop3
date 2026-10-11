@@ -19,6 +19,8 @@
 
   const ETAPES = ["a_imprimer", "imprime", "en_drop", "drope"];
   const NOMS = { a_imprimer: "Pas imprimé", imprime: "Imprimé", en_drop: "En cours de drop", drope: "Drop" };
+  // apres le drop : ce que dit le transporteur (controle des depots)
+  const DEPOTS = { pris: "Pris en charge", livre: "Livré", pas_encore: "Pas encore scanné", verification: "Vérification…" };
   const CONNUS = new Set(["MR", "LP", "CHRONO", "UPS", "DPD", "GLS", "DHL"]);
   const TOUS = 2000; // tout l'historique (le serveur plafonne au meme nombre)
   const APERCU = 5; // colis montres par groupe avant "Afficher les autres"
@@ -270,10 +272,11 @@
     }
     $("nom").textContent = d.expediteur;
     const enCours = d.colis.filter((c) => c.etape !== "drope").length;
+    const pris = d.colis.filter((c) => c.etape === "drope" && ["pris", "livre"].includes(c.depot?.etat)).length;
     $("resume").textContent =
       d.total === 0
         ? "Aucun colis pour l'instant."
-        : `${pluriel(d.total, "colis", "colis")} · ${enCours ? `${nf.format(enCours)} en cours` : "aucun en cours"}`;
+        : `${pluriel(d.total, "colis", "colis")} · ${enCours ? `${nf.format(enCours)} en cours` : "aucun en cours"}${pris ? ` · ${pluriel(pris, "pris en charge", "pris en charge")}` : ""}`;
     rend({ anime: Boolean(avant), signale: Boolean(avant) });
   }
 
@@ -571,7 +574,7 @@
     const l2 = el("div", "p-colis-l2");
     const tr = el("span", "p-colis-tr carrier");
     tr.append(el("i", "carrier-dot"), el("span"));
-    l2.append(el("span", "p-etat-nom"), tr, el("span", "p-bj", "Boîte jaune"), el("span", "p-quand"));
+    l2.append(el("span", "p-etat-nom"), el("span", "p-depot"), tr, el("span", "p-bj", "Boîte jaune"), el("span", "p-quand"));
     const seg = el("div", "p-seg");
     seg.setAttribute("aria-hidden", "true");
     for (let i = 0; i < 4; i++) seg.append(el("i"));
@@ -604,6 +607,9 @@
     ligne._colis = c;
     const etape = ETAPES.includes(c.etape) ? c.etape : "a_imprimer";
     const change = !premiere && avant && avant.etape !== etape;
+    const depot = etape === "drope" && c.depot && DEPOTS[c.depot.etat] ? c.depot : null;
+    // pris en charge (ou livre) depuis la derniere lecture : la ligne le signale
+    const depotChange = !premiere && avant && !change && (avant.depot?.etat || null) !== (depot?.etat || null) && ["pris", "livre"].includes(depot?.etat);
 
     // le numero, la partie cherchee surlignee
     const numero = c.suivi?.numero || null;
@@ -630,6 +636,14 @@
     tr.lastElementChild.textContent = nomDe(c);
     ligne.querySelector(".p-bj").hidden = !c.boiteJaune;
     ligne.querySelector(".p-etat-nom").textContent = NOMS[etape];
+    const badge = ligne.querySelector(".p-depot");
+    badge.hidden = !depot;
+    if (depot) {
+      const d = depot.le ? new Date(depot.le) : null;
+      badge.dataset.depot = depot.etat;
+      badge.textContent = `${DEPOTS[depot.etat]}${depot.etat === "pris" && d && !Number.isNaN(d.getTime()) ? ` ${quand(d)}` : ""}`;
+      badge.title = depot.constate ? "Vérifié sur la page officielle du transporteur" : "D'après le suivi officiel du transporteur";
+    }
     // la derniere etape franchie, et quand
     const moment = etape === "drope" && c.dropeLe ? `dropé ${quand(date(c.dropeLe))}` : c.recuLe ? `reçu ${quand(date(c.recuLe))}` : "";
     ligne.querySelector(".p-quand").textContent = moment;
@@ -681,6 +695,13 @@
       ico.replaceChildren(icone(etape));
     }
     ligne.dataset.etape = etape;
+    if (depotChange && !reduit) {
+      ligne.classList.remove("vient-de-changer");
+      void ligne.offsetWidth;
+      ligne.classList.add("vient-de-changer");
+      setTimeout(() => ligne.classList.remove("vient-de-changer"), 1800);
+    }
+    if (depotChange) $("annonce").textContent = `${numero ? `Colis ${numero}` : "Un colis"} : ${DEPOTS[depot.etat].toLowerCase()}`;
   }
 
   // --- Mise a jour d'une liste a cles ---------------------------------------------------
