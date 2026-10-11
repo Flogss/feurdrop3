@@ -22,6 +22,8 @@ struct DashboardView: View {
     /// largeur disponible : au-dela d'un seuil (Mac, grande fenetre), les
     /// cartes se rangent sur deux colonnes
     @State private var largeur: CGFloat = 0
+    /// la hauteur de « À poster » : la carte des expediteurs prend la meme
+    @State private var hauteurPoster: CGFloat = 0
 
     private var model: DashboardModel { app.dashboard }
     private var large: Bool { largeur >= 860 }
@@ -35,13 +37,24 @@ struct DashboardView: View {
 
                     if booted, let stats = model.stats {
                         if large {
-                            // grande fenetre : le sac et les chiffres a gauche, ce
-                            // qu'il faut poster et les expediteurs a droite
+                            // grande fenetre, comme le site : en haut le sac a cote
+                            // des chiffres et du stock ; dessous « À poster » et
+                            // « Expéditeurs » cote a cote -- meme haut, meme hauteur
+                            // (au moins 480 pt), la liste des expediteurs defile seule
                             HStack(alignment: .top, spacing: 16) {
-                                VStack(spacing: 14) { colonnePrincipale(stats) }
+                                VStack(spacing: 14) { sac(stats) }
                                     .frame(maxWidth: .infinity)
-                                VStack(spacing: 14) { colonneSecondaire(stats) }
+                                VStack(spacing: 14) { chiffres(stats) }
                                     .frame(maxWidth: .infinity)
+                            }
+                            HStack(alignment: .top, spacing: 16) {
+                                CarriersCard(carriers: stats.byCarrier, hauteurMin: 480)
+                                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { hauteurPoster = $0 }
+                                    .frame(maxWidth: .infinity)
+                                    .entrance(booted, index: 4)
+                                SendersCard(senders: stats.bySender, hauteur: max(hauteurPoster, 480))
+                                    .frame(maxWidth: .infinity)
+                                    .entrance(booted, index: 5)
                             }
                         } else {
                             colonnePrincipale(stats)
@@ -85,6 +98,12 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func colonnePrincipale(_ stats: Stats) -> some View {
+        sac(stats)
+        chiffres(stats)
+    }
+
+    @ViewBuilder
+    private func sac(_ stats: Stats) -> some View {
         HeroCard(stats: stats)
             .entrance(booted, index: 1)
         if !stats.tour.isActive, let last = stats.tour.last {
@@ -94,6 +113,10 @@ struct DashboardView: View {
                     removal: .scale(scale: 0.92).combined(with: .opacity)
                 ))
         }
+    }
+
+    @ViewBuilder
+    private func chiffres(_ stats: Stats) -> some View {
         MetricsRow(stats: stats)
             .entrance(booted, index: 2)
         StockCard()

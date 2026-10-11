@@ -238,6 +238,8 @@ struct StockCard: View {
 
 struct CarriersCard: View {
     let carriers: [CarrierSummary]
+    /// grande fenetre : au moins la hauteur de la carte des expediteurs voisine
+    var hauteurMin: CGFloat?
     @Environment(AppModel.self) private var app
 
     var body: some View {
@@ -247,6 +249,8 @@ struct CarriersCard: View {
             SectionHeader("À poster") {
                 if total > 0 { Text(Format.count(total, "colis", "colis")).contentTransition(.numericText()) }
             }
+            // la meme hauteur d'en-tete que « Expéditeurs » : les titres sur une ligne
+            .frame(minHeight: 34)
             if lignes.isEmpty {
                 EmptyStateView(symbol: "party.popper.fill", title: "Rien à poster", subtitle: "Tout est dropé, beau travail.", positive: true)
             } else {
@@ -260,6 +264,7 @@ struct CarriersCard: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, minHeight: hauteurMin.map { $0 - 2 * Theme.Space.xl }, alignment: .top)
         .surfaceCard()
         .animation(Theme.spring, value: lignes)
     }
@@ -297,43 +302,82 @@ struct CarriersCard: View {
 
 // MARK: - Expediteurs
 
+/// Les expediteurs. Beaucoup d'expediteurs : une recherche, le choix entre
+/// ceux qui ont des colis a poster et tous, leur nombre ; un liseré violet sur
+/// ceux qui ont des colis. En grande fenetre (`hauteur`), la carte prend la
+/// hauteur de « À poster » a cote d'elle et sa liste defile seule.
 struct SendersCard: View {
     let senders: [SenderSummary]
+    var hauteur: CGFloat?
     @Environment(AppModel.self) private var app
     @State private var confirmeTout = false
     @State private var confirmeSaufLit = false
+    @State private var recherche = ""
+    @State private var tous: Bool?
+
+    private enum Filtre { case attente, tous }
+
+    private var enAttente: [SenderSummary] { senders.filter { $0.pendingCount > 0 } }
+    /// par defaut : ceux qui ont des colis, s'il y en a
+    private var voirTous: Bool { tous ?? enAttente.isEmpty }
+
+    private var visibles: [SenderSummary] {
+        let q = recherche.trimmingCharacters(in: .whitespaces).folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        if !q.isEmpty {
+            return senders.filter { $0.senderName.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).contains(q) }
+        }
+        return voirTous ? senders : enAttente
+    }
 
     var body: some View {
         let stats = app.dashboard.stats
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader("Expéditeurs") {
-                Menu {
-                    Button("Tout sauf les LIT", systemImage: "tray.and.arrow.up") { confirmeSaufLit = true }
-                    Button("Tout marquer dropé", systemImage: "checkmark.circle") { confirmeTout = true }
-                } label: {
-                    Label("Drop groupé", systemImage: "ellipsis")
-                        .labelStyle(.iconOnly)
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 34, height: 34)
+                HStack(spacing: 10) {
+                    if !senders.isEmpty { Text(Format.integer(senders.count)).monospacedDigit() }
+                    Menu {
+                        Button("Tout sauf les LIT", systemImage: "tray.and.arrow.up") { confirmeSaufLit = true }
+                        Button("Tout marquer dropé", systemImage: "checkmark.circle") { confirmeTout = true }
+                    } label: {
+                        Label("Drop groupé", systemImage: "ellipsis")
+                            .labelStyle(.iconOnly)
+                            .font(.system(size: 15, weight: .bold))
+                            .frame(width: 34, height: 34)
+                    }
+                    .boutonVerre(.rond)
+                    .menuIndicator(.hidden)
+                    .disabled((stats?.pendingCount ?? 0) == 0)
                 }
-                .boutonVerre(.rond)
-                .menuIndicator(.hidden)
-                .disabled((stats?.pendingCount ?? 0) == 0)
             }
+            .frame(minHeight: 34)
             if senders.isEmpty {
                 EmptyStateView(symbol: "shippingbox", title: "Aucun colis pour le moment", subtitle: "Les fichiers envoyés au bot apparaîtront ici.")
             } else {
-                GlassEffectContainer(spacing: 0) {
-                    VStack(spacing: 2) {
-                        ForEach(senders) { s in
-                            SenderRow(sender: s)
+                outils
+                if let hauteur {
+                    // grande fenetre : la liste defile dans la carte, ses bords s'estompent
+                    ScrollView {
+                        liste.padding(.vertical, 6)
+                    }
+                    .scrollIndicators(.automatic)
+                    .mask {
+                        VStack(spacing: 0) {
+                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 10)
+                            Color.black
+                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 22)
                         }
                     }
+                    .frame(maxHeight: .infinity)
+                } else {
+                    liste
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: hauteur.map { $0 - 2 * Theme.Space.xl }, alignment: .top)
         .surfaceCard()
         .animation(Theme.spring, value: senders)
+        .animation(Theme.spring, value: voirTous)
         .confirmationDialog("Tout marquer comme dropé ?", isPresented: $confirmeTout, titleVisibility: .visible) {
             Button("Tout dropper") { Task { await app.dashboard.dropAll() } }
             Button("Annuler", role: .cancel) {}
@@ -347,6 +391,95 @@ struct SendersCard: View {
             Text("Les colis déjà imprimés seront marqués dropés, sauf les LIT. Ceux pas encore imprimés restent en attente.")
         }
     }
+
+    /// la recherche et le choix « À poster / Tous »
+    private var outils: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { champ; choix }
+            VStack(spacing: 8) { champ; choix.frame(maxWidth: .infinity) }
+        }
+    }
+
+    private var champ: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.text3)
+            TextField("Rechercher un expéditeur", text: $recherche)
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+            if !recherche.isEmpty {
+                Button {
+                    recherche = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.text3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Effacer la recherche")
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .frame(minWidth: 180)
+        .background(.white.opacity(0.04), in: .rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.hairline, lineWidth: 0.8))
+        .animation(Theme.spring, value: recherche.isEmpty)
+    }
+
+    private var choix: some View {
+        HStack(spacing: 2) {
+            segment("À poster", enAttente.count, actif: !voirTous) { tous = false }
+            segment("Tous", senders.count, actif: voirTous) { tous = true }
+        }
+        .padding(3)
+        .background(.black.opacity(0.22), in: .rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.hairline, lineWidth: 0.8))
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func segment(_ titre: String, _ n: Int, actif: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.selection()
+            withAnimation(Theme.spring) { action() }
+        } label: {
+            HStack(spacing: 5) {
+                Text(titre)
+                Text(Format.integer(n)).monospacedDigit().foregroundStyle(actif ? Theme.violetPale : Theme.text3)
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(actif ? Theme.text : Theme.text2)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background {
+                if actif {
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(Theme.violet.opacity(0.3))
+                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.violetLight.opacity(0.35), lineWidth: 0.8))
+                        .shadow(color: Theme.violet.opacity(0.5), radius: 8)
+                }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(actif ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var liste: some View {
+        let lignes = visibles
+        if lignes.isEmpty {
+            EmptyStateView(symbol: "magnifyingglass", title: "Aucun expéditeur trouvé", subtitle: "Rien ne correspond à « \(recherche.trimmingCharacters(in: .whitespaces)) ».")
+                .padding(.vertical, 12)
+        } else {
+            GlassEffectContainer(spacing: 0) {
+                LazyVStack(spacing: 2) {
+                    ForEach(lignes) { s in
+                        SenderRow(sender: s)
+                    }
+                }
+            }
+        }
+    }
 }
 
 private struct SenderRow: View {
@@ -357,10 +490,17 @@ private struct SenderRow: View {
         let model = app.dashboard
         let nom = sender.senderName
         HStack(spacing: 10) {
+            // un expediteur qui a des colis a poster : un liseré violet ; les autres en retrait
+            Capsule()
+                .fill(sender.pendingCount > 0 ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(.clear))
+                .frame(width: 3, height: 26)
+                .shadow(color: sender.pendingCount > 0 ? Theme.violet.opacity(0.7) : .clear, radius: 5)
             SenderAvatar(name: nom, size: 38)
+                .opacity(sender.pendingCount > 0 ? 1 : 0.7)
             VStack(alignment: .leading, spacing: 2) {
                 Text(nom)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(sender.pendingCount > 0 ? Theme.text : Theme.text2)
                     .lineLimit(1)
                 Text("\(Format.count(sender.droppedCount, "dropé", "dropés")) · \(Format.euroGraphe(sender.droppedValue))")
                     .font(.caption)

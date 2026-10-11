@@ -27,6 +27,10 @@ import Testing
     #expect(petit < moyen && moyen < grand)
     #expect(grand <= CountingDuration.maximum)
     #expect(CountingDuration.seconds(from: 5, to: 5) == 0)
+    // +10 colis se voit monter ; l'argent prend plus de temps, sans jamais trainer
+    #expect(CountingDuration.seconds(from: 25, to: 35) > 1.2)
+    #expect(CountingDuration.seconds(from: 0, to: 900, argent: true) > CountingDuration.seconds(from: 0, to: 900))
+    #expect(CountingDuration.seconds(from: 0, to: 1_000_000, argent: true) <= CountingDuration.maximum)
 }
 
 @Test func bulleSeulementSiNouveau() {

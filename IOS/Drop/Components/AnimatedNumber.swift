@@ -72,7 +72,8 @@ struct AnimatedNumber: View {
             shown = cible
             return
         }
-        let duree = CountingDuration.seconds(from: depart, to: cible)
+        // un montant (son format porte « € ») prend plus de temps qu'un compte
+        let duree = CountingDuration.seconds(from: depart, to: cible, argent: format(1.5).contains("€"))
         if annonce, let bubble {
             let texte = bubble(cible - depart)
             Task { @MainActor in

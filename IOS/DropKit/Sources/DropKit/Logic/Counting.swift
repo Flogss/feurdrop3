@@ -10,12 +10,16 @@ import Foundation
 ///     +1 000 -> ~2,4 s (plafond 2,6 s)
 public enum CountingDuration {
     public static let minimum: Double = 0.5
-    public static let maximum: Double = 2.6
+    /// le plafond : le site reste vif meme pour un tres grand ecart
+    public static let maximum: Double = 3.2
 
-    public static func seconds(from ancien: Double, to nouveau: Double) -> Double {
+    /// La duree suit l'ampleur du changement (un +1 roule vite, +10 colis se
+    /// voit monter) ; l'argent prend plus de temps : on doit le voir grimper.
+    /// Les memes valeurs que le site (dureeComptage).
+    public static func seconds(from ancien: Double, to nouveau: Double, argent: Bool = false) -> Double {
         let ecart = abs(nouveau - ancien)
         guard ecart > 0 else { return 0 }
-        return min(maximum, 0.52 + log10(ecart + 1) * 0.64)
+        return argent ? min(maximum, 1.15 + log10(ecart + 1) * 0.6) : min(2.4, 0.62 + log10(ecart + 1) * 0.68)
     }
 }
 
