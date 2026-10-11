@@ -158,7 +158,10 @@ test("premier scan : posté confirmé, sort de la file active, date de confirmat
   assert.equal(s.statut, "confirme");
   assert.ok(s.confirme_le);
   assert.match(s.preuve_libelle, /déposé dans un point postal/);
-  assert.equal(s.prochaine_le, null, "plus jamais relu par la file");
+  // plus controle ; mais un colis La Poste reste suivi (calmement) jusqu'a
+  // sa livraison, pour les actualites de l'espace expediteur
+  const dans = (Date.parse(`${s.prochaine_le.replace(" ", "T")}Z`) - Date.now()) / H;
+  assert.ok(dans > 3.5 && dans <= 4, `prochaine lecture dans ${dans} h`);
   // le colis et son etiquette sont intacts
   assert.equal(db.db.prepare("SELECT status FROM colis WHERE id = ?").get(id).status, "dropped");
 });
@@ -180,6 +183,8 @@ test("livré : posté confirmé, et ne revient jamais dans la file (ni « Tout v
   assert.equal(ligne(id).controle.categorie, "confirme");
   assert.equal(ligne(id).controle.livre, true);
   assert.equal(actif(id), false);
+  assert.equal(suivi(n).final, 1, "livre : son suivi est fini");
+  assert.equal(suivi(n).prochaine_le, null);
   const appels = faux.appels.length;
   // ni la file, ni « Relancer », ni « Tout vérifier » ne le relisent
   rendDu();
@@ -372,7 +377,9 @@ test("CAPTCHA : bloqué, aucun faux statut, plus rien demande a ce transporteur"
 
 test("deux lectures du meme colis : aucun doublon (API et page)", async () => {
   const n = "6A40000000001";
-  faux.suivi(n, [ev(30, "DR1")]);
+  // (le meme objet d'une lecture a l'autre : une vraie date La Poste ne bouge pas)
+  const dr1 = ev(30, "DR1");
+  faux.suivi(n, [dr1]);
   drope(n);
   await depots.synchronise();
   assert.equal(nbEvenements(n), 1);
@@ -380,7 +387,7 @@ test("deux lectures du meme colis : aucun doublon (API et page)", async () => {
   assert.equal((await depots.synchronise()).nouveauxEvenements, 0);
   assert.equal(nbEvenements(n), 1);
   // la prise en charge arrive : seuls les nouveaux evenements sont ajoutes
-  faux.suivi(n, [ev(0.5, "ET1"), ev(1, "PC1"), ev(30, "DR1")]);
+  faux.suivi(n, [ev(0.5, "ET1"), ev(1, "PC1"), dr1]);
   rendDu();
   assert.equal((await depots.synchronise()).nouveauxEvenements, 2);
   assert.equal(nbEvenements(n), 3);
@@ -464,13 +471,12 @@ test("apres la mise a jour : un ancien « confirmé » de l'ancienne regle est r
   faux.appels.length = 0;
   faux.suivi("6A14000000001", [ev(0.5, "PC1", "Votre colis a été déposé dans un point postal."), ev(30, "DR1")]);
   await depots.synchronise();
-  // le faux positif est revenu dans la file, et relu tout de suite
-  assert.deepEqual(faux.appels.map((a) => a.numero), ["6A14000000001"]);
+  // le faux positif est revenu dans la file, et relu tout de suite ; le vrai
+  // depot, pas encore livre, reprend son suivi (actualites de l'expediteur)
+  assert.deepEqual(faux.appels.map((a) => a.numero).sort(), ["6A14000000001", "6A14000000002"]);
   assert.equal(ligne(faux1).controle.categorie, "confirme", "relu : cette fois le depot est prouve");
-  // le vrai depot prouve recoit sa date, sans etre relu
   assert.ok(suivi("6A14000000002").confirme_le);
-  assert.equal(suivi("6A14000000002").prochaine_le, null);
-  assert.equal(actif(vrai), false);
+  assert.equal(actif(vrai), false, "il reste hors de la liste active");
 });
 
 test("faux positif corrigé : boite jaune -- un passage en point relais avant l'etiquette n'est pas la preuve, le scan d'apres l'est", async () => {

@@ -266,6 +266,8 @@ function memoriseStatut(numero, x) {
   } else {
     db.prepare("UPDATE controle_suivis SET statut = ?, confirme_le = NULL, preuve_le = NULL, preuve_libelle = NULL WHERE numero = ?").run(c.categorie, numero);
   }
+  // livre : le suivi de ce colis est fini (plus de lecture, meme pour l'espace expediteur)
+  if (c.livre) db.prepare("UPDATE controle_suivis SET final = 1 WHERE numero = ?").run(numero);
   return c.categorie;
 }
 
@@ -323,9 +325,14 @@ function verifieInconnu(numero, x) {
 // depot prouve ou le numero retire ; souvent tant qu'il ne l'est pas (les
 // premiers jours), puis plus calmement ; un « inconnu » est relu 12 h plus
 // tard (pour etre sur avant de le retirer).
+//
+// Un depot prouve n'est plus controle ; mais un colis lu par une API
+// officielle (La Poste...) reste suivi, calmement, jusqu'a sa livraison :
+// l'espace expediteur montre toutes les actualites de son suivi.
 function planifie(numero, { categorie, dropeMs = null }) {
-  const s = db.prepare("SELECT methode, archive_le, trouve FROM controle_suivis WHERE numero = ?").get(numero);
-  if (!s || s.archive_le || s.methode === "manuel" || categorie === "confirme") return null;
+  const s = db.prepare("SELECT methode, archive_le, trouve, final FROM controle_suivis WHERE numero = ?").get(numero);
+  if (!s || s.archive_le || s.methode === "manuel") return null;
+  if (categorie === "confirme") return estServeur(s.methode) && !s.final ? sql(Date.now() + 4 * HEURE) : null;
   const age = dropeMs ? Date.now() - dropeMs : 0;
   const minutes = s.trouve === 0 ? 12 * 60 : categorie === "non_confirme" ? (age < 72 * HEURE ? 2 * 60 : 6 * 60) : 6 * 60;
   return sql(Date.now() + minutes * MINUTE);
@@ -342,11 +349,12 @@ function apresLecture(numero, x) {
 // Une lecture en echec : rien n'est conclu, une preuve deja lue reste. Un
 // nouvel essai de plus en plus tard (15 min, 30 min... 6 h au plus).
 function noteErreurNumero(numero, err, { methodeLecture = null, statutBrut = undefined, pageUrl = null } = {}) {
-  const l = db.prepare("SELECT essais, statut, archive_le FROM controle_suivis WHERE numero = ?").get(numero);
+  const l = db.prepare("SELECT essais, statut, archive_le, methode, final FROM controle_suivis WHERE numero = ?").get(numero);
   const essais = (l?.essais || 0) + 1;
   // un depot deja prouve (ou un numero retire) n'est pas remis dans la file
+  // -- sauf un colis La Poste encore en route, dont le suivi continue
   const prochaine =
-    l?.statut === "confirme" || l?.archive_le || err.type === "invalide"
+    (l?.statut === "confirme" && (!estServeur(l.methode) || l.final)) || l?.archive_le || err.type === "invalide"
       ? null
       : err.type === "ambigu"
         ? sql(Date.now() + 24 * HEURE)
@@ -381,6 +389,13 @@ function recaleFile(affiches) {
       if (s?.code_erreur !== "invalide") db.prepare("UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE numero = ? AND prochaine_le IS NULL").run(numero);
     }
   }
+  // les colis lus par une API, prouves mais pas encore livres : leur suivi
+  // continue pour l'espace expediteur (l'ancienne version l'arretait a la preuve)
+  const enRoute = db.prepare(
+    `UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE numero = ? AND methode IN ('laposte', 'ups', 'dhl')
+       AND statut = 'confirme' AND final = 0 AND prochaine_le IS NULL AND archive_le IS NULL`
+  );
+  for (const numero of affiches.keys()) enRoute.run(numero);
   return a.length;
 }
 
@@ -1176,11 +1191,33 @@ function depotsPourPortail(colisListe, { cle = null } = {}) {
     else if (c.categorie === "confirme") etat = c.livre ? "livre" : "pris";
     else if (c.categorie === "non_confirme") etat = "pas_encore";
     else if (c.categorie === "en_attente" && api) etat = "verification";
-    if (etat) sortie.set(x.colis.id, { etat, le: etat === "pris" || etat === "livre" ? c.preuve?.le || null : null, constate: c.preuve?.source === "manuel" });
-    if (api && dansLaFenetre && c.categorie !== "confirme" && !s?.archive_le && s?.code_erreur !== "invalide") aLire.push(x);
+    const actus = s?.archive_le ? [] : actusLaPoste(x, evenements.get(x.suivi.numero));
+    if (etat || actus.length) sortie.set(x.colis.id, { etat, le: etat === "pris" || etat === "livre" ? c.preuve?.le || null : null, constate: c.preuve?.source === "manuel", actus });
+    // a relire : pas encore prouve, ou prouve mais encore en route (ses actualites)
+    const enRoute = c.categorie === "confirme" && !c.livre && !s?.final;
+    if (api && dansLaFenetre && (c.categorie !== "confirme" || enRoute) && !s?.archive_le && s?.code_erreur !== "invalide") aLire.push(x);
   }
   if (cle && aLire.length) lisALaVisite(cle, aLire);
   return sortie;
+}
+
+// Toutes les actualites d'un colis La Poste (Colissimo, Chronopost, DPD : la
+// meme API), telles que La Poste les ecrit, de la plus recente a la plus
+// ancienne. Un numero deja servi a un autre colis (ancien parcours avant la
+// reception de l'etiquette) ne montre que ce qui suit : jamais le parcours
+// d'un autre.
+const MARGE_ANCIEN_MS = 6 * HEURE;
+function actusLaPoste(x, evenements = []) {
+  const lus = evenements.filter((e) => e.source === "laposte" && e.libelle).map((e) => ({ ...e, ms: versMs(e.survenuLe) }));
+  if (!lus.length) return [];
+  const recu = sqlVersMs(x.colis.created_at);
+  const seuil = recu != null ? recu - MARGE_ANCIEN_MS : null;
+  const reutilise = seuil != null && lus.some((e) => e.physique && e.ms != null && e.ms < seuil);
+  return lus
+    .filter((e) => !reutilise || (e.ms != null && e.ms >= seuil))
+    .sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity) || (b.ordre ?? 0) - (a.ordre ?? 0))
+    .slice(0, 40)
+    .map((e) => ({ le: e.survenuLe, libelle: e.libelle }));
 }
 
 function lisALaVisite(cle, aLire) {

@@ -578,7 +578,13 @@
     const seg = el("div", "p-seg");
     seg.setAttribute("aria-hidden", "true");
     for (let i = 0; i < 4; i++) seg.append(el("i"));
-    centre.append(l1, l2, seg);
+    // les actualites du suivi La Poste : la derniere, et toutes en depliant
+    const actus = el("details", "p-actus");
+    actus.hidden = true;
+    const resume = el("summary");
+    resume.append(el("span", "p-actus-titre"), el("span", "p-actus-der"));
+    actus.append(resume, el("ol", "p-actus-liste"));
+    centre.append(l1, l2, seg, actus);
 
     const suivre = el("a", "btn btn-sm btn-secondary p-suivre");
     suivre.target = "_blank";
@@ -653,6 +659,26 @@
       i.classList.toggle("fait", n <= rang);
       i.classList.toggle("actuel", n === rang);
     });
+
+    // toutes les actualites La Poste (la liste depliee reste ouverte d'une mise a jour a l'autre)
+    const actus = ligne.querySelector(".p-actus");
+    const liste = Array.isArray(c.depot?.actus) ? c.depot.actus : [];
+    actus.hidden = !liste.length;
+    const cleActus = JSON.stringify(liste);
+    if (liste.length && actus._cle !== cleActus) {
+      actus._cle = cleActus;
+      const der = liste[0];
+      actus.querySelector(".p-actus-titre").textContent = `Suivi ${nomDe(c)}`;
+      actus.querySelector(".p-actus-der").textContent = `${der.libelle}${der.le ? ` · ${quand(new Date(der.le))}` : ""}`;
+      actus.querySelector(".p-actus-liste").replaceChildren(
+        ...liste.map((a) => {
+          const li = el("li");
+          const d = a.le ? new Date(a.le) : null;
+          li.append(el("time", null, d && !Number.isNaN(d.getTime()) ? `${jourCourt.format(d)} · ${heure.format(d)}` : "—"), el("span", null, a.libelle));
+          return li;
+        })
+      );
+    }
 
     const suivre = ligne.querySelector(".p-suivre");
     const cible = c.suivi ? c.suivi.lien || c.suivi.page : null;

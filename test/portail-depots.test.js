@@ -49,7 +49,10 @@ const attendsLaFile = async () => {
 const parNumero = (r) => Object.fromEntries(r.json.colis.map((c) => [c.suivi?.numero, c.depot]));
 
 test("a la visite : les colis La Poste sont relus, l'expediteur voit pris en charge / pas encore scanne", async () => {
-  faux.suivi("6A50000000001", [ev(1, "PC1", "Votre colis a été déposé dans un point postal."), ev(20, "DR1")]);
+  // (les memes objets d'une lecture a l'autre : une vraie date La Poste ne bouge pas)
+  const pc1 = ev(1, "PC1", "Votre colis a été déposé dans un point postal.");
+  const dr1 = ev(20, "DR1");
+  faux.suivi("6A50000000001", [pc1, dr1]);
   faux.suivi("6A50000000002", [ev(20, "DR1", "Votre Colissimo va bientôt nous être confié !")]);
   drope("Alice", "6A50000000001");
   drope("Alice", "6A50000000002");
@@ -59,7 +62,7 @@ test("a la visite : les colis La Poste sont relus, l'expediteur voit pris en cha
   // premiere visite : rien n'est encore lu, la lecture part
   let r = await app.appel(`/api/portail/${jeton}`, { anonyme: true });
   assert.equal(r.status, 200);
-  assert.deepEqual(parNumero(r), { "6A50000000001": { etat: "verification", le: null, constate: false }, "6A50000000002": { etat: "verification", le: null, constate: false } });
+  assert.deepEqual(parNumero(r), { "6A50000000001": { etat: "verification", le: null, constate: false, actus: [] }, "6A50000000002": { etat: "verification", le: null, constate: false, actus: [] } });
   await attendsLaFile();
   // (la file lit aussi ce qui etait du par ailleurs : le nouveau colis de Bob)
   const lus = faux.appels.map((a) => a.numero);
@@ -70,14 +73,41 @@ test("a la visite : les colis La Poste sont relus, l'expediteur voit pris en cha
   assert.equal(d["6A50000000001"].etat, "pris");
   assert.ok(d["6A50000000001"].le);
   assert.equal(d["6A50000000002"].etat, "pas_encore");
-  // rien d'interne : ni raison, ni methode, ni erreur
-  for (const interdit of ["raison", "methode", "bientôt nous être confié", "PC1", "erreur"]) assert.ok(!r.texte.includes(interdit), `fuite : ${interdit}`);
+  // toutes les actualites La Poste, telles que La Poste les ecrit, la plus recente d'abord
+  assert.deepEqual(d["6A50000000001"].actus.map((a) => a.libelle), ["Votre colis a été déposé dans un point postal.", "DR1"]);
+  assert.deepEqual(d["6A50000000002"].actus.map((a) => a.libelle), ["Votre Colissimo va bientôt nous être confié !"]);
+  assert.ok(d["6A50000000001"].actus[0].le);
+  // rien d'interne : ni raison, ni methode, ni code, ni erreur
+  for (const interdit of ["raison", "methode", "PC1", "erreur", "\"physique\"", "\"source\""]) assert.ok(!r.texte.includes(interdit), `fuite : ${interdit}`);
 
   // une deuxieme visite tout de suite : pas de nouvelle lecture (10 min)
   faux.appels.length = 0;
   await app.appel(`/api/portail/${jeton}`, { anonyme: true });
   await depots.synchronise();
   assert.equal(faux.appels.length, 0);
+
+  // plus tard : le colis pris en charge continue d'etre suivi -- une
+  // nouvelle actualite apparait a la visite suivante
+  process.env.CONTROLE_PORTAIL_MINUTES = "0";
+  db.db.prepare("UPDATE controle_suivis SET verifie_le = datetime('now', '-1 hour')").run();
+  faux.suivi("6A50000000001", [ev(0.2, "ET1", "Votre colis est en transit sur nos plateformes logistiques."), pc1, dr1]);
+  await app.appel(`/api/portail/${jeton}`, { anonyme: true });
+  await attendsLaFile();
+  r = await app.appel(`/api/portail/${jeton}`, { anonyme: true });
+  assert.equal(parNumero(r)["6A50000000001"].actus[0].libelle, "Votre colis est en transit sur nos plateformes logistiques.");
+  assert.equal(parNumero(r)["6A50000000001"].actus.length, 3);
+});
+
+test("un numero deja servi : l'expediteur ne voit jamais le parcours de l'ancien colis", async () => {
+  // l'ancien colis de ce numero, livre il y a 8 jours ; puis le nouveau
+  faux.suivi("6A50000000020", [ev(1, "PC1", "Votre colis a été déposé dans un point postal."), ev(190, "DI1", "Votre colis est livré à Madame X."), ev(200, "PC1", "Ancien dépôt")]);
+  drope("Alice", "6A50000000020");
+  await depots.synchronise();
+  const r = await app.appel(`/api/portail/${jetonDe("Alice")}`, { anonyme: true });
+  const d = parNumero(r)["6A50000000020"];
+  assert.equal(d.etat, "pris");
+  assert.deepEqual(d.actus.map((a) => a.libelle), ["Votre colis a été déposé dans un point postal."]);
+  assert.ok(!r.texte.includes("Madame X") && !r.texte.includes("Ancien dépôt"));
 });
 
 test("les autres transporteurs : ce qui est deja su (constat a la main, page lue sur le Mac), jamais de lecture a la visite", async () => {
@@ -95,6 +125,7 @@ test("les autres transporteurs : ce qui est deja su (constat a la main, page lue
   assert.equal(d["4278870016"], null, "rien de su : seulement « Drop »");
   await depots.synchronise();
   assert.equal(faux.appels.length, 0);
+  assert.deepEqual(d["4278870015"].actus, [], "les actualites detaillees : La Poste seulement");
   // un retour apres la prise en charge (« mis a disposition du vendeur ») ne change rien pour l'expediteur
   assert.ok(mr2);
 });

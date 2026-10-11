@@ -267,6 +267,34 @@
 .p-depot { --d: var(--e-drope); font-weight: 650; color: rgb(var(--d)); }
 .p-depot[data-depot="pas_encore"] { --d: 255 176 72; }
 .p-depot[data-depot="verification"] { --d: 168 166 196; font-weight: 600; }
+/* les actualites du suivi La Poste */
+.p-actus { margin-top: 7px; min-width: 0; }
+.p-actus > summary {
+  display: flex; align-items: baseline; gap: 7px; min-width: 0; list-style: none; cursor: pointer;
+  font-size: 12.5px; line-height: 1.35; color: var(--text-3); border-radius: 6px;
+}
+.p-actus > summary::-webkit-details-marker { display: none; }
+.p-actus > summary:focus-visible { outline: 2px solid rgb(var(--violet-400) / 0.9); outline-offset: 3px; }
+.p-actus-titre { flex: none; font-weight: 650; color: var(--text-2); }
+.p-actus-titre::after { content: "›"; display: inline-block; margin-left: 5px; transition: transform var(--t-3) var(--ease-out); }
+.p-actus[open] .p-actus-titre::after { transform: rotate(90deg); }
+.p-actus-der { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-actus[open] .p-actus-der { visibility: hidden; }
+.p-actus-liste {
+  display: flex; flex-direction: column; gap: 8px; margin: 9px 0 3px 3px; padding: 0 0 0 14px; list-style: none;
+  border-left: 2px solid rgb(var(--e) / 0.3);
+}
+.p-actus-liste li { position: relative; display: flex; flex-direction: column; gap: 1px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+.p-actus-liste li::before {
+  content: ""; position: absolute; left: -19px; top: 5px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--bg, #0d0b14); box-shadow: inset 0 0 0 2px rgb(var(--e) / 0.55);
+}
+.p-actus-liste li:first-child { color: var(--text); font-weight: 600; }
+.p-actus-liste li:first-child::before { background: rgb(var(--e)); box-shadow: 0 0 8px rgb(var(--e) / 0.7); }
+.p-actus-liste time { font-size: 11.5px; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.p-actus[open] .p-actus-liste { animation: p-actus-entree var(--t-4, 240ms) var(--ease-out, ease-out); }
+@keyframes p-actus-entree { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .p-actus[open] .p-actus-liste { animation: none; } }
 .p-depot[data-depot="pris"]::after,
 .p-depot[data-depot="livre"]::after { content: " ✓"; }
 .p-colis-l2 > :not([hidden]) ~ :not([hidden])::before { content: "·"; margin-right: 6px; color: var(--text-3); font-weight: 400; }
