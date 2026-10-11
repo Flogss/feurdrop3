@@ -4,25 +4,33 @@ const { transporteur: infoTransporteurBrut, METHODES_AUTOMATIQUES, NON_CONTROLES
 const { analyseDepot, versMs } = require("./analyse");
 const { lisPage } = require("./pages");
 const laposte = require("./laposte");
+const ups = require("./ups");
+const dhl = require("./dhl");
 
-// Controle des depots : pour chaque colis DROPE qui a un numero de suivi, ce
-// que le transporteur en dit, a cote du statut FeurDrop -- les deux restent
-// separes, rien n'est ecrit dans la table des colis.
+// Controle des depots : pour chaque colis DROPE qui a un numero de suivi, le
+// transporteur l'a-t-il pris en charge ? Le statut FeurDrop et ce que dit le
+// transporteur restent separes : rien n'est ecrit dans la table des colis.
 //
-// Deux facons de lire :
-//   - le serveur interroge l'API La Poste (La Poste, Colissimo, Chronopost,
-//     DPD) a son rythme : une file, un numero a la fois, espaces, jamais plus
-//     de CONTROLE_MAX_PAR_PASSAGE par passage ; chaque numero a son heure de
-//     prochaine verification, gardee en base (un redemarrage reprend la ou on
-//     en etait, ouvrir la page ne declenche rien) ;
-//   - l'app Drop du Mac lit les pages officielles (Mondial Relay, DHL, FedEx,
-//     GLS) quand on lance « Tout verifier » : elle prend les numeros par
-//     petits lots (un bail de quelques minutes), envoie le texte de chaque
-//     page, et le serveur le lit (controle/pages.js). Chaque resultat est
-//     rattache a SON numero.
-// Un transporteur qui ralentit ou refuse (429, 403, defi anti-robot) est mis
-// en pause, de plus en plus longue s'il recommence : on n'insiste jamais
-// contre une protection. Un echec n'efface jamais une preuve deja lue.
+// La file active ne garde que ce qui reste a trancher : un depot prouve en
+// sort tout seul (sa date de confirmation et sa preuve restent dans
+// l'historique), un numero que le transporteur dit inconnu a plusieurs
+// reprises en est retire (avec la raison, gardee en base et dans le journal
+// du serveur). Le colis et son etiquette ne sont jamais touches.
+//
+// Qui lit :
+//   - le serveur, par les API officielles (La Poste/Colissimo/Chronopost/DPD,
+//     UPS et DHL quand leurs cles sont posees) : une file, un numero a la
+//     fois, espaces, jamais plus de CONTROLE_MAX_PAR_PASSAGE par passage ;
+//   - l'app Drop du Mac, par les pages officielles (Mondial Relay, GLS, DHL
+//     sans cle) : elle prend les numeros dus par petits lots d'un meme
+//     transporteur (un bail de quelques minutes), seule tant qu'elle est
+//     ouverte, et tout de suite apres « Tout vérifier » ; le serveur lit le
+//     texte de chaque page (controle/pages.js) et le range sous SON numero.
+// Chaque numero a son heure de prochaine lecture, gardee en base : un
+// redemarrage reprend la ou on en etait, ouvrir la page ne lit rien. Un
+// transporteur qui ralentit ou refuse (429, 403, defi anti-robot) est mis en
+// pause : on n'insiste jamais contre une protection. Un echec n'efface
+// jamais une preuve deja lue.
 
 const reglages = () => ({
   affichageJours: Number(process.env.CONTROLE_AFFICHAGE_JOURS || 30),
@@ -34,6 +42,13 @@ const reglages = () => ({
   fraicheurMinutes: Number(process.env.CONTROLE_FRAICHEUR_MINUTES || 30),
   // un numero pris par le Mac lui revient s'il n'a rien rendu apres 3 min
   bailMinutes: Number(process.env.CONTROLE_BAIL_MINUTES || 3),
+  // un numero inconnu n'est retire qu'apres 2 lectures « inconnu », a 12 h
+  // d'ecart au moins, et 72 h apres le drop (le premier scan a eu le temps)
+  inconnuLectures: Number(process.env.CONTROLE_INCONNU_LECTURES || 2),
+  inconnuEcartHeures: Number(process.env.CONTROLE_INCONNU_ECART_HEURES || 12),
+  inconnuAgeHeures: Number(process.env.CONTROLE_INCONNU_AGE_HEURES || 72),
+  // le Mac est « en ligne » s'il s'est signale il y a moins de 45 s
+  agentSecondes: Number(process.env.CONTROLE_AGENT_SECONDES || 45),
 });
 
 const MINUTE = 60 * 1000;
@@ -42,7 +57,9 @@ const sql = (ms) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 const maintenantSql = () => sql(Date.now());
 const sqlVersMs = (s) => (s ? Date.parse(`${String(s).replace(" ", "T")}Z`) : null);
 const attends = (ms) => new Promise((r) => setTimeout(r, ms));
-const ADAPTATEURS = { laposte };
+// les methodes lues par le serveur (API officielles)
+const ADAPTATEURS = { laposte, ups, dhl };
+const estServeur = (methode) => Object.hasOwn(ADAPTATEURS, methode);
 
 // --- Reglages : la lecture automatique par transporteur ------------------------------
 
@@ -93,6 +110,11 @@ function parNumero(liste) {
   return m;
 }
 
+// le colis drope (affiche) d'un numero ; le plus recent s'il y en a plusieurs
+function colisDuNumero(numero) {
+  return colisDropes().avec.find((x) => x.suivi.numero === numero) || null;
+}
+
 const versEvenement = (e) => ({
   id: e.id,
   survenuLe: e.survenu_le,
@@ -124,9 +146,9 @@ function lignesSuivis(numeros) {
   return { suivis, evenements };
 }
 
-// --- Pauses (disjoncteur) : par methode pour l'API, par transporteur pour le Mac -------
+// --- Pauses (disjoncteur) : par methode pour les API, par transporteur pour le Mac -----
 
-// "laposte", ou "navigateur:MR"
+// "laposte", "ups", "dhl", ou "navigateur:MR"
 const clePause = (t) => (t.methode === "navigateur" ? `navigateur:${t.code}` : t.methode);
 
 function pauseDe(cle) {
@@ -162,47 +184,22 @@ function levePause(cle) {
   db.prepare("UPDATE controle_transporteurs SET bloque_jusqua = NULL WHERE code = ?").run(cle);
 }
 
-// --- Prochaine verification (file du serveur) -------------------------------------------
+// --- La ligne d'un numero ---------------------------------------------------------------
 
-// D'apres ce que l'on sait deja : rien de plus une fois le depot prouve ou le
-// colis livre ; souvent tant qu'il ne l'est pas (les premiers jours), puis
-// plus calmement.
-function planifie(numero, { encoreAffiche = true, dropeMs = null } = {}) {
-  if (!encoreAffiche) return null;
-  const s = db.prepare("SELECT final, methode FROM controle_suivis WHERE numero = ?").get(numero);
-  if (s?.methode !== "laposte") return null;
-  const evts = db.prepare("SELECT etape, physique, incident, code FROM controle_evenements WHERE numero = ?").all(numero);
-  // la question est le depot : une fois prouve, plus rien a relire
-  if (s?.final || evts.some((e) => e.physique)) return null;
-  const age = dropeMs ? Date.now() - dropeMs : 0;
-  const minutes = age < 72 * HEURE ? 2 * 60 : 6 * 60;
-  return sql(Date.now() + minutes * MINUTE);
-}
-
-function noteErreurNumero(numero, err, { methodeLecture = null, statutBrut = undefined, pageUrl = null } = {}) {
-  const l = db.prepare("SELECT essais, methode FROM controle_suivis WHERE numero = ?").get(numero);
-  const essais = (l?.essais || 0) + 1;
-  // un numero refuse n'est pas redemande ; une panne passagere, de plus en
-  // plus tard (la file du serveur seulement : le Mac relit a la demande)
-  const relire = l?.methode === "laposte" && !["invalide", "ambigu", "bloque"].includes(err.type);
-  const prochaine = relire ? sql(Date.now() + Math.min(6 * 60, 15 * 2 ** (essais - 1)) * MINUTE) : null;
-  db.prepare(
-    `UPDATE controle_suivis SET erreur = ?, code_erreur = ?, essais = ?, essai_le = ?, prochaine_le = ?,
-       methode_lecture = COALESCE(?, methode_lecture), statut_brut = COALESCE(?, statut_brut), page_url = COALESCE(?, page_url) WHERE numero = ?`
-  ).run(String(err.message || err).slice(0, 300), err.type || "erreur", essais, maintenantSql(), prochaine, methodeLecture, statutBrut ?? null, pageUrl, numero);
-}
-
-// La ligne d'un numero, creee a sa premiere apparition.
 function suiviDe(numero, { suivi, transporteur }) {
+  const auto = transporteur.methode !== "manuel";
   db.prepare("INSERT OR IGNORE INTO controle_suivis (numero, transporteur, methode, prochaine_le) VALUES (?, ?, ?, ?)").run(
     numero,
     suivi.transporteur,
     transporteur.methode,
-    transporteur.methode === "laposte" ? maintenantSql() : null
+    auto ? maintenantSql() : null
   );
-  // la methode d'un transporteur a pu changer (Mondial Relay lu sur le Mac,
-  // lecture coupee...) : la ligne suit
-  db.prepare("UPDATE controle_suivis SET methode = ? WHERE numero = ? AND methode != ?").run(transporteur.methode, numero, transporteur.methode);
+  // la methode d'un transporteur a pu changer (cle d'API posee, lecture
+  // coupee ou rallumee) : la ligne suit, et une lecture automatique est due
+  db.prepare(
+    `UPDATE controle_suivis SET methode = ?, prochaine_le = CASE WHEN ? AND archive_le IS NULL AND COALESCE(statut, '') != 'confirme' THEN datetime('now') ELSE NULL END
+     WHERE numero = ? AND methode != ?`
+  ).run(transporteur.methode, auto ? 1 : 0, numero, transporteur.methode);
   return db.prepare("SELECT * FROM controle_suivis WHERE numero = ?").get(numero);
 }
 
@@ -212,7 +209,7 @@ function suiviDe(numero, { suivi, transporteur }) {
  * partir de TOUS les evenements gardes -- une lecture plus pauvre n'efface
  * jamais une preuve deja lue.
  */
-function enregistreLecture(numero, lecture, { encoreAffiche = true, dropeMs = null, methodeLecture = "laposte", statutBrut = null, pageUrl = null, luPar = null } = {}) {
+function enregistreLecture(numero, lecture, { methodeLecture = "laposte", statutBrut = null, pageUrl = null, luPar = null } = {}) {
   return transaction(() => {
     const ajoute = db.prepare(
       `INSERT OR IGNORE INTO controle_evenements
@@ -245,26 +242,149 @@ function enregistreLecture(numero, lecture, { encoreAffiche = true, dropeMs = nu
          essais = 0, erreur = NULL, code_erreur = NULL, methode_lecture = ?, statut_brut = COALESCE(?, statut_brut),
          page_url = COALESCE(?, page_url), lu_par = COALESCE(?, lu_par) WHERE numero = ?`
     ).run(lecture.trouve ? 1 : 0, lecture.final ? 1 : 0, lecture.produit ?? null, maintenantSql(), maintenantSql(), methodeLecture, brut, pageUrl, luPar, numero);
-    db.prepare("UPDATE controle_suivis SET prochaine_le = ? WHERE numero = ?").run(planifie(numero, { encoreAffiche, dropeMs }), numero);
+    // « inconnu » : on compte les lectures (pour ne retirer qu'a coup sur)
+    if (lecture.trouve) db.prepare("UPDATE controle_suivis SET inconnu_lectures = 0, inconnu_premier_le = NULL WHERE numero = ?").run(numero);
+    else db.prepare("UPDATE controle_suivis SET inconnu_lectures = inconnu_lectures + 1, inconnu_premier_le = COALESCE(inconnu_premier_le, ?) WHERE numero = ?").run(maintenantSql(), numero);
     return nouveaux;
   });
 }
 
-// le statut normalise d'un numero, garde avec sa derniere lecture
-function memoriseStatut(numero, connu = null) {
-  const x = connu || colisDuNumero(numero);
+// le statut d'un numero, garde avec sa derniere lecture ; un depot prouve
+// garde sa date de confirmation et sa preuve (il sort de la file active)
+function memoriseStatut(numero, x) {
   if (!x) return null;
   const { suivis, evenements } = lignesSuivis([numero]);
   const l = ligneDe(x, suivis.get(numero), evenements.get(numero), contexte());
-  db.prepare("UPDATE controle_suivis SET statut = ? WHERE numero = ?").run(l.controle.categorie, numero);
-  return l.controle.categorie;
+  const c = l.controle;
+  if (c.categorie === "confirme") {
+    db.prepare("UPDATE controle_suivis SET statut = 'confirme', confirme_le = COALESCE(confirme_le, verifie_le, ?), preuve_le = ?, preuve_libelle = ? WHERE numero = ?").run(
+      maintenantSql(),
+      c.preuve?.le || null,
+      c.preuve?.statut || null,
+      numero
+    );
+  } else {
+    db.prepare("UPDATE controle_suivis SET statut = ?, confirme_le = NULL, preuve_le = NULL, preuve_libelle = NULL WHERE numero = ?").run(c.categorie, numero);
+  }
+  return c.categorie;
 }
 
-function colisDuNumero(numero) {
-  return colisDropes().avec.find((x) => x.suivi.numero === numero) || null;
+// Retire un numero de la file active, avec sa raison. Le colis n'est jamais touche.
+function archive(numero, motif, detail = {}) {
+  db.prepare("UPDATE controle_suivis SET archive_le = ?, archive_motif = ?, archive_detail = ?, prochaine_le = NULL WHERE numero = ? AND archive_le IS NULL").run(
+    maintenantSql(),
+    motif,
+    JSON.stringify(detail),
+    numero
+  );
+  console.log(`[controle] suivi ${numero} retiré de la file : ${motif}`);
 }
 
-// --- Passages du serveur (API La Poste) ----------------------------------------------------
+function desarchive(numero) {
+  db.prepare("UPDATE controle_suivis SET archive_le = NULL, archive_motif = NULL, archive_detail = NULL, inconnu_lectures = 0, inconnu_premier_le = NULL WHERE numero = ?").run(numero);
+}
+
+/**
+ * Un numero inconnu du transporteur est-il a retirer ? Seulement a coup sur :
+ *   - refuse comme invalide par l'API (format faux) : tout de suite ;
+ *   - « inconnu » lu au moins 2 fois, a 12 h d'ecart, 72 h apres le drop, et
+ *     jamais aucun evenement connu pour ce numero.
+ * Jamais sur une erreur reseau, un delai, une page bloquee ou incomplete :
+ * ce ne sont pas des lectures « inconnu ».
+ */
+function verifieInconnu(numero, x) {
+  const s = db.prepare("SELECT * FROM controle_suivis WHERE numero = ?").get(numero);
+  if (!s || s.archive_le) return false;
+  const connus = db.prepare("SELECT COUNT(*) AS n FROM controle_evenements WHERE numero = ? AND source != 'manuel'").get(numero).n;
+  if (connus > 0) return false;
+  const t = x?.transporteur || infoTransporteur(s.transporteur);
+  if (s.code_erreur === "invalide") {
+    archive(numero, `numéro refusé par ${t.nom} (${s.erreur || "format invalide"})`, { regle: "invalide", erreur: s.erreur, colisId: x?.colis.id ?? null });
+    return true;
+  }
+  const r = reglages();
+  const age = x ? Date.now() - sqlVersMs(x.colis.dropped_at) : 0;
+  const ecart = s.inconnu_premier_le ? Date.now() - sqlVersMs(s.inconnu_premier_le) : 0;
+  if (s.trouve === 0 && s.inconnu_lectures >= r.inconnuLectures && ecart >= r.inconnuEcartHeures * HEURE && age >= r.inconnuAgeHeures * HEURE) {
+    archive(numero, `inconnu de ${t.nom} : ${s.inconnu_lectures} lectures sur ${Math.round(ecart / HEURE)} h, drop il y a ${Math.round(age / HEURE)} h`, {
+      regle: "inconnu",
+      lectures: s.inconnu_lectures,
+      premiere: s.inconnu_premier_le,
+      derniere: s.verifie_le,
+      methode: s.methode_lecture,
+      colisId: x?.colis.id ?? null,
+    });
+    return true;
+  }
+  return false;
+}
+
+// La prochaine lecture, d'apres ce que l'on sait : jamais plus une fois le
+// depot prouve ou le numero retire ; souvent tant qu'il ne l'est pas (les
+// premiers jours), puis plus calmement ; un « inconnu » est relu 12 h plus
+// tard (pour etre sur avant de le retirer).
+function planifie(numero, { categorie, dropeMs = null }) {
+  const s = db.prepare("SELECT methode, archive_le, trouve FROM controle_suivis WHERE numero = ?").get(numero);
+  if (!s || s.archive_le || s.methode === "manuel" || categorie === "confirme") return null;
+  const age = dropeMs ? Date.now() - dropeMs : 0;
+  const minutes = s.trouve === 0 ? 12 * 60 : categorie === "non_confirme" ? (age < 72 * HEURE ? 2 * 60 : 6 * 60) : 6 * 60;
+  return sql(Date.now() + minutes * MINUTE);
+}
+
+// Apres une lecture reussie : le statut, l'eventuel retrait, la prochaine lecture.
+function apresLecture(numero, x) {
+  const categorie = memoriseStatut(numero, x);
+  const retire = verifieInconnu(numero, x);
+  if (!retire) db.prepare("UPDATE controle_suivis SET prochaine_le = ? WHERE numero = ?").run(x ? planifie(numero, { categorie, dropeMs: sqlVersMs(x.colis.dropped_at) }) : null, numero);
+  return retire ? "retire" : categorie;
+}
+
+// Une lecture en echec : rien n'est conclu, une preuve deja lue reste. Un
+// nouvel essai de plus en plus tard (15 min, 30 min... 6 h au plus).
+function noteErreurNumero(numero, err, { methodeLecture = null, statutBrut = undefined, pageUrl = null } = {}) {
+  const l = db.prepare("SELECT essais, statut, archive_le FROM controle_suivis WHERE numero = ?").get(numero);
+  const essais = (l?.essais || 0) + 1;
+  // un depot deja prouve (ou un numero retire) n'est pas remis dans la file
+  const prochaine =
+    l?.statut === "confirme" || l?.archive_le || err.type === "invalide"
+      ? null
+      : err.type === "ambigu"
+        ? sql(Date.now() + 24 * HEURE)
+        : err.type === "bloque"
+          ? sql(Date.now() + 3 * HEURE)
+          : sql(Date.now() + Math.min(6 * 60, 15 * 2 ** (essais - 1)) * MINUTE);
+  db.prepare(
+    `UPDATE controle_suivis SET erreur = ?, code_erreur = ?, essais = ?, essai_le = ?, prochaine_le = ?,
+       methode_lecture = COALESCE(?, methode_lecture), statut_brut = COALESCE(?, statut_brut), page_url = COALESCE(?, page_url) WHERE numero = ?`
+  ).run(String(err.message || err).slice(0, 300), err.type || "erreur", essais, maintenantSql(), prochaine, methodeLecture, statutBrut ?? null, pageUrl, numero);
+}
+
+// Les lignes a remettre d'aplomb : un « confirmé » garde par l'ancienne regle
+// (qui prenait une etiquette ou un ancien parcours pour un depot) n'etait plus
+// jamais relu -- s'il ne l'est plus d'apres l'analyse actuelle, il revient
+// dans la file ; un confirme sans date de confirmation la recoit.
+function recaleFile(affiches) {
+  const a = db
+    .prepare(
+      `SELECT numero FROM controle_suivis WHERE archive_le IS NULL AND (
+         (prochaine_le IS NULL AND methode != 'manuel' AND COALESCE(statut, '') != 'confirme') OR (statut = 'confirme' AND confirme_le IS NULL))`
+    )
+    .all()
+    .map((r) => r.numero)
+    .filter((n) => affiches.has(n));
+  for (const numero of a) {
+    const x = affiches.get(numero)[0];
+    const categorie = memoriseStatut(numero, x);
+    if (categorie !== "confirme" && x.transporteur.methode !== "manuel") {
+      const s = db.prepare("SELECT code_erreur FROM controle_suivis WHERE numero = ?").get(numero);
+      // (un numero refuse comme invalide ne se relit pas)
+      if (s?.code_erreur !== "invalide") db.prepare("UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE numero = ? AND prochaine_le IS NULL").run(numero);
+    }
+  }
+  return a.length;
+}
+
+// --- Passages du serveur (API officielles) ------------------------------------------------
 
 let enCours = null;
 
@@ -278,13 +398,13 @@ async function verifieNumeros(methode, numeros, { bilan, affiches }) {
       break;
     }
     const numero = numeros[i];
-    const porteurs = affiches.get(numero) || [];
-    const dropeMs = porteurs.length ? Math.min(...porteurs.map((p) => sqlVersMs(p.colis.dropped_at))) : null;
+    const x = affiches.get(numero)?.[0] || null;
     if (i > 0) await attends(intervalleMs);
     try {
       const lecture = await adaptateur.verifie(numero);
-      bilan.nouveauxEvenements += enregistreLecture(numero, lecture, { encoreAffiche: porteurs.length > 0, dropeMs, methodeLecture: methode });
-      if (porteurs.length) memoriseStatut(numero, porteurs[0]);
+      bilan.nouveauxEvenements += enregistreLecture(numero, lecture, { methodeLecture: methode });
+      const r = apresLecture(numero, x);
+      if (r === "retire") bilan.retires += 1;
       bilan.verifies += 1;
       passageres = 0;
       noteReussite(methode);
@@ -304,6 +424,7 @@ async function verifieNumeros(methode, numeros, { bilan, affiches }) {
         break;
       }
       noteErreurNumero(numero, err, { methodeLecture: methode });
+      if (err.type === "invalide" && verifieInconnu(numero, x)) bilan.retires += 1;
       if (err.type === "passagere" && ++passageres >= 3) {
         // trois pannes de suite : le transporteur a un souci, on revient plus tard
         metEnPause(methode, { type: "passagere", message: "plusieurs échecs de suite", pauseMs: 15 * MINUTE });
@@ -315,10 +436,10 @@ async function verifieNumeros(methode, numeros, { bilan, affiches }) {
 }
 
 /**
- * Un passage : les numeros dont l'heure est venue, au rythme de l'API. Jamais
- * deux passages a la fois. `force` (« Relancer » ou « Tout verifier ») avance
- * l'heure de tous les suivis encore ouverts, sauf ceux lus il y a moins de
- * 10 minutes.
+ * Un passage : les numeros dont l'heure est venue, methode par methode, au
+ * rythme de chacune. Jamais deux passages a la fois. `force` (« Relancer »
+ * ou « Tout vérifier ») avance l'heure de tous les suivis encore ouverts,
+ * sauf ceux lus il y a moins de 10 minutes.
  */
 function synchronise({ declencheur = "auto", force = false } = {}) {
   // le verrou est leve par .finally, toujours APRES l'affectation : un passage
@@ -328,16 +449,17 @@ function synchronise({ declencheur = "auto", force = false } = {}) {
 }
 
 async function passe({ declencheur, force }) {
-  const bilan = { declencheur, debut: new Date().toISOString(), verifies: 0, nouveauxEvenements: 0, erreurs: 0, reportes: 0, pauses: [] };
+  const bilan = { declencheur, debut: new Date().toISOString(), verifies: 0, nouveauxEvenements: 0, erreurs: 0, reportes: 0, retires: 0, pauses: [] };
   try {
     const { avec } = colisDropes();
     const affiches = parNumero(avec);
     // les nouveaux numeros entrent dans la file ; ceux qui ont quitte la
     // fenetre (ou ont ete "undropes") n'y sont plus relus
     for (const [numero, porteurs] of affiches) suiviDe(numero, porteurs[0]);
+    recaleFile(affiches);
     if (force) {
       db.prepare(
-        `UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE methode = 'laposte' AND prochaine_le IS NOT NULL
+        `UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE methode != 'manuel' AND prochaine_le IS NOT NULL AND archive_le IS NULL
            AND (verifie_le IS NULL OR verifie_le <= datetime('now', '-10 minutes'))`
       ).run();
     }
@@ -347,7 +469,7 @@ async function passe({ declencheur, force }) {
       if (pauseDe(methode)) continue;
       const dus = db
         .prepare(
-          `SELECT numero FROM controle_suivis WHERE methode = ? AND prochaine_le IS NOT NULL AND prochaine_le <= datetime('now')
+          `SELECT numero FROM controle_suivis WHERE methode = ? AND archive_le IS NULL AND prochaine_le IS NOT NULL AND prochaine_le <= datetime('now')
            ORDER BY verifie_le IS NOT NULL, prochaine_le LIMIT ?`
         )
         .all(methode, parPassage)
@@ -385,12 +507,13 @@ function colisAvecSuivi(colisId) {
 /**
  * « Vérifier » sur un colis : une lecture tout de suite par l'API ; pour un
  * transporteur lu sur le Mac, une petite campagne d'un numero (le Mac la
- * prend des qu'il est ouvert).
+ * prend des qu'il est en ligne). Un numero retire de la file y revient.
  */
 async function verifieColis(colisId, { par = null } = {}) {
   const x = colisAvecSuivi(colisId);
   const { transporteur } = x;
   suiviDe(x.suivi.numero, x);
+  desarchive(x.suivi.numero);
   if (transporteur.methode === "manuel") {
     throw Object.assign(new Error(transporteur.raison || `${transporteur.nom} se vérifie à la main : ouvre le suivi officiel`), { status: 409 });
   }
@@ -400,7 +523,7 @@ async function verifieColis(colisId, { par = null } = {}) {
     return detail(colisId);
   }
   const adaptateur = ADAPTATEURS[transporteur.methode];
-  if (!adaptateur.estConfigure()) throw Object.assign(new Error("L'API La Poste n'est pas configurée (OKAPI_KEY)"), { status: 503 });
+  if (!adaptateur.estConfigure()) throw Object.assign(new Error(`${METHODES_AUTOMATIQUES[transporteur.methode].nom} n'est pas configurée`), { status: 503 });
   const pause = pauseDe(transporteur.methode);
   if (pause) throw Object.assign(new Error(`${transporteur.nom} en pause jusqu'à ${pause.jusqua.slice(11, 16)} UTC : ${pause.motif}`), { status: 429 });
   const s = db.prepare("SELECT verifie_le FROM controle_suivis WHERE numero = ?").get(x.suivi.numero);
@@ -408,12 +531,15 @@ async function verifieColis(colisId, { par = null } = {}) {
   if (!s?.verifie_le || Date.now() - sqlVersMs(s.verifie_le) > 2 * MINUTE) {
     try {
       const lecture = await adaptateur.verifie(x.suivi.numero);
-      enregistreLecture(x.suivi.numero, lecture, { dropeMs: sqlVersMs(x.colis.dropped_at), methodeLecture: transporteur.methode });
-      memoriseStatut(x.suivi.numero);
+      enregistreLecture(x.suivi.numero, lecture, { methodeLecture: transporteur.methode });
+      apresLecture(x.suivi.numero, x);
       noteReussite(transporteur.methode);
     } catch (err) {
       if (err.type === "limite" || err.type === "bloque") metEnPause(transporteur.methode, err);
-      else if (err.type !== "config") noteErreurNumero(x.suivi.numero, err, { methodeLecture: transporteur.methode });
+      else if (err.type !== "config") {
+        noteErreurNumero(x.suivi.numero, err, { methodeLecture: transporteur.methode });
+        if (err.type === "invalide") verifieInconnu(x.suivi.numero, x);
+      }
     }
   }
   return detail(colisId);
@@ -425,22 +551,23 @@ function relance() {
   return etat();
 }
 
-// --- « Tout verifier » : les campagnes ------------------------------------------------------
+// --- « Tout verifier » : les campagnes (la progression d'un lot) --------------------------
 
 function campagneActive() {
   return db.prepare("SELECT * FROM controle_campagnes WHERE statut = 'active' ORDER BY id DESC LIMIT 1").get() || null;
 }
 
 /**
- * Lance une campagne : les numeros qui ont besoin d'etre lus -- pas ceux dont
- * le depot est deja prouve, pas ceux lus il y a moins de 30 min (sauf
- * `force`). L'API La Poste s'en occupe aussitot sur le serveur ; les pages
- * officielles attendent le Mac. Une campagne deja active est completee, pas
- * dupliquee.
+ * Lance une campagne : les numeros qui ont besoin d'etre lus -- jamais ceux
+ * dont le depot est prouve ou qui ont ete retires, pas ceux lus il y a moins
+ * de 30 min (sauf `force`). Les API partent aussitot sur le serveur ; les
+ * pages officielles attendent le Mac. Une campagne deja active est completee,
+ * pas dupliquee.
  */
 function lanceCampagne({ par = null, force = false, numeros = null } = {}) {
   const { avec } = colisDropes();
   const affiches = parNumero(avec);
+  for (const [numero, porteurs] of affiches) if (!numeros || numeros.includes(numero)) suiviDe(numero, porteurs[0]);
   const { suivis, evenements } = lignesSuivis(new Set(affiches.keys()));
   const ctx = contexte();
   const fraicheur = reglages().fraicheurMinutes * MINUTE;
@@ -448,11 +575,12 @@ function lanceCampagne({ par = null, force = false, numeros = null } = {}) {
   for (const [numero, porteurs] of affiches) {
     if (numeros && !numeros.includes(numero)) continue;
     const x = porteurs[0];
-    suiviDe(numero, x);
     const s = suivis.get(numero);
+    if (s?.archive_le) continue;
     const l = ligneDe(x, s, evenements.get(numero), ctx);
-    // la question est le depot : une fois prouve, rien a relire
-    if (l.controle.categorie === "confirme") continue;
+    // la question est le depot : une fois prouve, rien a relire (sauf
+    // demande sur ce colis precis : « Vérifier »)
+    if (!numeros && l.controle.categorie === "confirme") continue;
     if (!force && !numeros && s?.verifie_le && Date.now() - sqlVersMs(s.verifie_le) < fraicheur) continue;
     choisis.push({ numero, x });
   }
@@ -467,19 +595,17 @@ function lanceCampagne({ par = null, force = false, numeros = null } = {}) {
        ON CONFLICT(campagne_id, numero) DO UPDATE SET etat = CASE WHEN controle_campagne_items.etat IN ('fait', 'en_cours') THEN controle_campagne_items.etat ELSE excluded.etat END,
          methode = excluded.methode, maj_le = excluded.maj_le`
     );
-    const laposteANumeros = [];
+    const marque = db.prepare(
+      "UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE numero = ? AND archive_le IS NULL AND (verifie_le IS NULL OR verifie_le <= datetime('now', '-2 minutes') OR ?)"
+    );
     for (const { numero, x } of choisis) {
       const m = x.transporteur.methode;
       ajoute.run(c.id, numero, x.suivi.transporteur, m, m === "manuel" ? "manuel" : "attente", maintenantSql());
-      if (m === "laposte") laposteANumeros.push(numero);
-    }
-    // l'API La Poste : ces numeros passent en tete de la file du serveur
-    if (laposteANumeros.length) {
-      const marque = db.prepare("UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE numero = ? AND (verifie_le IS NULL OR verifie_le <= datetime('now', '-2 minutes') OR ?)");
-      for (const n of laposteANumeros) marque.run(n, force ? 1 : 0);
+      // les API : ces numeros passent en tete de la file du serveur
+      if (estServeur(m)) marque.run(numero, force ? 1 : 0);
     }
     // une demande explicite redonne une chance aux transporteurs en pause sur le
-    // Mac (on a peut-etre resolu le defi dans le navigateur entre-temps)
+    // Mac (on a peut-etre resolu le defi dans la fenetre entre-temps)
     for (const code of new Set(choisis.filter((y) => y.x.transporteur.methode === "navigateur").map((y) => y.x.transporteur.code))) {
       levePause(`navigateur:${code}`);
     }
@@ -489,40 +615,34 @@ function lanceCampagne({ par = null, force = false, numeros = null } = {}) {
 
 function nouvelleCampagne({ par = null, force = false } = {}) {
   const id = lanceCampagne({ par, force });
-  // l'API La Poste, sans attendre
+  // les API, sans attendre
   synchronise({ declencheur: "campagne" }).catch(() => {});
   return campagne(id);
 }
 
-// les numeros La Poste d'une campagne suivent la file du serveur : leur etat se
-// lit dans controle_suivis (lu apres le debut de la campagne ? en erreur ?)
-function actualiseItemsLaposte(c) {
-  const items = db.prepare("SELECT numero FROM controle_campagne_items WHERE campagne_id = ? AND methode = 'laposte' AND etat IN ('attente', 'en_cours')").all(c.id);
+// les numeros lus par le serveur suivent sa file : leur etat se lit dans
+// controle_suivis (lu apres le debut de la campagne ? en erreur ? retire ?)
+function actualiseItemsServeur(c) {
+  const items = db
+    .prepare("SELECT numero, methode FROM controle_campagne_items WHERE campagne_id = ? AND methode IN ('laposte', 'ups', 'dhl') AND etat IN ('attente', 'en_cours')")
+    .all(c.id);
   if (!items.length) return;
-  // sans cle, l'API ne lira jamais ces numeros : on le dit, la campagne ne
-  // reste pas suspendue a eux
-  if (!laposte.estConfigure()) {
-    db.prepare("UPDATE controle_campagne_items SET etat = 'erreur', message = ?, maj_le = ? WHERE campagne_id = ? AND methode = 'laposte' AND etat IN ('attente', 'en_cours')").run(
-      "API La Poste non configurée (OKAPI_KEY)",
-      maintenantSql(),
-      c.id
-    );
-    return;
-  }
   const depuis = sqlVersMs(c.cree_le) - 5000;
-  const affiches = parNumero(colisDropes().avec);
-  const memorise = (numero) => (affiches.has(numero) ? memoriseStatut(numero, affiches.get(numero)[0]) : null);
   const marque = db.prepare("UPDATE controle_campagne_items SET etat = ?, resultat = ?, message = ?, maj_le = ? WHERE campagne_id = ? AND numero = ?");
-  for (const { numero } of items) {
-    const s = db.prepare("SELECT verifie_le, essai_le, code_erreur, erreur FROM controle_suivis WHERE numero = ?").get(numero);
-    if (!s) continue;
-    if (s.verifie_le && sqlVersMs(s.verifie_le) >= depuis) {
-      marque.run("fait", memorise(numero), null, maintenantSql(), c.id, numero);
-    } else if (s.code_erreur && s.essai_le && sqlVersMs(s.essai_le) >= depuis) {
-      marque.run(s.code_erreur === "bloque" || s.code_erreur === "limite" ? "bloque" : "erreur", memorise(numero), s.erreur, maintenantSql(), c.id, numero);
-    } else if (pauseDe("laposte")) {
-      marque.run("bloque", null, pauseDe("laposte").motif, maintenantSql(), c.id, numero);
+  for (const { numero, methode } of items) {
+    // sans cle, l'API ne lira jamais ces numeros : on le dit, la campagne ne
+    // reste pas suspendue a eux
+    if (!ADAPTATEURS[methode].estConfigure()) {
+      marque.run("erreur", null, `${METHODES_AUTOMATIQUES[methode].nom} non configurée`, maintenantSql(), c.id, numero);
+      continue;
     }
+    const s = db.prepare("SELECT verifie_le, essai_le, code_erreur, erreur, statut, archive_le, archive_motif FROM controle_suivis WHERE numero = ?").get(numero);
+    if (!s) continue;
+    if (s.archive_le) marque.run("fait", "retire", s.archive_motif, maintenantSql(), c.id, numero);
+    else if (s.verifie_le && sqlVersMs(s.verifie_le) >= depuis) marque.run("fait", s.statut, null, maintenantSql(), c.id, numero);
+    else if (s.code_erreur && s.essai_le && sqlVersMs(s.essai_le) >= depuis) {
+      marque.run(s.code_erreur === "bloque" || s.code_erreur === "limite" ? "bloque" : "erreur", s.statut, s.erreur, maintenantSql(), c.id, numero);
+    } else if (pauseDe(methode)) marque.run("bloque", null, pauseDe(methode).motif, maintenantSql(), c.id, numero);
   }
 }
 
@@ -539,20 +659,55 @@ function annuleCampagne() {
   return campagne(c.id);
 }
 
+// --- Le Mac : en ligne ? ------------------------------------------------------------
+
+function agentVu() {
+  const a = safeJson(getSetting("controle_agent_vu", ""));
+  if (!a?.le) return null;
+  const depuis = Date.now() - Date.parse(a.le);
+  return { nom: a.nom, le: a.le, actif: depuis < reglages().agentSecondes * 1000 };
+}
+
+function signaleAgent(nom) {
+  setSetting("controle_agent_vu", JSON.stringify({ le: new Date().toISOString(), nom: String(nom || "Mac").slice(0, 60) }));
+}
+
+// les pages dues pour le Mac : campagne en cours et file persistante
+// (un numero compte une fois, qu'il soit dans la campagne, dans la file, ou les deux)
+function pagesDues() {
+  const c = campagneActive();
+  const { n } = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM (
+         SELECT numero FROM controle_campagne_items WHERE campagne_id = ? AND methode = 'navigateur' AND etat = 'attente'
+         UNION
+         SELECT numero FROM controle_suivis WHERE methode = 'navigateur' AND archive_le IS NULL AND prochaine_le IS NOT NULL AND prochaine_le <= datetime('now')
+       )`
+    )
+    .get(c?.id ?? -1);
+  return { total: n };
+}
+
+/** Le Mac se signale (toutes les 10 s) : a-t-il quelque chose a lire ? */
+function agent({ nom = "Mac" } = {}) {
+  signaleAgent(nom);
+  const c = campagneActive();
+  return { aLire: pagesDues().total, campagne: c ? { id: c.id, par: c.par } : null };
+}
+
 /** L'etat d'une campagne : la progression, par transporteur, et le Mac. */
 function campagne(id = null) {
   let c = id ? db.prepare("SELECT * FROM controle_campagnes WHERE id = ?").get(id) : campagneActive();
   if (!c) c = db.prepare("SELECT * FROM controle_campagnes ORDER BY id DESC LIMIT 1").get();
-  const agent = safeJson(getSetting("controle_agent_vu", ""));
-  const agentActif = Boolean(agent?.le && Date.now() - Date.parse(agent.le) < 30 * 1000);
-  if (!c) return { campagne: null, agent: agent ? { ...agent, actif: agentActif } : null };
+  const agentEtat = agentVu();
+  if (!c) return { campagne: null, agent: agentEtat };
   if (c.statut === "active") {
-    actualiseItemsLaposte(c);
+    actualiseItemsServeur(c);
     termineSiFini(c);
     c = db.prepare("SELECT * FROM controle_campagnes WHERE id = ?").get(c.id);
   }
   const items = db.prepare("SELECT * FROM controle_campagne_items WHERE campagne_id = ?").all(c.id);
-  const compteurs = { total: items.length, verifies: 0, restants: 0, confirmes: 0, nonConfirmes: 0, aVerifier: 0, bloques: 0, erreurs: 0, aConstater: 0, annules: 0 };
+  const compteurs = { total: items.length, verifies: 0, restants: 0, confirmes: 0, nonConfirmes: 0, aVerifier: 0, bloques: 0, erreurs: 0, aConstater: 0, annules: 0, retires: 0 };
   const parTransporteur = {};
   for (const it of items) {
     const t = (parTransporteur[it.transporteur] ||= { code: it.transporteur, nom: infoTransporteur(it.transporteur).nom, methode: it.methode, total: 0, faits: 0, restants: 0, bloques: 0, erreurs: 0, aConstater: 0, message: null });
@@ -562,6 +717,7 @@ function campagne(id = null) {
       t.faits += 1;
       if (it.resultat === "confirme") compteurs.confirmes += 1;
       else if (it.resultat === "non_confirme") compteurs.nonConfirmes += 1;
+      else if (it.resultat === "retire") compteurs.retires += 1;
       else compteurs.aVerifier += 1;
     } else if (it.etat === "attente" || it.etat === "en_cours") {
       compteurs.restants += 1;
@@ -585,51 +741,85 @@ function campagne(id = null) {
     compteurs,
     parTransporteur: Object.values(parTransporteur).sort((a, b) => b.total - a.total),
     attendMac,
-    agent: agent ? { ...agent, actif: agentActif } : null,
+    agent: agentEtat,
   };
 }
 
 // --- Le Mac : un lot de pages a lire, puis ce qu'il a vu ----------------------------------
 
 /**
- * Le Mac demande du travail : quelques numeros a lire, du meme transporteur
- * d'abord (une seule page ouverte, reutilisee), avec un bail. Un transporteur
- * en pause (defi affiche) n'est pas redonne : ses numeros passent « bloque ».
+ * Le Mac demande du travail : quelques numeros d'un meme transporteur (une
+ * seule page, reutilisee), ceux de la campagne en cours d'abord, puis ceux
+ * dont l'heure est venue (la file persistante). Chaque numero donne a un bail
+ * (3 min) : un Mac qui s'endort le rend a la file. Un transporteur en pause
+ * (defi affiche) n'est pas redonne.
  */
-function travail({ agent = "Mac", lot = 6 } = {}) {
-  setSetting("controle_agent_vu", JSON.stringify({ le: new Date().toISOString(), nom: String(agent).slice(0, 60) }));
-  const c = campagneActive();
-  if (!c) return { campagne: null, items: [] };
+function travail({ agent: nom = "Mac", lot = 6 } = {}) {
+  signaleAgent(nom);
   const { bailMinutes } = reglages();
+  const taille = Math.min(Math.max(Number(lot) || 6, 1), 12);
+  const affiches = parNumero(colisDropes().avec);
   return transaction(() => {
-    // les baux expires reviennent dans la file (un Mac qui s'est endormi)
-    db.prepare("UPDATE controle_campagne_items SET etat = 'attente', bail_jusqua = NULL WHERE campagne_id = ? AND etat = 'en_cours' AND bail_jusqua < ?").run(c.id, maintenantSql());
-    const candidats = db
-      .prepare("SELECT * FROM controle_campagne_items WHERE campagne_id = ? AND methode = 'navigateur' AND etat = 'attente' ORDER BY transporteur, numero")
-      .all(c.id);
-    const items = [];
-    for (const it of candidats) {
-      const pause = pauseDe(`navigateur:${it.transporteur}`);
-      if (pause) {
-        db.prepare("UPDATE controle_campagne_items SET etat = 'bloque', message = ?, maj_le = ? WHERE campagne_id = ? AND numero = ?").run(pause.motif, maintenantSql(), c.id, it.numero);
-        continue;
-      }
-      // un lot ne melange pas les transporteurs : une page, un site
-      if (items.length && items[0].transporteur !== it.transporteur) continue;
-      if (items.length >= Math.min(Math.max(Number(lot) || 6, 1), 12)) break;
-      items.push(it);
-    }
+    const c = campagneActive();
     const bail = sql(Date.now() + bailMinutes * MINUTE);
-    const prend = db.prepare("UPDATE controle_campagne_items SET etat = 'en_cours', bail_jusqua = ?, tentatives = tentatives + 1, maj_le = ? WHERE campagne_id = ? AND numero = ?");
-    for (const it of items) prend.run(bail, maintenantSql(), c.id, it.numero);
-    termineSiFini(c);
+    let items = [];
+    if (c) {
+      // les baux expires reviennent dans la file (un Mac qui s'est endormi)
+      db.prepare("UPDATE controle_campagne_items SET etat = 'attente', bail_jusqua = NULL WHERE campagne_id = ? AND etat = 'en_cours' AND bail_jusqua < ?").run(c.id, maintenantSql());
+      const candidats = db
+        .prepare("SELECT numero, transporteur FROM controle_campagne_items WHERE campagne_id = ? AND methode = 'navigateur' AND etat = 'attente' ORDER BY transporteur, numero")
+        .all(c.id);
+      for (const it of candidats) {
+        const pause = pauseDe(`navigateur:${it.transporteur}`);
+        if (pause) {
+          db.prepare("UPDATE controle_campagne_items SET etat = 'bloque', message = ?, maj_le = ? WHERE campagne_id = ? AND numero = ?").run(pause.motif, maintenantSql(), c.id, it.numero);
+          continue;
+        }
+        if (!affiches.has(it.numero)) {
+          // le colis n'est plus drope (remis en attente) : plus rien a lire
+          db.prepare("UPDATE controle_campagne_items SET etat = 'annule', message = 'colis plus dropé', maj_le = ? WHERE campagne_id = ? AND numero = ?").run(maintenantSql(), c.id, it.numero);
+          continue;
+        }
+        // un lot ne melange pas les transporteurs : une page, un site
+        if (items.length && items[0].transporteur !== it.transporteur) continue;
+        if (items.length >= taille) break;
+        items.push(it);
+      }
+      const prend = db.prepare("UPDATE controle_campagne_items SET etat = 'en_cours', bail_jusqua = ?, tentatives = tentatives + 1, maj_le = ? WHERE campagne_id = ? AND numero = ?");
+      for (const it of items) prend.run(bail, maintenantSql(), c.id, it.numero);
+      termineSiFini(c);
+    }
+    if (!items.length) {
+      // la file persistante : les pages dont l'heure est venue
+      const dus = db
+        .prepare(
+          `SELECT numero, transporteur FROM controle_suivis WHERE methode = 'navigateur' AND archive_le IS NULL AND prochaine_le IS NOT NULL
+             AND prochaine_le <= datetime('now') ORDER BY transporteur, verifie_le IS NOT NULL, prochaine_le LIMIT 200`
+        )
+        .all();
+      for (const it of dus) {
+        if (!affiches.has(it.numero)) {
+          db.prepare("UPDATE controle_suivis SET prochaine_le = NULL WHERE numero = ?").run(it.numero);
+          continue;
+        }
+        if (pauseDe(`navigateur:${it.transporteur}`)) continue;
+        if (items.length && items[0].transporteur !== it.transporteur) continue;
+        if (items.length >= taille) break;
+        items.push(it);
+      }
+    }
+    // le bail dans la file persistante : la prochaine lecture est repoussee de
+    // 3 min (le resultat la remet a sa vraie heure)
+    const repousse = db.prepare("UPDATE controle_suivis SET prochaine_le = ? WHERE numero = ? AND archive_le IS NULL");
+    for (const it of items) repousse.run(bail, it.numero);
+    const t = items.length ? infoTransporteur(items[0].transporteur) : null;
     return {
-      campagne: c.id,
-      // une pause entre deux pages : le rythme d'une personne, pas d'un robot
-      pauseMs: 2500,
+      campagne: c?.id ?? null,
+      // une pause entre deux pages : le rythme d'une personne, propre a chaque site
+      pauseMs: t?.rythmeMs ?? 3000,
       items: items.map((it) => {
-        const t = infoTransporteur(it.transporteur);
-        return { numero: it.numero, transporteur: it.transporteur, nom: t.nom, url: t.pageLue(it.numero) };
+        const tr = infoTransporteur(it.transporteur);
+        return { numero: it.numero, transporteur: it.transporteur, nom: tr.nom, url: tr.pageLue(it.numero) };
       }),
     };
   });
@@ -637,20 +827,22 @@ function travail({ agent = "Mac", lot = 6 } = {}) {
 
 /**
  * Ce que le Mac a vu sur la page officielle d'un numero. Chaque resultat est
- * rattache a SON numero (et verifie : un numero dope, de ce transporteur).
+ * rattache a SON numero : le numero doit etre un colis drope de ce
+ * transporteur, et la page doit afficher ce numero.
  *   { numero, transporteur, url, titre, texte, erreur? }
  */
-function recoitResultat(r, { agent = "Mac" } = {}) {
+function recoitResultat(r, { agent: nom = "Mac" } = {}) {
   const numero = String(r.numero || "");
   const x = colisDuNumero(numero);
   if (!x) return { numero, etat: "ignore", message: "numéro inconnu des colis dropés" };
   if (r.transporteur && r.transporteur !== x.suivi.transporteur) return { numero, etat: "ignore", message: "transporteur différent" };
   const t = infoTransporteurBrut(x.suivi.transporteur);
-  if (!t.lisible) return { numero, etat: "ignore", message: "ce transporteur ne se lit pas automatiquement" };
+  if (!t.lisible) return { numero, etat: "ignore", message: "ce transporteur ne se lit pas sur le Mac" };
   suiviDe(numero, x);
   const c = campagneActive();
+  const item = c ? db.prepare("SELECT etat, tentatives FROM controle_campagne_items WHERE campagne_id = ? AND numero = ?").get(c.id, numero) : null;
   const marqueItem = (etat, resultat, message) => {
-    if (!c) return;
+    if (!item) return;
     db.prepare("UPDATE controle_campagne_items SET etat = ?, resultat = ?, message = ?, bail_jusqua = NULL, maj_le = ? WHERE campagne_id = ? AND numero = ?").run(
       etat,
       resultat,
@@ -662,25 +854,24 @@ function recoitResultat(r, { agent = "Mac" } = {}) {
   };
   const cle = `navigateur:${x.suivi.transporteur}`;
   const url = r.url ? String(r.url).slice(0, 500) : null;
+  // une erreur technique : rien n'est conclu, la preuve deja lue reste ; un
+  // deuxieme essai, pas une boucle
+  const erreurTechnique = (type, message) => {
+    noteErreurNumero(numero, { type, message }, { methodeLecture: "navigateur", pageUrl: url });
+    if (item && item.tentatives < 2) marqueItem("attente", null, message);
+    else marqueItem("erreur", memoriseStatut(numero, x), message);
+    return { numero, etat: "erreur", message };
+  };
 
-  // le Mac n'a pas pu lire la page (reseau, delai) : rien n'est conclu
-  if (r.erreur) {
-    noteErreurNumero(numero, { type: "passagere", message: `page non lue sur le Mac : ${String(r.erreur).slice(0, 200)}` }, { methodeLecture: "navigateur", pageUrl: url });
-    const it = c ? db.prepare("SELECT tentatives FROM controle_campagne_items WHERE campagne_id = ? AND numero = ?").get(c.id, numero) : null;
-    // un deuxieme essai plus tard, pas une boucle
-    if (it && it.tentatives < 2) marqueItem("attente", null, String(r.erreur).slice(0, 200));
-    else marqueItem("erreur", memoriseStatut(numero), String(r.erreur).slice(0, 200));
-    return { numero, etat: "erreur" };
-  }
+  if (r.erreur) return erreurTechnique("passagere", `page non lue sur le Mac : ${String(r.erreur).slice(0, 200)}`);
 
-  const lu = lisPage(x.suivi.transporteur, { titre: r.titre, texte: r.texte, url });
-  const options = { dropeMs: sqlVersMs(x.colis.dropped_at), methodeLecture: "navigateur", pageUrl: url, luPar: String(agent).slice(0, 60) };
+  const lu = lisPage(x.suivi.transporteur, { titre: r.titre, texte: r.texte, url }, numero);
   if (lu.etat === "bloque") {
     // une protection : on arrete ce transporteur (pause), ses autres numeros
     // de la campagne aussi -- jamais d'insistance
     noteErreurNumero(numero, { type: "bloque", message: lu.motif }, { methodeLecture: "navigateur", statutBrut: lu.statutBrut, pageUrl: url });
     metEnPause(cle, { type: "bloque", message: lu.motif, pauseMs: 3 * HEURE });
-    marqueItem("bloque", memoriseStatut(numero), lu.motif);
+    marqueItem("bloque", memoriseStatut(numero, x), lu.motif);
     if (c) {
       db.prepare("UPDATE controle_campagne_items SET etat = 'bloque', message = ?, maj_le = ? WHERE campagne_id = ? AND transporteur = ? AND etat IN ('attente', 'en_cours')").run(
         `${t.nom} a affiché une vérification anti-robot : arrêt pour ce transporteur`,
@@ -691,28 +882,30 @@ function recoitResultat(r, { agent = "Mac" } = {}) {
     }
     return { numero, etat: "bloque" };
   }
+  // une page incomplete ou d'un autre numero : une erreur de lecture, pas un statut
+  if (lu.etat === "incomplet" || lu.etat === "autre_numero") return { ...erreurTechnique(lu.etat, lu.motif), etat: lu.etat };
   if (lu.etat === "illisible" || lu.etat === "ambigu") {
-    noteErreurNumero(numero, { type: lu.etat === "ambigu" ? "ambigu" : "illisible", message: lu.motif }, { methodeLecture: "navigateur", statutBrut: lu.statutBrut, pageUrl: url });
+    noteErreurNumero(numero, { type: lu.etat, message: lu.motif }, { methodeLecture: "navigateur", statutBrut: lu.statutBrut, pageUrl: url });
     noteReussite(cle);
-    marqueItem("fait", memoriseStatut(numero), lu.motif);
+    marqueItem("fait", memoriseStatut(numero, x), lu.motif);
     return { numero, etat: lu.etat };
   }
-  enregistreLecture(numero, { trouve: lu.etat === "trouve", evenements: lu.evenements, final: false }, { ...options, statutBrut: lu.statutBrut });
+  enregistreLecture(numero, { trouve: lu.etat === "trouve", evenements: lu.evenements, final: false }, { methodeLecture: "navigateur", pageUrl: url, luPar: String(nom).slice(0, 60), statutBrut: lu.statutBrut });
   noteReussite(cle);
-  const resultat = memoriseStatut(numero);
+  const resultat = apresLecture(numero, x);
   marqueItem("fait", resultat, null);
   return { numero, etat: lu.etat, resultat };
 }
 
-function recoitResultats(liste, { agent = "Mac" } = {}) {
-  setSetting("controle_agent_vu", JSON.stringify({ le: new Date().toISOString(), nom: String(agent).slice(0, 60) }));
-  const sortie = (Array.isArray(liste) ? liste : []).slice(0, 20).map((r) => recoitResultat(r, { agent }));
+function recoitResultats(liste, { agent: nom = "Mac" } = {}) {
+  signaleAgent(nom);
+  const sortie = (Array.isArray(liste) ? liste : []).slice(0, 20).map((r) => recoitResultat(r, { agent: nom }));
   const c = campagneActive();
   if (c) termineSiFini(c);
   return { resultats: sortie, ...campagne() };
 }
 
-// --- Constats a la main (UPS, ou une page bloquee) ------------------------------------------
+// --- Constats a la main (UPS sans API, ou une page bloquee) --------------------------------
 
 const CONSTATS = {
   pris: { code: "MANUEL_PRIS", libelle: "Pris en charge (constaté sur la page officielle)", etape: "in_transit", physique: 1, incident: null },
@@ -723,9 +916,10 @@ const CONSTATS = {
 function constate(colisId, resultat, { par = null } = {}) {
   const x = colisAvecSuivi(colisId);
   suiviDe(x.suivi.numero, x);
+  desarchive(x.suivi.numero);
   if (resultat === "annule") {
     db.prepare("DELETE FROM controle_evenements WHERE numero = ? AND source = 'manuel'").run(x.suivi.numero);
-    memoriseStatut(x.suivi.numero);
+    apresLecture(x.suivi.numero, x);
     return detail(colisId);
   }
   const c = CONSTATS[resultat];
@@ -736,7 +930,7 @@ function constate(colisId, resultat, { par = null } = {}) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manuel', ?)`
   ).run(x.suivi.numero, `manuel|${maintenant}`, maintenant, maintenant, c.code, c.libelle, c.etape, c.physique, c.incident, par);
   db.prepare("UPDATE controle_suivis SET methode_lecture = 'manuel', statut_brut = ? WHERE numero = ?").run(c.libelle, x.suivi.numero);
-  const categorie = memoriseStatut(x.suivi.numero);
+  const categorie = apresLecture(x.suivi.numero, x);
   // le constat resout aussi la ligne de la campagne (« à constater », « bloqué »)
   const camp = campagneActive();
   if (camp) {
@@ -753,7 +947,7 @@ function constate(colisId, resultat, { par = null } = {}) {
 // --- Ce que la page affiche ------------------------------------------------------------
 
 function demandeAttention(controle, x) {
-  if (controle.categorie === "confirme") return false;
+  if (controle.categorie === "confirme" || controle.categorie === "en_attente") return false;
   if (controle.manuel) {
     // un colis a verifier a la main l'est une fois les scans remontes (24 h)
     return Date.now() - sqlVersMs(x.colis.dropped_at) > 24 * HEURE;
@@ -769,7 +963,7 @@ function ligneDe(x, s, evenements, { pauses, configure }) {
     evenements: evenements || [],
     transporteur: t,
     pause: t.methode === "manuel" ? null : pauses[clePause(t)] ?? null,
-    configure: t.methode === "laposte" ? configure.laposte : true,
+    configure: estServeur(t.methode) ? configure[t.methode] : true,
     delaiHeures: reglages().delaiScanHeures,
   });
   const attention = demandeAttention(controle, x);
@@ -789,23 +983,71 @@ function ligneDe(x, s, evenements, { pauses, configure }) {
     erreur: s?.code_erreur ? { code: s.code_erreur, message: s.erreur } : null,
     // la memoire de la derniere lecture
     lecture: s ? { methode: s.methode_lecture || null, statutBrut: s.statut_brut || null, page: s.page_url || null, par: s.lu_par || null } : null,
+    confirmeLe: controle.categorie === "confirme" ? s?.confirme_le || null : null,
+    retire: s?.archive_le ? { le: s.archive_le, motif: s.archive_motif } : null,
     lien: t.lien(x.suivi.numero),
   };
 }
 
 function contexte() {
-  const pauses = { laposte: pauseDe("laposte") };
+  const pauses = {};
+  for (const m of Object.keys(ADAPTATEURS)) pauses[m] = pauseDe(m);
   for (const code of LISIBLES) pauses[`navigateur:${code}`] = pauseDe(`navigateur:${code}`);
-  return { pauses, configure: { laposte: laposte.estConfigure() } };
+  const configure = {};
+  for (const m of Object.keys(ADAPTATEURS)) configure[m] = ADAPTATEURS[m].estConfigure();
+  return { pauses, configure };
 }
 
+// une ligne d'historique : legere (le detail s'ouvre a la demande)
+const resume = (l) => ({
+  colisId: l.colisId,
+  numero: l.numero,
+  expediteur: l.expediteur,
+  transporteur: l.transporteur,
+  dropeLe: l.statutInterne.dropeLe,
+  confirmeLe: l.confirmeLe,
+  preuve: l.controle.preuve ? { le: l.controle.preuve.le, statut: l.controle.preuve.statut, source: l.controle.preuve.source } : null,
+  suite: l.controle.suite,
+  livre: l.controle.livre,
+  retire: l.retire,
+  lien: l.lien,
+});
+
+/**
+ * La page : la file active (ce qui reste a trancher), et l'historique (les
+ * depots prouves, avec leur date de confirmation et leur preuve ; les numeros
+ * retires, avec leur raison).
+ */
 function vue() {
   const { avec, sansNumero, horsControle } = colisDropes();
   const { suivis, evenements } = lignesSuivis(new Set(avec.map((x) => x.suivi.numero)));
   const ctx = contexte();
-  const lignes = avec.map((x) => ligneDe(x, suivis.get(x.suivi.numero), evenements.get(x.suivi.numero), ctx));
+  const toutes = avec.map((x) => ligneDe(x, suivis.get(x.suivi.numero), evenements.get(x.suivi.numero), ctx));
+  const lignes = [];
+  const confirmes = [];
+  const retires = [];
+  for (const l of toutes) {
+    if (l.retire) retires.push(resume(l));
+    else if (l.controle.categorie === "confirme") confirmes.push(resume(l));
+    else lignes.push(l);
+  }
+  confirmes.sort((a, b) => String(b.confirmeLe || b.dropeLe).localeCompare(String(a.confirmeLe || a.dropeLe)));
   // `anomalie` reste a 0 pour les anciennes versions de l'app
-  const compteurs = { confirme: 0, non_confirme: 0, a_verifier: 0, bloque: 0, anomalie: 0, nonConfirmeHorsDelai: 0, aConstater: 0, attention: 0, total: lignes.length, sansNumero };
+  const compteurs = {
+    confirme: confirmes.length,
+    non_confirme: 0,
+    a_verifier: 0,
+    bloque: 0,
+    en_attente: 0,
+    anomalie: 0,
+    nonConfirmeHorsDelai: 0,
+    aConstater: 0,
+    attention: 0,
+    actifs: lignes.length,
+    retires: retires.length,
+    total: toutes.length,
+    sansNumero,
+  };
   compteurs.horsControle = Object.entries(horsControle).map(([code, colis]) => ({ code, nom: infoTransporteur(code).nom, colis }));
   for (const l of lignes) {
     compteurs[l.controle.categorie] += 1;
@@ -813,7 +1055,7 @@ function vue() {
     if (l.aConstater) compteurs.aConstater += 1;
     if (l.attention) compteurs.attention += 1;
   }
-  return { etat: etat(lignes), compteurs, lignes };
+  return { etat: etat(toutes), compteurs, lignes, historique: { confirmes: confirmes.slice(0, 500), retires } };
 }
 
 function detail(colisId) {
@@ -844,7 +1086,7 @@ function safeJson(t) {
   }
 }
 
-// L'etat de la file et des transporteurs, pour l'en-tete de la page.
+// L'etat des files, des transporteurs et du Mac, pour l'en-tete de la page.
 function etat(lignes = null) {
   const ctx = contexte();
   const transporteurs = {};
@@ -855,18 +1097,18 @@ function etat(lignes = null) {
   }
   const file = db
     .prepare(
-      `SELECT COUNT(*) AS enAttente, MIN(prochaine_le) AS prochaine FROM controle_suivis
-       WHERE methode = 'laposte' AND prochaine_le IS NOT NULL AND prochaine_le <= datetime('now')`
+      `SELECT COUNT(*) AS enAttente FROM controle_suivis
+       WHERE methode IN ('laposte', 'ups', 'dhl') AND archive_le IS NULL AND prochaine_le IS NOT NULL AND prochaine_le <= datetime('now')`
     )
     .get();
   const methodes = {};
   for (const m of Object.keys(METHODES_AUTOMATIQUES)) {
-    const cle = m === "navigateur" ? null : m;
-    const t = cle ? db.prepare("SELECT derniere_reussite FROM controle_transporteurs WHERE code = ?").get(cle) : null;
+    const serveur = estServeur(m);
+    const t = serveur ? db.prepare("SELECT derniere_reussite FROM controle_transporteurs WHERE code = ?").get(m) : null;
     methodes[m] = {
       nom: METHODES_AUTOMATIQUES[m].nom,
-      configure: m === "laposte" ? ctx.configure.laposte : true,
-      pause: cle ? ctx.pauses[cle] : null,
+      configure: serveur ? ctx.configure[m] : true,
+      pause: serveur ? ctx.pauses[m] : null,
       derniereReussite: t?.derniere_reussite || null,
     };
   }
@@ -881,6 +1123,8 @@ function etat(lignes = null) {
     transporteurs: Object.values(transporteurs).sort((a, b) => b.colis - a.colis),
     // les transporteurs que le Mac sait lire, et ceux dont la lecture est coupee
     lecture: LISIBLES.map((code) => ({ code, nom: infoTransporteurBrut(code).nom, active: !coupees.includes(code), pause: ctx.pauses[`navigateur:${code}`] || null })),
+    // le Mac : en ligne ? combien de pages l'attendent ?
+    mac: { ...(agentVu() || { actif: false }), pagesDues: pagesDues().total },
     campagne: campagne(),
     affichageJours: reglages().affichageJours,
     delaiScanHeures: reglages().delaiScanHeures,
@@ -898,9 +1142,10 @@ function demarreControleAuto() {
   setTimeout(() => synchronise().catch(() => {}), 20 * 1000).unref();
   minuteur = setInterval(() => synchronise().catch(() => {}), cycle);
   minuteur.unref();
-  console.log(
-    `[controle] controle des depots : passage toutes les ${cycle / MINUTE} min (La Poste${laposte.estConfigure() ? "" : " NON configurée : OKAPI_KEY manquante"}) ; pages officielles lues par le Mac (« Tout vérifier »)`
-  );
+  const api = Object.entries(ADAPTATEURS)
+    .map(([m, a]) => `${METHODES_AUTOMATIQUES[m].nom}${a.estConfigure() ? "" : " (non configurée)"}`)
+    .join(", ");
+  console.log(`[controle] controle des depots : passage toutes les ${cycle / MINUTE} min (${api}) ; pages officielles lues par l'app du Mac`);
 }
 
 module.exports = {
@@ -920,6 +1165,7 @@ module.exports = {
   campagne,
   annuleCampagne,
   travail,
+  agent,
   recoitResultats,
   coupeLecture,
 };

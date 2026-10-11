@@ -314,7 +314,6 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
 .carrier[data-carrier="DPD"] { --c: var(--c-dpd); }
 .carrier[data-carrier="GLS"] { --c: var(--c-gls); }
 .carrier[data-carrier="DHL"] { --c: var(--c-dhl); }
-.carrier[data-carrier="FEDEX"] { --c: var(--c-fedex); }
 .carrier[data-carrier="BJ"] { --c: var(--c-bj); }
 .carrier[data-carrier="LIT"] { --c: var(--c-lit); }
 .carrier[data-carrier="SPECIAL"] { --c: var(--c-special); }

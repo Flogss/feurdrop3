@@ -1,11 +1,14 @@
 // --- Controle des depots ------------------------------------------------------------
 // Une question : le transporteur a-t-il pris en charge ce colis ? Le serveur
-// interroge l'API officielle La Poste (La Poste, Colissimo, Chronopost, DPD) ;
-// l'app Drop du Mac lit les pages officielles de Mondial Relay, DHL, FedEx et
-// GLS quand on lance « Tout vérifier » ; UPS (consultation automatisee
-// interdite par ses conditions) se constate a la main. Ouvrir la page ne fait
-// que lire la base. Le statut FeurDrop et ce que dit le transporteur restent
-// deux colonnes distinctes.
+// interroge les API officielles (La Poste pour La Poste, Colissimo,
+// Chronopost, DPD ; UPS et DHL quand leurs cles sont posees) ; l'app Drop du
+// Mac lit seule les pages officielles de Mondial Relay, GLS (et DHL sans cle)
+// des qu'elle est ouverte ; UPS sans API (lecture de son site interdite par
+// ses conditions) se constate a la main. Ouvrir la page ne fait que lire la
+// base. La liste ne garde que ce qui reste a trancher : un depot prouve passe
+// dans l'historique (avec sa date de confirmation et sa preuve), un numero
+// inconnu du transporteur en est retire (avec sa raison). Le statut FeurDrop
+// et ce que dit le transporteur restent deux colonnes distinctes.
 
 const depotsEtat = {
   donnees: null,
@@ -22,9 +25,12 @@ const depotsEtat = {
   campagneMasquee: 0,
 };
 
-const DEPOTS_COURTS = { confirme: "Posté confirmé", non_confirme: "Non confirmé", a_verifier: "À vérifier", bloque: "Vérif. bloquée" };
-const DEPOTS_ICONES = { confirme: "check", non_confirme: "clock", a_verifier: "search", bloque: "lock" };
-const DEPOTS_LECTURES = { laposte: "API La Poste (officielle)", navigateur: "page officielle lue sur le Mac", manuel: "constat à la main" };
+const DEPOTS_COURTS = { confirme: "Posté confirmé", non_confirme: "Non confirmé", a_verifier: "À vérifier", bloque: "Vérif. bloquée", en_attente: "En attente" };
+const DEPOTS_ICONES = { confirme: "check", non_confirme: "clock", a_verifier: "search", bloque: "lock", en_attente: "refresh" };
+const DEPOTS_LECTURES = { laposte: "API La Poste (officielle)", ups: "API UPS (officielle)", dhl: "API DHL (officielle)", navigateur: "page officielle lue sur le Mac", manuel: "constat à la main" };
+const DEPOTS_API = ["laposte", "ups", "dhl"];
+// l'historique : les depots prouves, les numeros retires de la file
+const DEPOTS_HISTORIQUE = { confirme: "confirmes", retires: "retires" };
 const DEPOTS_ETAPES = {
   info_received: "Étiquette créée",
   in_transit: "Pris en charge / en transit",
@@ -72,6 +78,7 @@ function depotStatutTransporteur(l) {
   if (c.dernierStatut) return c.dernierStatut.libelle;
   if (depotManuel(l)) return c.constat ? "Constaté à la main" : "Pas de lecture automatique";
   if (l.lecture?.statutBrut && l.erreur) return l.lecture.statutBrut;
+  if (l.controle.erreurTechnique) return "Lecture en échec, nouvel essai";
   return l.verifieLe ? "Inconnu du transporteur" : l.transporteur.methode === "navigateur" ? "En attente du Mac" : "Pas encore vérifié";
 }
 
@@ -114,7 +121,7 @@ function majBadgeDepots(c, etat = depotsEtat.donnees?.etat) {
   badge.textContent = c.attention ? entier(c.attention) : "";
   if (etat && !etat.methodes.laposte.configure) sub.textContent = "API La Poste à configurer";
   else if (c.attention) sub.textContent = pluriel(c.attention, "colis à regarder", "colis à regarder");
-  else if (c.total) sub.textContent = `${pluriel(c.confirme, "dépôt confirmé", "dépôts confirmés")} sur ${entier(c.total)}`;
+  else if (c.total) sub.textContent = c.actifs ? `${pluriel(c.actifs, "colis en contrôle", "colis en contrôle")} · ${pluriel(c.confirme, "confirmé", "confirmés")}` : `${pluriel(c.confirme, "dépôt confirmé", "dépôts confirmés")}`;
   else sub.textContent = "Preuves de prise en charge";
 }
 
@@ -123,7 +130,9 @@ function rendDepots() {
   if (!d) return;
   const { compteurs: c, etat } = d;
 
-  for (const cat of Object.keys(DEPOTS_COURTS)) compte($(`depots-n-${cat}`), c[cat]);
+  for (const cat of ["confirme", "non_confirme", "a_verifier", "bloque"]) compte($(`depots-n-${cat}`), c[cat]);
+  $("depots-n-a-verifier-sous").textContent = c.en_attente ? `+ ${pluriel(c.en_attente, "en attente de lecture", "en attente de lecture")}` : "inconnu, illisible ou en échec répété";
+  $("depots-n-confirme-sous").textContent = c.retires ? `sortis de la liste · ${pluriel(c.retires, "numéro retiré", "numéros retirés")}` : "sortis de la liste, gardés dans l'historique";
   $("depots-n-hors-delai").textContent = c.nonConfirmeHorsDelai
     ? `dont ${pluriel(c.nonConfirmeHorsDelai, "hors délai", "hors délai")}`
     : "étiquette seule, pas de prise en charge";
@@ -131,18 +140,38 @@ function rendDepots() {
   document.querySelectorAll(".depot-metric").forEach((b) => b.classList.toggle("active", b.dataset.depotsFiltre === depotsEtat.filtre));
 
   $("depots-sub").textContent = c.total
-    ? `${pluriel(c.total, "colis dropé", "colis dropés")} sur ${entier(etat.affichageJours)} jours${c.attention ? ` · ${pluriel(c.attention, "à regarder", "à regarder")}` : ""}`
+    ? `${pluriel(c.actifs, "colis en contrôle", "colis en contrôle")} · ${pluriel(c.confirme, "confirmé", "confirmés")} sur ${entier(etat.affichageJours)} jours${c.attention ? ` · ${pluriel(c.attention, "à regarder", "à regarder")}` : ""}`
     : `Aucun colis dropé avec un numéro de suivi sur ${entier(etat.affichageJours)} jours`;
 
   rendPassageDepots(etat, c);
+  rendMacDepots(etat);
   rendBandeauDepots(etat);
   rendMethodesDepots(etat);
-  rendChoixDepots(d.lignes);
+  rendChoixDepots([...d.lignes, ...d.historique.confirmes, ...d.historique.retires]);
   rendLignesDepots();
 }
 
+// Le Mac : en ligne (il lit seul les pages officielles), ou hors ligne (les
+// pages l'attendent). Le site ne lit jamais ces pages lui-meme.
+function rendMacDepots(etat) {
+  const mac = etat.mac || { actif: false, pagesDues: 0 };
+  const box = $("depots-mac");
+  const lisibles = (etat.lecture || []).filter((l) => l.active).map((l) => l.nom);
+  if (!lisibles.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.classList.toggle("is-actif", Boolean(mac.actif));
+  const pages = mac.pagesDues ? pluriel(mac.pagesDues, "page à lire", "pages à lire") : "rien à lire";
+  $("depots-mac-texte").innerHTML = mac.actif
+    ? `<b>Mac en ligne</b> · ${escapeHtml(mac.nom || "app Drop")} lit ${escapeHtml(lisibles.join(", "))} · ${pages}`
+    : `<b>Mac hors ligne${mac.le ? ` depuis ${escapeHtml(depotIlYa(mac.le).replace("il y a ", ""))}` : ""}</b> · ${mac.pagesDues ? `${pluriel(mac.pagesDues, "page attend", "pages attendent")} l'app Drop du Mac (${escapeHtml(lisibles.join(", "))})` : `${escapeHtml(lisibles.join(", "))} se lisent quand l'app Drop du Mac est ouverte`}`;
+  $("depots-mac-ouvrir").hidden = Boolean(mac.actif) || !mac.pagesDues;
+}
+
 function rendPassageDepots(etat, c) {
-  const lp = etat.methodes.laposte;
+  const apis = DEPOTS_API.map((m) => etat.methodes[m]).filter((m) => m?.configure);
   $("depots-synchro-point").classList.toggle("is-busy", etat.enCours);
   $("depots-synchro").textContent = etat.enCours
     ? "Vérifications en cours…"
@@ -160,12 +189,13 @@ function rendPassageDepots(etat, c) {
     if (faits.length) morceaux.push(faits.join(" · "));
   }
   morceaux.push(etat.file.enAttente ? pluriel(etat.file.enAttente, "vérification en attente", "vérifications en attente") : "rien en attente");
-  if (lp.pause) morceaux.push(`La Poste en pause jusqu'à ${depotHeure(lp.pause.jusqua)}`);
+  for (const m of apis) if (m.pause) morceaux.push(`${m.nom} en pause jusqu'à ${depotHeure(m.pause.jusqua)}`);
   $("depots-synchro-detail").textContent = morceaux.join(" · ");
 
   const bouton = $("depots-relancer");
-  bouton.disabled = !lp.configure || Boolean(lp.pause);
-  bouton.title = !lp.configure ? "API La Poste non configurée" : lp.pause ? "La Poste a demandé une pause : la file reprendra seule" : "";
+  const enPause = apis.length && apis.every((m) => m.pause);
+  bouton.disabled = !apis.length || enPause;
+  bouton.title = !apis.length ? "Aucune API officielle configurée" : enPause ? "Pause demandée par le transporteur : la file reprendra seule" : "";
   bouton.setAttribute("aria-busy", etat.enCours ? "true" : "false");
   $("depots-constater").hidden = !c.aConstater;
   $("depots-constater-n").textContent = entier(c.aConstater);
@@ -202,10 +232,13 @@ function rendMethodesDepots(etat) {
       else if (t.methode === "navigateur")
         etatPuce = t.pause
           ? ["is-pause", "lock", "bloqué", `Le site a affiché une vérification anti-robot : nouvel essai après ${depotHeure(t.pause.jusqua)} (ou « Tout vérifier »)`]
-          : ["is-auto", "bolt", "lu sur le Mac", "La page officielle est lue par l'app Drop du Mac (« Tout vérifier »)"];
-      else if (!lp.configure) etatPuce = ["is-pause", "info", "non configuré", "OKAPI_KEY manquante sur le serveur"];
-      else if (lp.pause) etatPuce = ["is-pause", "clock", "en pause", `Pause demandée par La Poste jusqu'à ${depotHeure(lp.pause.jusqua)}`];
-      else etatPuce = ["is-auto", "bolt", "automatique", lp.nom];
+          : ["is-auto", "bolt", "lu sur le Mac", "La page officielle est lue par l'app Drop du Mac, seule, dès qu'elle est ouverte"];
+      else {
+        const api = etat.methodes[t.methode] || lp;
+        if (!api.configure) etatPuce = ["is-pause", "info", "non configuré", `${api.nom} : clé manquante sur le serveur`];
+        else if (api.pause) etatPuce = ["is-pause", "clock", "en pause", `Pause demandée par le transporteur jusqu'à ${depotHeure(api.pause.jusqua)}`];
+        else etatPuce = ["is-auto", "bolt", "API officielle", api.nom];
+      }
       const [classe, icone, texte, titre] = etatPuce;
       const bascule = lecture
         ? `<button class="depot-methode-bascule" type="button" data-lecture="${escapeAttr(t.code)}" data-active="${lecture.active ? "1" : "0"}" title="${lecture.active ? "Couper la lecture automatique" : "Rallumer la lecture automatique"}" aria-pressed="${lecture.active}">${lecture.active ? "auto" : "manuel"}</button>`
@@ -255,12 +288,15 @@ function rendChoixDepots(lignes) {
   remplit($("depots-expediteur"), tri(expediteurs), "Tous les expéditeurs", depotsEtat.expediteur);
 }
 
+const depotsHistorique = () => DEPOTS_HISTORIQUE[depotsEtat.filtre] || null;
+
 function depotsFiltrees() {
-  const { lignes } = depotsEtat.donnees;
+  const historique = depotsHistorique();
+  const lignes = historique ? depotsEtat.donnees.historique[historique] : depotsEtat.donnees.lignes;
   const q = depotsEtat.recherche.replace(/\s+/g, "").toUpperCase();
   return lignes.filter((l) => {
     if (depotsEtat.filtre === "attention" && !l.attention) return false;
-    if (!["tous", "attention"].includes(depotsEtat.filtre) && l.controle.categorie !== depotsEtat.filtre) return false;
+    if (!historique && !["tous", "attention"].includes(depotsEtat.filtre) && l.controle.categorie !== depotsEtat.filtre) return false;
     if (depotsEtat.transporteur && l.transporteur.code !== depotsEtat.transporteur) return false;
     if (depotsEtat.expediteur && l.expediteur !== depotsEtat.expediteur) return false;
     if (q && !l.numero.includes(q)) return false;
@@ -303,19 +339,64 @@ function ligneDepot(l) {
     </div>`;
 }
 
+// Une ligne de l'historique : un depot prouve (sa date de confirmation et sa
+// preuve), ou un numero retire de la file (sa raison, discretement).
+function ligneHistorique(h) {
+  const numero = escapeAttr(h.numero);
+  const retire = Boolean(h.retire);
+  const cat = retire ? "retire" : "confirme";
+  const suite = h.suite ? (h.suite.retour ? "puis retour à l'expéditeur" : h.suite.etape === "delivered" ? "puis livré" : "puis suite") : h.livre ? "puis livré" : "";
+  return `
+    <div class="depot-ligne is-histo cat-${cat}" data-key="h${h.colisId}" data-depot="${h.colisId}">
+      <div class="depot-cell depot-colis">
+        <button class="depot-numero" type="button" aria-label="Détail du colis ${numero}">${escapeHtml(h.numero)}</button>
+        <span class="depot-sous"><span class="carrier depot-transporteur" data-carrier="${escapeAttr(h.transporteur.code)}"><i class="carrier-dot"></i>${escapeHtml(h.transporteur.nom)}</span> · ${escapeHtml(h.expediteur)}</span>
+      </div>
+      <div class="depot-cell depot-interne">
+        <span class="depot-interne-statut">Dropé</span>
+        <span class="depot-sous">${escapeHtml(depotHeure(h.dropeLe))}</span>
+      </div>
+      <div class="depot-cell depot-verdict">
+        <span class="depot-badge cat-${cat}">${ico(retire ? "inbox" : "check")}${retire ? "Retiré" : "Posté confirmé"}</span>
+        <span class="depot-sous">${retire ? `retiré ${escapeHtml(depotIlYa(h.retire.le))}` : `confirmé ${escapeHtml(depotIlYa(h.confirmeLe))}`}</span>
+      </div>
+      <div class="depot-cell depot-evenement">
+        <span class="depot-evenement-texte" title="${escapeAttr(retire ? h.retire.motif || "" : h.preuve?.statut || "")}">${retire ? escapeHtml(h.retire.motif || "retiré de la file") : h.preuve ? escapeHtml(h.preuve.statut) : "—"}</span>
+        <span class="depot-sous">${retire ? "le colis et son étiquette sont gardés" : h.preuve ? `${depotHeureTransporteur(h.preuve.le)}${suite ? ` · ${escapeHtml(suite)}` : ""}` : ""}</span>
+      </div>
+      <div class="depot-cell depot-verifie"></div>
+      <div class="depot-actions">
+        ${retire ? `<button class="icon-btn icon-btn-sm" type="button" data-depot-verifier title="Remettre en contrôle (relire maintenant)" aria-label="Remettre ${numero} en contrôle">${ico("refresh")}</button>` : ""}
+        ${h.lien ? `<a class="icon-btn icon-btn-sm" href="${escapeAttr(h.lien)}" target="_blank" rel="noopener noreferrer" title="Suivi officiel" aria-label="Suivi officiel de ${numero}">${ico("external")}</a>` : ""}
+      </div>
+    </div>`;
+}
+
 function rendLignesDepots() {
   const lignes = depotsFiltrees();
   const d = depotsEtat.donnees;
-  const filtreActif = depotsEtat.filtre !== "tous" || depotsEtat.transporteur || depotsEtat.expediteur || depotsEtat.recherche;
+  const historique = depotsHistorique();
+  const filtreActif = (depotsEtat.filtre !== "tous" && !historique) || depotsEtat.transporteur || depotsEtat.expediteur || depotsEtat.recherche;
+  const entete = $("depots-entete");
+  const titres = historique === "retires" ? ["Colis", "FeurDrop", "Contrôle", "Raison du retrait", "", ""] : historique ? ["Colis", "FeurDrop", "Contrôle", "Preuve de dépôt", "", ""] : ["Colis", "FeurDrop", "Contrôle", "Dernier statut transporteur", "Vérifié", ""];
+  const enteteHtml = titres.map((t) => `<span>${t}</span>`).join("");
+  if (entete._html !== enteteHtml) {
+    entete.innerHTML = enteteHtml;
+    entete._html = enteteHtml;
+  }
   rendListe($("depots-lignes"), lignes, {
-    cle: (l) => l.colisId,
-    html: ligneDepot,
+    cle: (l) => `${historique || "actif"}-${l.colisId}`,
+    html: historique ? ligneHistorique : ligneDepot,
     videHtml: filtreActif
       ? vide("search", "Aucun colis ne correspond", "Change de filtre ou de recherche.")
-      : vide("inbox", "Aucun colis dropé à contrôler", "Les colis dropés avec un numéro de suivi apparaîtront ici."),
+      : historique === "retires"
+        ? vide("inbox", "Aucun numéro retiré", "Un numéro que le transporteur dit inconnu à plusieurs reprises sort de la liste et apparaît ici.")
+        : historique
+          ? vide("check", "Aucun dépôt confirmé pour l'instant", "Un colis pris en charge par le transporteur quitte la liste et apparaît ici, avec sa preuve.")
+          : vide("check", "Rien à contrôler", d.compteurs.confirme ? "Tous les dépôts sont confirmés : ils sont dans l'historique." : "Les colis dropés avec un numéro de suivi apparaîtront ici."),
   });
   const pied = [];
-  if (filtreActif) pied.push(`${pluriel(lignes.length, "colis affiché", "colis affichés")} sur ${entier(d.lignes.length)}`);
+  if (filtreActif) pied.push(`${pluriel(lignes.length, "colis affiché", "colis affichés")} sur ${entier((historique ? d.historique[historique] : d.lignes).length)}`);
   for (const h of d.compteurs.horsControle || []) pied.push(pluriel(h.colis, `colis ${h.nom} non contrôlé`, `colis ${h.nom} non contrôlés`));
   if (d.compteurs.sansNumero) pied.push(`${pluriel(d.compteurs.sansNumero, "colis dropé sans numéro de suivi lisible", "colis dropés sans numéro de suivi lisible")} (non contrôlables)`);
   $("depots-pied").textContent = pied.join(" · ");
@@ -345,7 +426,7 @@ $("depots-relancer").addEventListener("click", (e) =>
       await loadDepots(true);
       suisPassageDepots();
     },
-    { succes: "Vérifications relancées, au rythme de La Poste : la page se met à jour au fil de l'eau" }
+    { succes: "Vérifications relancées, au rythme de chaque transporteur : la page se met à jour au fil de l'eau" }
   )
 );
 
@@ -380,9 +461,9 @@ function rendCampagne(etat) {
   $("campagne-titre").textContent = active ? "Vérification de tous les colis" : c.statut === "annulee" ? "Vérification annulée" : "Vérification terminée";
   let sous;
   if (active && etat.attendMac) {
-    sous = macActif ? `L'app Drop du Mac lit les pages officielles (${escapeHtml(mac.nom)})…` : "En attente de l'app Drop sur le Mac : ouvre-la pour lire Mondial Relay, DHL, FedEx et GLS.";
+    sous = macActif ? `L'app Drop du Mac lit les pages officielles (${escapeHtml(mac.nom)})…` : "En attente de l'app Drop sur le Mac : les pages officielles (Mondial Relay, GLS…) seront lues dès qu'elle sera ouverte.";
   } else if (active) {
-    sous = "L'API La Poste vérifie ses colis…";
+    sous = "Les API officielles vérifient leurs colis…";
   } else {
     sous = `${c.statut === "annulee" ? "Arrêtée" : "Finie"} ${depotIlYa(c.finLe)} · ${pluriel(n.verifies, "colis vérifié", "colis vérifiés")}`;
   }
@@ -392,7 +473,7 @@ function rendCampagne(etat) {
   $("campagne-fermer").hidden = active;
   $("campagne-transporteurs").innerHTML = etat.parTransporteur
     .map((t) => {
-      const methode = t.methode === "navigateur" ? "Mac" : t.methode === "laposte" ? "API" : "à la main";
+      const methode = t.methode === "navigateur" ? "Mac" : DEPOTS_API.includes(t.methode) ? "API" : "à la main";
       const detail = t.restants
         ? `${entier(t.faits)} / ${entier(t.total)}`
         : [t.faits && `${entier(t.faits)} vérifié${t.faits > 1 ? "s" : ""}`, t.bloques && `${entier(t.bloques)} bloqué${t.bloques > 1 ? "s" : ""}`, t.erreurs && `${entier(t.erreurs)} erreur${t.erreurs > 1 ? "s" : ""}`, t.aConstater && `${entier(t.aConstater)} à constater`]
@@ -511,7 +592,7 @@ function evenementDepot(e, preuve) {
     ? "constat sur la page officielle"
     : e.source === "navigateur"
       ? "page officielle lue sur le Mac"
-      : `La Poste · ${e.code || "?"}${e.etape === "unknown" ? " (code non reconnu)" : ""}`;
+      : `${{ ups: "API UPS", dhl: "API DHL" }[e.source] || "La Poste"} · ${e.code || "?"}${e.etape === "unknown" ? " (code non reconnu)" : ""}`;
   return `
     <li class="depot-evt${estPreuve ? " is-preuve" : ""}${e.incident || e.etape === "exception" ? " is-suite" : ""}${manuel ? " is-manuel" : ""}">
       <span class="depot-evt-point" aria-hidden="true"></span>
@@ -534,7 +615,7 @@ function constatDepot(d) {
     ? ""
     : d.transporteur.methode === "navigateur"
       ? "La lecture automatique n'a pas pu trancher pour ce colis : tu peux noter ce que montre la page officielle. "
-      : "L'API La Poste ne permet pas de trancher pour ce colis : tu peux noter ce que montre la page officielle. ";
+      : "L'API officielle ne permet pas de trancher pour ce colis : tu peux noter ce que montre la page officielle. ";
   return `
     <section class="depot-constat">
       <h3 class="depot-detail-titre">Constat sur la page officielle</h3>
@@ -571,10 +652,15 @@ function rendDetailDepot(d) {
   const suite = c.suite
     ? `<div class="depot-detail-suite"><dt>Après la prise en charge</dt><dd>${escapeHtml(c.suite.libelle || "")}${c.suite.le ? ` · ${depotHeureTransporteur(c.suite.le)}` : ""}<span class="depot-sous"> — sans effet sur le dépôt, déjà prouvé</span></dd></div>`
     : "";
+  // retire de la liste (numero inconnu) : on le dit d'abord, le verdict suit
+  const tete = d.retire
+    ? `<span class="depot-badge cat-retire">${ico("inbox")}Retiré de la liste</span>
+      <p class="depot-detail-raison">${escapeHtml(d.retire.motif || "Retiré de la file de contrôle")}. Le colis et son étiquette sont gardés ; « Vérifier maintenant » le remet en contrôle.</p>`
+    : `<span class="depot-badge cat-${escapeAttr(c.categorie)}">${ico(DEPOTS_ICONES[c.categorie])}${escapeHtml(c.libelle)}</span>
+      <p class="depot-detail-raison">${escapeHtml(c.raison)}</p>`;
   $("depot-sheet-contenu").innerHTML = `
     <div class="depot-detail-tete">
-      <span class="depot-badge cat-${escapeAttr(c.categorie)}">${ico(DEPOTS_ICONES[c.categorie])}${escapeHtml(c.libelle)}</span>
-      <p class="depot-detail-raison">${escapeHtml(c.raison)}</p>
+      ${tete}
     </div>
     <dl class="depot-detail-grille">
       <div><dt>FeurDrop</dt><dd>Dropé le ${escapeHtml(depotHeure(d.statutInterne.dropeLe))}</dd></div>
@@ -583,6 +669,8 @@ function rendDetailDepot(d) {
       <div><dt>Vérification</dt><dd>${escapeHtml(methode)}${d.lecture?.par ? ` · ${escapeHtml(d.lecture.par)}` : ""}</dd></div>
       <div><dt>Statut transporteur</dt><dd>${escapeHtml(d.lecture?.statutBrut || depotStatutTransporteur(d))}</dd></div>
       <div><dt>Vérifié</dt><dd>${escapeHtml(verifie)}</dd></div>
+      ${c.categorie === "confirme" && d.confirmeLe ? `<div><dt>Confirmé</dt><dd>${escapeHtml(depotHeure(d.confirmeLe))} · sorti de la liste</dd></div>` : ""}
+      ${d.retire ? `<div><dt>Retiré de la liste</dt><dd>${escapeHtml(depotHeure(d.retire.le))}</dd></div><div><dt>Dernier verdict</dt><dd>${escapeHtml(c.libelle)}</dd></div>` : ""}
       ${suite}
       ${d.erreur ? `<div class="depot-detail-erreur"><dt>Dernière erreur</dt><dd>${escapeHtml(d.erreur.message)}</dd></div>` : ""}
     </dl>
@@ -598,12 +686,12 @@ function rendDetailDepot(d) {
               ? "Rien n'est lu automatiquement chez ce transporteur."
               : d.transporteur.methode === "navigateur"
                 ? "La page officielle n'a pas encore été lue par le Mac."
-                : "La Poste n'a encore rien remonté pour ce numéro."
+                : "Le transporteur n'a encore rien remonté pour ce numéro."
           )
     }`;
   $("depot-verifier-un").hidden = manuel;
-  const lp = depotsEtat.donnees?.etat.methodes.laposte;
-  $("depot-verifier-un").disabled = d.transporteur.methode === "laposte" && (!lp?.configure || Boolean(lp?.pause));
+  const api = depotsEtat.donnees?.etat.methodes[d.transporteur.methode];
+  $("depot-verifier-un").disabled = DEPOTS_API.includes(d.transporteur.methode) && (!api?.configure || Boolean(api?.pause));
   $("depot-suivant").hidden = !serie;
 }
 
@@ -644,7 +732,7 @@ function verifieDepot(colisId, bouton) {
       if (d.enAttenteDuMac) suisCampagne();
       return d;
     },
-    { succes: (d) => (d.enAttenteDuMac ? `${d.numero} : l'app Drop du Mac va lire la page officielle` : `${d.numero} : ${d.controle.libelle.toLowerCase()}`) }
+    { succes: (d) => (d.enAttenteDuMac ? `${d.numero} : l'app Drop du Mac va lire la page officielle` : `${d.numero} : ${d.controle.libelle.toLowerCase()}${d.controle.categorie === "confirme" ? " (dans l'historique)" : ""}`) }
   );
 }
 

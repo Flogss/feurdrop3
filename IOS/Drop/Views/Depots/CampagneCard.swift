@@ -88,7 +88,7 @@ struct CampagneCard: View {
 
     private func sousTitre(_ etat: DepotCampagneEtat?, visible: Bool) -> String {
         guard visible, let etat, let c = etat.campagne else {
-            return "La Poste, Colissimo, Chronopost et DPD par l'API officielle ; Mondial Relay, DHL, FedEx et GLS lus sur le Mac ; UPS à la main."
+            return "La Poste, Colissimo, Chronopost et DPD par l'API officielle ; Mondial Relay, GLS (et DHL sans clé d'API) lus sur le Mac ; UPS par son API si elle est posée, sinon à la main."
         }
         if c.statut == "active" {
             #if os(macOS)
@@ -98,9 +98,9 @@ struct CampagneCard: View {
             }
             #endif
             if etat.attendMac == true {
-                return etat.agent?.actif == true ? "L'app Drop du Mac lit les pages officielles (\(etat.agent?.nom ?? "Mac"))…" : "En attente de l'app Drop sur le Mac : ouvre-la pour lire Mondial Relay, DHL, FedEx et GLS."
+                return etat.agent?.actif == true ? "L'app Drop du Mac lit les pages officielles (\(etat.agent?.nom ?? "Mac"))…" : "En attente de l'app Drop sur le Mac : les pages officielles (Mondial Relay, GLS…) seront lues dès qu'elle sera ouverte."
             }
-            return "L'API La Poste vérifie ses colis…"
+            return "Les API officielles vérifient leurs colis…"
         }
         let n = etat.compteurs
         return "\(c.statut == "annulee" ? "Arrêtée" : "Finie") \(ilYa(c.finLe)) · \(Format.count(n?.verifies ?? 0, "colis vérifié", "colis vérifiés"))"

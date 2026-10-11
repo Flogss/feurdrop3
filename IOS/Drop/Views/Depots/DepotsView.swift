@@ -2,9 +2,10 @@ import SwiftUI
 import DropKit
 
 /// Le controle des depots, comme sur le site : « Tout vérifier » et sa
-/// progression, quatre compteurs qui filtrent, l'etat des verifications, la
-/// methode de chaque transporteur, puis la liste -- statut FeurDrop et parole
-/// du transporteur cote a cote. Toucher un colis ouvre sa chronologie.
+/// progression, quatre compteurs qui filtrent, l'etat des verifications (et
+/// du Mac), la methode de chaque transporteur, puis la liste active -- statut
+/// FeurDrop et parole du transporteur cote a cote -- et l'historique (depots
+/// prouves, numeros retires). Toucher un colis ouvre sa chronologie.
 struct DepotsView: View {
     @Environment(AppModel.self) private var app
     @State private var largeur: CGFloat = 0
@@ -54,14 +55,15 @@ struct DepotsView: View {
     private var sousTitre: String {
         guard let c = model.vue?.compteurs, let etat = model.vue?.etat else { return "" }
         guard c.total > 0 else { return "Aucun colis dropé sur \(etat.affichageJours) jours" }
-        return "\(Format.count(c.total, "colis dropé", "colis dropés")) sur \(etat.affichageJours) jours" + (c.attention > 0 ? " · \(c.attention) à regarder" : "")
+        let actifs = c.actifs ?? c.total
+        return "\(Format.count(actifs, "colis en contrôle", "colis en contrôle")) · \(Format.count(c.confirme, "confirmé", "confirmés"))" + (c.attention > 0 ? " · \(c.attention) à regarder" : "")
     }
 
     // MARK: Compteurs
 
     @ViewBuilder
     private func compteurs(_ c: DepotsCompteurs) -> some View {
-        let toutes = DepotCategorie.allCases
+        let toutes = DepotCategorie.compteurs
         if large {
             HStack(spacing: 10) {
                 ForEach(toutes) { cat in compteur(cat, c) }
@@ -74,11 +76,13 @@ struct DepotsView: View {
     }
 
     private func compteur(_ cat: DepotCategorie, _ c: DepotsCompteurs) -> some View {
-        let actif = model.filtre == .categorie(cat)
+        // les confirmes ont quitte la liste : leur compteur ouvre l'historique
+        let cible: DepotsModel.Filtre = cat == .confirme ? .confirmes : .categorie(cat)
+        let actif = model.filtre == cible
         let couleur = cat.couleur
         return Button {
             Haptics.selection()
-            withAnimation(Theme.spring) { model.filtre = actif ? .tous : .categorie(cat) }
+            withAnimation(Theme.spring) { model.filtre = actif ? .tous : cible }
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 Text(cat.libelle.uppercased())
@@ -119,10 +123,11 @@ struct DepotsView: View {
 
     private func sousCompteur(_ cat: DepotCategorie, _ c: DepotsCompteurs) -> String {
         switch cat {
-        case .confirme: "pris en charge par le transporteur"
+        case .confirme: (c.retires ?? 0) > 0 ? "historique · \(Format.count(c.retires ?? 0, "retiré", "retirés"))" : "sortis de la liste (historique)"
         case .nonConfirme: c.nonConfirmeHorsDelai > 0 ? "dont \(c.nonConfirmeHorsDelai) hors délai" : "étiquette seule"
-        case .aVerifier: "pas encore lu, inconnu ou en échec"
+        case .aVerifier: (c.enAttente ?? 0) > 0 ? "+ \(c.enAttente ?? 0) en attente de lecture" : "inconnu, illisible ou en échec"
         case .bloque: c.aConstater > 0 ? "dont \(c.aConstater) à constater" : "site protégé ou à la main"
+        case .enAttente: "pas encore lu"
         }
     }
 
@@ -151,11 +156,32 @@ struct DepotsView: View {
                 choix("Expéditeur", selection: $model.expediteur, options: model.expediteursPresents.map { ($0, $0) })
             }
 
-            if lignes.isEmpty {
+            if model.filtre.historique {
+                let historique = model.historique
+                if historique.isEmpty {
+                    if model.filtreActif {
+                        EmptyStateView(symbol: "magnifyingglass", title: "Aucun colis ne correspond", subtitle: "Change de filtre ou de recherche.")
+                    } else if model.filtre == .retires {
+                        EmptyStateView(symbol: "tray", title: "Aucun numéro retiré", subtitle: "Un numéro que le transporteur dit inconnu à plusieurs reprises sort de la liste et apparaît ici.")
+                    } else {
+                        EmptyStateView(symbol: "checkmark.seal", title: "Aucun dépôt confirmé pour l'instant", subtitle: "Un colis pris en charge par le transporteur quitte la liste et apparaît ici, avec sa preuve.")
+                    }
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(historique) { h in
+                            HistoriqueRow(ligne: h) { ouvert = DepotOuvert(colisID: h.colisId) }
+                            if h.id != historique.last?.id {
+                                Divider().overlay(Theme.hairline)
+                            }
+                        }
+                    }
+                    .animation(Theme.spring, value: historique.map(\.id))
+                }
+            } else if lignes.isEmpty {
                 if model.filtreActif {
                     EmptyStateView(symbol: "magnifyingglass", title: "Aucun colis ne correspond", subtitle: "Change de filtre ou de recherche.")
                 } else {
-                    EmptyStateView(symbol: "tray", title: "Aucun colis dropé à contrôler", subtitle: "Les colis dropés avec un numéro de suivi apparaîtront ici.")
+                    EmptyStateView(symbol: "checkmark.seal", title: "Rien à contrôler", subtitle: vue.compteurs.confirme > 0 ? "Tous les dépôts sont confirmés : ils sont dans l'historique." : "Les colis dropés avec un numéro de suivi apparaîtront ici.")
                 }
             } else {
                 LazyVStack(spacing: 0) {
@@ -169,7 +195,7 @@ struct DepotsView: View {
                 .animation(Theme.spring, value: lignes.map(\.id))
             }
 
-            if let pied = pied(vue, affichees: lignes.count) {
+            if let pied = pied(vue, affichees: model.filtre.historique ? model.historique.count : lignes.count) {
                 Text(pied)
                     .font(.caption)
                     .foregroundStyle(Theme.text3)
@@ -249,7 +275,14 @@ struct DepotsView: View {
 
     private func pied(_ vue: DepotsVue, affichees: Int) -> String? {
         var morceaux: [String] = []
-        if model.filtreActif { morceaux.append("\(Format.count(affichees, "colis affiché", "colis affichés")) sur \(Format.integer(vue.lignes.count))") }
+        if model.filtreActif {
+            let total = switch model.filtre {
+            case .confirmes: vue.historique?.confirmes.count ?? 0
+            case .retires: vue.historique?.retires.count ?? 0
+            default: vue.lignes.count
+            }
+            morceaux.append("\(Format.count(affichees, "colis affiché", "colis affichés")) sur \(Format.integer(total))")
+        }
         for h in vue.compteurs.horsControle ?? [] {
             morceaux.append(Format.count(h.colis, "colis \(h.nom) non contrôlé", "colis \(h.nom) non contrôlés"))
         }
@@ -319,6 +352,9 @@ private struct PassageCard: View {
             Text(detail(etat))
                 .font(.caption)
                 .foregroundStyle(Theme.text3)
+            if let mac = etat.mac, etat.lecture?.contains(where: \.active) == true {
+                etatMac(mac, etat)
+            }
 
             // cote a cote s'il y a la place, l'un sous l'autre sur un telephone
             ViewThatFits(in: .horizontal) {
@@ -354,7 +390,7 @@ private struct PassageCard: View {
         } label: {
             HStack(spacing: 6) {
                 if app.depots.relance || etat.enCours { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
-                Text("Relancer La Poste")
+                Text("Relancer les API")
             }
             .font(.subheadline.weight(.semibold))
             .fixedSize()
@@ -363,7 +399,29 @@ private struct PassageCard: View {
             .padding(.horizontal, 6)
         }
         .boutonVerre()
-        .disabled(lp?.configure != true || lp?.pause != nil || etat.enCours || app.depots.relance)
+        .disabled(etat.apisConfigurees.isEmpty || etat.apisConfigurees.allSatisfy { $0.pause != nil } || etat.enCours || app.depots.relance)
+    }
+
+    /// l'app du Mac : en ligne (elle lit seule les pages officielles), ou
+    /// hors ligne (les pages l'attendent)
+    private func etatMac(_ mac: DepotMac, _ etat: DepotsEtat) -> some View {
+        let actif = mac.actif == true
+        let lisibles = (etat.lecture ?? []).filter(\.active).map(\.nom).joined(separator: ", ")
+        let pages = mac.pagesDues ?? 0
+        let texte = actif
+            ? "Mac en ligne · \(mac.nom ?? "app Drop") lit \(lisibles)" + (pages > 0 ? " · \(Format.count(pages, "page à lire", "pages à lire"))" : "")
+            : "Mac hors ligne" + (mac.le.map { " depuis \(ilYa($0).replacingOccurrences(of: "il y a ", with: ""))" } ?? "")
+                + (pages > 0 ? " · \(Format.count(pages, "page attend", "pages attendent")) l'app Drop du Mac" : " · \(lisibles) se lisent quand l'app Drop du Mac est ouverte")
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Circle()
+                .fill(actif ? Theme.teal : Theme.warn)
+                .frame(width: 7, height: 7)
+                .shadow(color: (actif ? Theme.teal : Theme.warn).opacity(0.7), radius: 4)
+            Text(texte)
+                .font(.caption)
+                .foregroundStyle(actif ? Theme.text2 : Theme.text3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func titre(_ etat: DepotsEtat) -> String {
@@ -396,12 +454,13 @@ private struct PassageCard: View {
 
     /// une puce par transporteur : automatique, en pause, ou a la main
     private func methode(_ t: DepotTransporteurCompte, _ lp: DepotMethode?) -> some View {
+        let api = vue.etat.methodes[t.methode] ?? lp
         let (texte, symbole, couleur): (String, String, Color) =
             !t.automatique ? ("à la main", "pencil", Theme.violetLight)
             : t.methode == "navigateur" ? (t.pause != nil ? ("bloqué", "lock.fill", Theme.warn) : ("lu sur le Mac", "desktopcomputer", Theme.teal))
-            : lp?.configure != true ? ("non configuré", "info.circle", Theme.warn)
-            : lp?.pause != nil ? ("en pause", "clock", Theme.warn)
-            : ("automatique", "bolt.fill", Theme.teal)
+            : api?.configure != true ? ("non configuré", "info.circle", Theme.warn)
+            : api?.pause != nil ? ("en pause", "clock", Theme.warn)
+            : ("API officielle", "bolt.fill", Theme.teal)
         return HStack(spacing: 7) {
             CarrierDot(color: .carrier(t.code), size: 7)
             Text(t.nom).font(.caption).foregroundStyle(Theme.text2)
@@ -415,6 +474,7 @@ private struct PassageCard: View {
                 .frame(minWidth: 22, minHeight: 20)
                 .background(couleur.opacity(0.14), in: .capsule)
         }
+        .fixedSize()
         .padding(.leading, 10)
         .padding(.trailing, 4)
         .frame(height: 30)
@@ -509,13 +569,93 @@ private struct DepotRow: View {
         .accessibilityAction(named: "Détail", ouvre)
     }
 
-    private var statutTransporteur: String { ligne.controle.statutTransporteur(manuel: ligne.manuel, verifie: ligne.verifieLe != nil) }
+    private var statutTransporteur: String { ligne.controle.statutTransporteur(manuel: ligne.manuel, verifie: ligne.verifieLe != nil, navigateur: ligne.transporteur.methode == "navigateur") }
 
     private var quand: String {
         if ligne.manuel {
             return ligne.controle.constat.map { "constaté \(ilYa($0.le))" } ?? "à constater"
         }
         return ilYa(ligne.verifieLe ?? ligne.essaiLe)
+    }
+}
+
+/// Une ligne de l'historique : un depot prouve (sa date de confirmation et sa
+/// preuve), ou un numero retire de la file (sa raison, discretement).
+private struct HistoriqueRow: View {
+    let ligne: DepotHistorique
+    let ouvre: () -> Void
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let retire = ligne.retire != nil
+        let couleur = retire ? Theme.text3 : DepotCategorie.confirme.couleur
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(ligne.numero)
+                    .font(.subheadline.weight(.semibold).monospaced())
+                    .foregroundStyle(Theme.text2)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Label(retire ? "Retiré" : "Posté confirmé", systemImage: retire ? "tray" : "checkmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(couleur)
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(couleur.opacity(0.13), in: .capsule)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 5) {
+                CarrierDot(color: .carrier(ligne.transporteur.code), size: 6)
+                Text("\(ligne.transporteur.nom) · \(ligne.expediteur)").lineLimit(1)
+                Spacer(minLength: 8)
+                Text(retire ? "retiré \(ilYa(ligne.retire?.le))" : "confirmé \(ilYa(ligne.confirmeLe))")
+            }
+            .font(.caption)
+            .foregroundStyle(Theme.text3)
+            Text(retire ? (ligne.retire?.motif ?? "retiré de la file") : (ligne.preuve?.statut ?? "—"))
+                .font(.footnote)
+                .foregroundStyle(retire ? Theme.text3 : Theme.text)
+                .lineLimit(2)
+            HStack(spacing: 6) {
+                Text(retire ? "Dropé \(ServerDate.shortDayTime(ligne.dropeLe)) · colis et étiquette gardés" : "\(ServerDate.shortDayTime(ligne.preuve?.le))\(suite)")
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if retire {
+                    Button {
+                        Task { await app.depots.verifie(ligne.colisId) }
+                    } label: {
+                        Group {
+                            if app.depots.enVerification.contains(ligne.colisId) { ProgressView().controlSize(.mini) } else { Image(systemName: "arrow.clockwise") }
+                        }
+                        .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.text2)
+                    .accessibilityLabel("Remettre \(ligne.numero) en contrôle")
+                }
+                if let lien = ligne.lien, let url = URL(string: lien) {
+                    Link(destination: url) {
+                        Image(systemName: "arrow.up.right.square").frame(width: 30, height: 30)
+                    }
+                    .foregroundStyle(Theme.text2)
+                    .accessibilityLabel("Suivi officiel de \(ligne.numero)")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(Theme.text3)
+        }
+        .padding(.vertical, 10)
+        .padding(.leading, 15)
+        .contentShape(.rect)
+        .onTapGesture(perform: ouvre)
+        .ligneSurvol()
+        .accessibilityAction(named: "Détail", ouvre)
+    }
+
+    private var suite: String {
+        if ligne.suite?.retour == true { return " · puis retour à l'expéditeur" }
+        if ligne.suite?.etape == "delivered" || ligne.livre == true { return " · puis livré" }
+        return ""
     }
 }
 
@@ -547,6 +687,8 @@ extension DepotCategorie {
         case .nonConfirme: Theme.warn
         case .aVerifier: Theme.info
         case .bloque: Theme.violetLight
+        // rien n'est encore lu : gris lavande, sans alerte
+        case .enAttente: Color(red: 0.66, green: 0.65, blue: 0.77)
         }
     }
 
@@ -556,16 +698,18 @@ extension DepotCategorie {
         case .nonConfirme: "clock"
         case .aVerifier: "magnifyingglass"
         case .bloque: "lock.fill"
+        case .enAttente: "arrow.clockwise"
         }
     }
 }
 
 extension DepotControle {
     /// ce que dit le transporteur, en quelques mots
-    func statutTransporteur(manuel: Bool, verifie: Bool) -> String {
+    func statutTransporteur(manuel: Bool, verifie: Bool, navigateur: Bool = false) -> String {
         if let s = dernierStatut { return s.libelle }
         if manuel { return constat != nil ? "Constaté à la main" : "Pas de lecture automatique" }
-        return verifie ? "Inconnu du transporteur" : "Pas encore vérifié"
+        if erreurTechnique == true { return "Lecture en échec, nouvel essai" }
+        return verifie ? "Inconnu du transporteur" : navigateur ? "En attente du Mac" : "Pas encore vérifié"
     }
 }
 

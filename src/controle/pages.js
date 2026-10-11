@@ -4,23 +4,32 @@
 // Le Mac ne fait que lire : c'est ici, et seulement ici, que ce texte devient
 // une decision -- une seule logique, testee, pour tous les appareils.
 //
-// Essais reels depuis le Mac de FeurDrop, dans WebKit (octobre 2026) :
-//   Mondial Relay  la page s'affiche (HTTP 200, pas de defi) ; numero
-//                  inconnu : « Nous n'avons identifie aucun colis portant ce
-//                  numero de suivi » ; un colis : « SUIVI DETAILLE DE MON
-//                  COLIS », des dates (09/10/2026), des heures et des
-//                  libelles (« Colis pris en charge en Point Relais »,
-//                  « Colis en preparation chez l'expediteur »).
-//   DHL            la page s'affiche ; numero inconnu : « Desole, votre
-//                  tentative de suivi a echoue ».
-//   FedEx          la page s'affiche ; numero ambigu : « Duplicate results
-//                  found ».
-//   GLS            la page s'affiche (en anglais) ; numero inconnu :
-//                  « Unfortunately there are no results ».
-// Les libelles des colis reels de DHL, FedEx et GLS n'ont pas pu etre vus
-// (aucun numero reel disponible) : ils sont reconnus par des formules
-// generiques ; un texte non reconnu n'est JAMAIS une preuve (« a verifier »,
-// avec le texte brut garde pour la page).
+// Chaque transporteur a SON lecteur : ou commence le suivi sur la page, quel
+// numero elle affiche, comment s'y suivent dates, heures et libelles, et la
+// liste exacte de ses formules. Une phrase qui n'est pas dans la liste n'est
+// jamais une preuve de depot ; une phrase au futur ou a la negation non plus
+// (« sera déposé », « pas encore remis », « will be picked up »).
+//
+// Lu pour de vrai dans WebKit sur le Mac de FeurDrop (octobre 2026) :
+//   Mondial Relay  colis pris en charge (3 vrais numeros) :
+//                    SUIVI DÉTAILLÉ DE MON COLIS
+//                    09/10/2026                      <- la date du jour
+//                    Colis pris en charge en Point Relais   <- titre du jour
+//                    20:31                           <- heure, puis
+//                    Colis pris en charge en Point Relais   <- l'evenement
+//                    12:42
+//                    Colis en préparation chez l'expéditeur
+//                  Le « SUIVI GLOBAL » au-dessus (préparation / remis /
+//                  livré) est la liste des etapes POSSIBLES : jamais lu.
+//                  Numero inconnu : « Nous n'avons identifié aucun colis
+//                  portant ce numéro de suivi ».
+//   DHL            numero inconnu : « Désolé, votre tentative de suivi a
+//                  échoué ».
+//   GLS            page en anglais ; numero inconnu : « Unfortunately there
+//                  are no results ».
+// Les libelles DHL et GLS d'un colis reel n'ont pas pu etre vus (pas de vrai
+// numero disponible) : leurs listes reprennent leurs formules publiques ;
+// une formule absente donne « À vérifier » avec le texte brut garde.
 
 // --- Une protection anti-robot affichee a la place du suivi ------------------------
 
@@ -46,45 +55,64 @@ function estBloque({ titre = "", texte = "" }) {
   return BLOCAGES.some((re) => re.test(debut));
 }
 
-// --- Les formules qui disent ou en est un colis -----------------------------------
+// --- Les formules ------------------------------------------------------------------
 
-// l'etiquette seulement : le transporteur attend le colis
-const ETIQUETTE = [
-  /en pr[ée]paration chez l.exp[ée]diteur/i,
-  /[ée]tiquette (cr[ée]{1,2}e|g[ée]n[ée]r[ée]e|imprim[ée]e)/i,
-  /label (created|printed)/i,
-  /informations? (de l.envoi |d.exp[ée]dition )?(re[cç]ues?|transmises?)/i,
-  /donn[ée]es ([ée]lectroniques )?(de l.envoi |du colis )?(ont [ée]t[ée] )?(re[cç]ues|transmises)/i,
-  /shipment information (received|sent)/i,
-  /electronic (shipment )?(information|notification)/i,
-  /parcel data (was|has been|have been) (entered|transmitted|received)/i,
-  /(colis|envoi) annonc[ée]/i,
-  /en attente (de (la )?|du )?(prise en charge|colis|d[ée]p[oô]t)/i,
-  /va bient[oô]t nous [eê]tre confi[ée]/i,
-  /not yet (handed|received)|awaiting (collection|drop.?off)/i,
-];
+// au futur, au conditionnel, a la negation : jamais une preuve
+const PAS_ENCORE = /pas encore|not yet|n.a pas (encore )?[ée]t[ée]|n.est pas encore|\bsera\b|\bseront\b|\bpr[ée]vue?s?\b|estim[ée]|bient[oô]t|will be|to be (picked|dropped|delivered)|expected|scheduled|planned|[àa] d[ée]poser|doit [eê]tre|en attente de (d[ée]p[oô]t|prise en charge|remise)|awaiting/i;
 
-// le transporteur a eu le colis entre les mains (dans l'ordre : du plus
-// precis au plus general)
-const ETAPES = [
-  // (pas de \b : en JavaScript il ne voit pas la fin de « livré »)
-  { etape: "delivered", re: /(?<!en cours de )(?<!out for )(?<![a-zà-ÿ])(livr[ée]e?|delivered|distribu[ée]e?|remis au destinataire|r[ée]cup[ée]r[ée] par le destinataire|collected by (the )?(recipient|consignee))(?![a-zà-ÿ])/i },
-  { etape: "out_for_delivery", re: /en cours de livraison|out for delivery|en livraison|with (the )?courier|chez le livreur/i },
-  { etape: "available_for_pickup", re: /disponible (en|au|dans (le|la|un|une))? ?(point|relais|locker|consigne|bureau)|mis[e]? [àa] disposition|available (for|at)|ready for (pickup|collection)|[àa] retirer/i },
-  { etape: "in_transit", re: /pris en charge|prise en charge|remis [àa] (mondial relay|dhl|fedex|gls|chronopost|colissimo|la poste|ups)|d[ée]pos[ée]|collect[ée]|picked up|we have your package|nous avons votre colis|handed over|received (by|at|in)|arriv[ée]e?|arrived|d[ée]part|departed|en transit|in transit|acheminement|centre de tri|plateforme|hub|sort(ed|ing)|on (its|the) way|en route|scann[ée]|processed at|trait[ée] (au|dans)|douane|customs/i },
-];
-// apres la prise en charge, ce sont des suites (retour, souci) : on les
-// garde pour le detail, jamais comme une « anomalie » du depot
-const SUITES = /retour|return(ed)?|renvoy|non distribuable|undeliverable|refus[ée]|refused|incident|probl[eè]me|exception|adresse (incompl[eè]te|erron[ée]e)|address (problem|issue)|vendeur|exp[ée]diteur/i;
+// l'etiquette ou les donnees seulement (pour chaque transporteur)
+const INFO = {
+  MR: [/en pr[ée]paration chez l.exp[ée]diteur/i, /colis (cr[ée]{1,2}|enregistr[ée])/i, /[ée]tiquette/i],
+  DHL: [
+    /donn[ée]es [ée]lectroniques/i,
+    /donn[ée]es (de l.envoi |d.exp[ée]dition )?(ont [ée]t[ée] )?(transmises|re[cç]ues)/i,
+    /instruction data/i,
+    /electronically announced/i,
+    /annonc[ée] [ée]lectroniquement/i,
+    /shipment information received/i,
+    /informations? (de l.envoi |d.exp[ée]dition )?re[cç]ues?/i,
+    /label created|[ée]tiquette cr[ée]{1,2}e/i,
+  ],
+  GLS: [/parcel data (was|has been) (entered|transmitted)/i, /donn[ée]es du colis (ont [ée]t[ée] )?(saisies|transmises)/i, /information (was|has been) (received|transmitted)/i],
+};
 
-function litLibelle(libelle) {
+// la prise en charge et la suite (pour chaque transporteur), du plus precis
+// au plus general ; « suite » = apres la prise en charge (retour, souci)
+const ETAPES = {
+  MR: [
+    // remis au vendeur / a l'expediteur : un retour, apres la prise en charge
+    { etape: "exception", re: /(mis|remis)e? [àa] (la )?disposition (du |de l.)(vendeur|exp[ée]diteur)|retourn[ée] (au|[àa] l.)(vendeur|exp[ée]diteur)|retour (vers|chez|[àa]) l.exp[ée]diteur/i, suite: true },
+    { etape: "delivered", re: /colis (livr[ée]|remis) (au|à au|a au) destinataire|colis r[ée]cup[ée]r[ée] par le destinataire|colis livr[ée](?![a-zà-ÿ])/i },
+    { etape: "available_for_pickup", re: /colis (est )?disponible (au|en|dans)|colis (est )?(mis|d[ée]pos[ée])e? [àa] (la )?disposition/i },
+    { etape: "out_for_delivery", re: /en cours de livraison/i },
+    { etape: "in_transit", re: /colis pris en charge|colis d[ée]pos[ée] (en|au|dans)|colis remis [àa] mondial relay|colis (en cours d.acheminement|en cours de traitement|achemin[ée])|colis arriv[ée] (sur|au|à|a l|dans)|colis (exp[ée]di[ée]|collect[ée])/i },
+    { etape: "exception", re: /retour|renvoy[ée]|non (livr[ée]|distribu)|refus[ée]|incident|probl[eè]me/i, suite: true },
+  ],
+  DHL: [
+    { etape: "delivered", re: /(successfully )?delivered|(a|ont) [ée]t[ée] (distribu|livr)[ée]e?s?|envoi (a [ée]t[ée] )?livr[ée]|distribu[ée] au destinataire/i },
+    { etape: "out_for_delivery", re: /loaded onto the delivery vehicle|with delivery courier|out for delivery|en cours de livraison|charg[ée] dans le v[ée]hicule de livraison/i },
+    { etape: "available_for_pickup", re: /ready for (pickup|collection)|disponible (au|en|dans) (point|relais|bureau|packstation)|available for pickup/i },
+    { etape: "in_transit", re: /picked up|has been posted|posted by the sender|d[ée]pos[ée] par l.exp[ée]diteur|enlev[ée]|processed (in|at)|trait[ée] (au|dans|à)|arrived (at|in)|arriv[ée] (au|dans|à)|departed|parti (du|de)|in transit|en transit|(sorting|parcel|distribution) cent(er|re)|centre de (tri|distribution)|customs clearance|d[ée]douan/i },
+    { etape: "exception", re: /return(ed)? to (sender|shipper)|retourn[ée]|could not be delivered|n.a pas pu [eê]tre (distribu|livr)|refused|refus[ée]/i, suite: true },
+  ],
+  GLS: [
+    { etape: "delivered", re: /has been delivered|a [ée]t[ée] livr[ée]|delivered to|livr[ée] (au|à|a)/i },
+    { etape: "available_for_pickup", re: /stored in the (gls )?parcelshop|available (in|at) the (gls )?parcelshop|disponible (au|dans le) (gls )?(parcelshop|relais)/i },
+    { etape: "out_for_delivery", re: /out for delivery|en cours de livraison|loaded (onto|on) the delivery vehicle/i },
+    { etape: "in_transit", re: /handed over to gls|remis [àa] gls|dropped off at the (gls )?parcelshop|d[ée]pos[ée] (au|dans le) (gls )?(parcelshop|relais)|reached the (parcel|depot)|left the (parcel|depot)|arriv[ée] (au|dans le) (centre|d[ée]p[oô]t)|quitt[ée] le (centre|d[ée]p[oô]t)|in transit|en transit|parcel center|centre de tri/i },
+    { etape: "exception", re: /return(ed)? to (sender|shipper)|retourn[ée]|could not be delivered|n.a pas pu [eê]tre livr|refused|refus[ée]/i, suite: true },
+  ],
+};
+
+/** une ligne d'un transporteur -> { etape, physique, suite } */
+function litLibelle(libelle, code = "MR") {
   const l = String(libelle || "");
-  if (ETIQUETTE.some((re) => re.test(l))) return { etape: "info_received", physique: false };
-  for (const { etape, re } of ETAPES) {
-    if (re.test(l)) return { etape, physique: true, suite: SUITES.test(l) ? true : undefined };
+  if ((INFO[code] || []).some((re) => re.test(l))) return { etape: "info_received", physique: false };
+  // au futur ou a la negation : ce n'est pas arrive
+  if (PAS_ENCORE.test(l)) return { etape: "unknown", physique: false };
+  for (const { etape, re, suite } of ETAPES[code] || []) {
+    if (re.test(l)) return { etape, physique: true, suite: suite || undefined };
   }
-  // un retour, un souci : le colis a forcement ete entre les mains du transporteur
-  if (SUITES.test(l)) return { etape: "exception", physique: true, suite: true };
   return { etape: "unknown", physique: false };
 }
 
@@ -111,17 +139,27 @@ function litDate(ligne) {
   return null;
 }
 
+// "20:31", "20h31", "8:31 PM" -> "20:31"
 function litHeure(ligne) {
-  const m = ligne.match(/\b([01]?\d|2[0-3])[:h]([0-5]\d)\b/);
-  return m ? `${deux(m[1])}:${m[2]}` : null;
+  const m = ligne.match(/\b([01]?\d|2[0-3])[:h]([0-5]\d)\s*([ap])?\.?\s*m?\b/i);
+  if (!m) return null;
+  let h = Number(m[1]);
+  if (m[3]) {
+    const pm = m[3].toLowerCase() === "p";
+    if (pm && h < 12) h += 12;
+    if (!pm && h === 12) h = 0;
+  }
+  return `${deux(h)}:${m[2]}`;
 }
 
-// heure de Paris -> ISO avec fuseau (l'heure d'ete d'octobre a fin mars : +01:00)
+const estDate = (l) => Boolean(litDate(l)) && l.replace(/[\d/.:\-\s]/g, "").length < 3;
+const estHeure = (l) => /^\s*([01]?\d|2[0-3])[:h][0-5]\d\s*([ap]\.?m\.?)?\s*$/i.test(l);
+
+// heure de Paris -> ISO avec fuseau (heure d'ete de fin mars a fin octobre)
 function enIso(jour, heure) {
   if (!jour) return null;
   const [a, mo, j] = jour.split("-").map(Number);
   const ms = Date.UTC(a, mo - 1, j, 12);
-  // dernier dimanche de mars / d'octobre
   const dernierDimanche = (mois) => {
     const d = new Date(Date.UTC(a, mois, 0));
     return d.getUTCDate() - d.getUTCDay();
@@ -130,50 +168,89 @@ function enIso(jour, heure) {
   return `${jour}T${heure || "12:00"}:00${ete ? "+02:00" : "+01:00"}`;
 }
 
-// --- Le texte d'une page -> des evenements ----------------------------------------------
-
 const lignesDe = (texte) =>
   String(texte || "")
     .split(/\n+/)
     .map((l) => l.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
-// Les lignes d'une section : une date pose le jour, une heure se rattache au
-// libelle voisin. Chaque libelle reconnu devient un evenement.
-function evenementsDe(lignes, { source = "navigateur" } = {}) {
-  const evenements = [];
-  let jour = null;
-  for (let i = 0; i < lignes.length; i++) {
-    const l = lignes[i];
-    const d = litDate(l);
-    if (d) jour = d;
-    const lu = litLibelle(l);
-    if (lu.etape === "unknown") continue;
-    // une ligne trop longue est un paragraphe d'aide, pas un evenement
-    if (l.length > 140) continue;
-    // l'heure suit le libelle sur ces pages (Mondial Relay : libelle, puis heure)
-    const heure = litHeure(l) || litHeure(lignes[i + 1] || "") || litHeure(lignes[i - 1] || "");
-    const jourLigne = d || jour;
-    const libelle = l.replace(/\b\d{1,2}[/.]\d{1,2}[/.]\d{4}\b/, "").replace(/\b([01]?\d|2[0-3])[:h][0-5]\d\b/, "").replace(/\s+/g, " ").trim() || l;
-    const survenuLe = enIso(jourLigne, heure);
-    evenements.push({
-      cle: `nav|${jourLigne || "?"}|${heure || "?"}|${libelle.slice(0, 120)}`,
-      survenuLe,
-      code: null,
-      libelle: libelle.slice(0, 200),
-      lieu: null,
-      etape: lu.etape,
-      physique: lu.physique,
-      incident: lu.suite ? libelle.slice(0, 120) : null,
-      resolu: false,
-      ordre: lignes.length - i,
-      source,
-      brut: { ligne: l },
-    });
-  }
-  // une meme formule lue deux fois (resume + detail) ne compte qu'une fois
+function evenement(code, { jour, heure, libelle, ordre, ligne }) {
+  const lu = litLibelle(libelle, code);
+  return {
+    cle: `nav|${jour || "?"}|${heure || "?"}|${libelle.slice(0, 120)}`,
+    survenuLe: enIso(jour, heure),
+    code: null,
+    libelle: libelle.slice(0, 200),
+    lieu: null,
+    etape: lu.etape,
+    physique: lu.physique,
+    incident: lu.suite ? libelle.slice(0, 120) : null,
+    resolu: false,
+    ordre,
+    source: "navigateur",
+    // la ligne telle que la page l'affiche, et sa date (sans date : jamais une preuve)
+    brut: { ligne, jour, heure, dateComplete: Boolean(jour) },
+  };
+}
+
+const sansDoublons = (evenements) => {
   const vus = new Set();
   return evenements.filter((e) => (vus.has(e.cle) ? false : vus.add(e.cle)));
+};
+
+// --- Mondial Relay : des jours, un titre, puis des paires heure / evenement ----------
+
+function evenementsMR(section) {
+  const jours = [];
+  let jour = null;
+  for (const l of section) {
+    if (estDate(l)) {
+      jour = { date: litDate(l), titre: null, paires: [], heure: null };
+      jours.push(jour);
+    } else if (!jour) {
+      continue;
+    } else if (estHeure(l)) {
+      jour.heure = litHeure(l);
+    } else if (jour.titre === null && jour.heure === null) {
+      // le titre du jour : le dernier evenement du jour, repete
+      jour.titre = l;
+    } else {
+      jour.paires.push({ heure: jour.heure, libelle: l });
+      jour.heure = null;
+    }
+  }
+  const evenements = [];
+  let ordre = 10_000;
+  for (const j of jours) {
+    // un jour sans paire : son titre est son seul evenement (sans heure)
+    const liste = j.paires.length ? j.paires : j.titre ? [{ heure: null, libelle: j.titre }] : [];
+    for (const p of liste) evenements.push(evenement("MR", { jour: j.date, heure: p.heure, libelle: p.libelle, ordre: ordre--, ligne: p.libelle }));
+  }
+  return sansDoublons(evenements);
+}
+
+// --- DHL, GLS : une ligne datee (ou la date au-dessus), un libelle -----------------
+
+function evenementsLignes(code, section) {
+  const evenements = [];
+  let jour = null;
+  let heure = null;
+  let ordre = 10_000;
+  for (const l of section) {
+    const d = litDate(l);
+    if (d) jour = d;
+    const h = litHeure(l);
+    if (h) heure = h;
+    if (estDate(l) || estHeure(l)) continue;
+    // une ligne trop longue est un paragraphe d'aide, pas un evenement
+    if (l.length > 160) continue;
+    const libelle = l.replace(/\b\d{1,2}[/.]\d{1,2}[/.]\d{4}\b/, "").replace(/\b([01]?\d|2[0-3])[:h][0-5]\d\s*([ap]\.?m\.?)?/i, "").replace(/\s+/g, " ").trim() || l;
+    const lu = litLibelle(libelle, code);
+    if (lu.etape === "unknown") continue;
+    evenements.push(evenement(code, { jour, heure, libelle, ordre: ordre--, ligne: l }));
+    heure = null;
+  }
+  return sansDoublons(evenements);
 }
 
 const entre = (lignes, debut, fin) => {
@@ -186,44 +263,43 @@ const entre = (lignes, debut, fin) => {
 
 // --- Chaque transporteur ---------------------------------------------------------------
 
+const chiffres = (t) => String(t || "").replace(/\D/g, "");
+
 const LECTEURS = {
   MR: {
     introuvable: /aucun colis portant ce num[ée]ro|n.avons identifi[ée] aucun colis/i,
-    section: (lignes) =>
-      entre(lignes, /^suivi d[ée]taill[ée] de mon colis$/i, /^je m.informe$|app.solument|^pour nous suivre$/i) ||
-      // a defaut, le statut seul (jamais le « suivi global » : c'est la liste
-      // des etapes possibles, livraison comprise, pas ce qui s'est passe)
-      entre(lignes, /^statut$/i, /^suivi global|^je m.informe$|app.solument/i),
-    statut: (lignes) => {
-      const i = lignes.findIndex((l) => /^statut$/i.test(l));
-      // la premiere vraie phrase apres « STATUT » (pas une date, pas une heure)
-      if (i < 0) return null;
-      const bloc = lignes.slice(i + 1, i + 5);
-      const fin = bloc.findIndex((l) => /^suivi (global|d[ée]taill[ée])/i.test(l));
-      return (fin < 0 ? bloc : bloc.slice(0, fin)).find((l) => !/^[\d/.:h\s-]+$/.test(l)) || null;
+    // la page affiche les 8 derniers chiffres du numero
+    numeroAffiche: (lignes) => {
+      const i = lignes.findIndex((l) => /^num[ée]ro de colis$/i.test(l));
+      return i >= 0 ? chiffres(lignes[i + 1]) : null;
     },
+    concerne: (affiche, numero) => Boolean(affiche) && (chiffres(numero).includes(affiche) || affiche.includes(chiffres(numero))),
+    section: (lignes) => entre(lignes, /^suivi d[ée]taill[ée] de mon colis$/i, /^je m.informe$|app.solument|^pour nous suivre$/i),
+    evenements: evenementsMR,
   },
   DHL: {
-    introuvable: /tentative de suivi a [ée]chou[ée]|tracking attempt (was )?(not successful|failed|unsuccessful)|aucun r[ée]sultat/i,
-    section: (lignes) => entre(lignes, /^(saisissez votre|enter your) .*num[ée]ro|^suivre$|^track$/i, /questions fr[ée]quemment pos[ée]es|frequently asked questions/i),
-  },
-  FEDEX: {
-    introuvable: /cannot locate|could not locate|introuvable|not found|nous ne trouvons pas|aucun envoi/i,
-    ambigu: /duplicate results found|plusieurs (envois|r[ée]sultats)/i,
-    section: (lignes) => entre(lignes, /^(track another shipment|suivre un autre envoi)$/i, /^(our company|notre soci[ée]t[ée])$/i),
+    introuvable: /tentative de suivi a [ée]chou[ée]|tracking attempt (was )?(not successful|failed|unsuccessful)|aucun r[ée]sultat|no result/i,
+    numeroAffiche: (lignes, numero) => (lignes.some((l) => l.replace(/\s/g, "").toUpperCase().includes(numero)) ? numero : null),
+    concerne: (affiche, numero) => affiche === numero,
+    section: (lignes) => entre(lignes, /^(saisissez votre|enter your) .*(num[ée]ro|tracking)|^suivre$|^track$/i, /questions fr[ée]quemment pos[ée]es|frequently asked questions/i),
+    evenements: (section) => evenementsLignes("DHL", section),
   },
   GLS: {
     introuvable: /unfortunately there are no results|aucun r[ée]sultat|pas de r[ée]sultat/i,
+    numeroAffiche: (lignes, numero) => (lignes.some((l) => chiffres(l).includes(chiffres(numero))) ? numero : null),
+    concerne: (affiche, numero) => affiche === numero,
     section: (lignes) => entre(lignes, /^(parcel tracking|suivi (de |des )?colis)$/i, /^(parcel search|recherche de colis)$/i),
+    evenements: (section) => evenementsLignes("GLS", section),
   },
 };
 
 /**
- * Le texte d'une page officielle -> ce qu'elle dit.
- *   { etat: "trouve"|"introuvable"|"ambigu"|"bloque"|"illisible", evenements, statutBrut, motif }
- * Jamais d'evenement physique sans une formule qui le dit.
+ * Le texte d'une page officielle -> ce qu'elle dit, pour CE numero.
+ *   { etat: "trouve"|"introuvable"|"ambigu"|"bloque"|"illisible"|"autre_numero"|"incomplet",
+ *     evenements, statutBrut, motif }
+ * Jamais d'evenement physique sans une formule de la liste, datee.
  */
-function lisPage(code, { titre = "", texte = "", url = "" } = {}) {
+function lisPage(code, { titre = "", texte = "", url = "" } = {}, numero = null) {
   if (estBloque({ titre, texte })) {
     return { etat: "bloque", evenements: [], statutBrut: `Protection affichée : « ${titre || String(texte).slice(0, 80)} »`, motif: "le site affiche une vérification anti-robot" };
   }
@@ -234,17 +310,27 @@ function lisPage(code, { titre = "", texte = "", url = "" } = {}) {
   if (lecteur.introuvable.test(tout)) {
     return { etat: "introuvable", evenements: [], statutBrut: "Numéro inconnu sur la page officielle", motif: null };
   }
-  if (lecteur.ambigu?.test(tout)) {
-    return { etat: "ambigu", evenements: [], statutBrut: "Plusieurs envois portent ce numéro sur la page officielle", motif: "plusieurs envois pour ce numéro : à choisir sur la page officielle" };
-  }
   const section = lecteur.section(lignes);
-  const evenements = section ? evenementsDe(section) : [];
-  const statut = lecteur.statut?.(lignes) || evenements[0]?.libelle || null;
-  if (!evenements.length) {
-    const apercu = (section || lignes).slice(0, 6).join(" · ").slice(0, 300);
-    return { etat: "illisible", evenements: [], statutBrut: apercu || null, motif: `page lue mais statut non reconnu${url ? "" : ""}` };
+  if (!section) {
+    // la page n'a pas (encore) affiche son suivi : rien de conclu
+    return { etat: "incomplet", evenements: [], statutBrut: null, motif: "la page n'a pas affiché de suivi (chargement incomplet)" };
   }
-  return { etat: "trouve", evenements, statutBrut: statut, motif: null };
+  // la page est-elle bien celle de CE colis ?
+  if (numero) {
+    const n = String(numero).toUpperCase();
+    const affiche = lecteur.numeroAffiche(lignes, n);
+    const dansAdresse = url && decodeURIComponent(url).toUpperCase().includes(n);
+    if (!lecteur.concerne(affiche, n) && !(affiche == null && dansAdresse && code !== "MR")) {
+      return { etat: "autre_numero", evenements: [], statutBrut: null, motif: `la page affichée ne correspond pas au numéro ${numero}` };
+    }
+  }
+  const evenements = lecteur.evenements(section);
+  if (!evenements.length) {
+    const apercu = section.slice(0, 6).join(" · ").slice(0, 300);
+    return { etat: "illisible", evenements: [], statutBrut: apercu || null, motif: "page lue mais statut non reconnu" };
+  }
+  const premier = evenements[0];
+  return { etat: "trouve", evenements, statutBrut: premier.libelle, motif: null };
 }
 
-module.exports = { lisPage, litLibelle, litDate, estBloque, evenementsDe, LECTEURS };
+module.exports = { lisPage, litLibelle, litDate, litHeure, estBloque, LECTEURS };

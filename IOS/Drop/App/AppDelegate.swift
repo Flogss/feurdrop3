@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         MacWatcher.shared.start()
+        // le controle des depots : ce Mac se signale et lit seul les pages
+        // officielles dues (Mondial Relay, GLS...), fenetre ouverte ou non
+        AppModel.shared.verificateur.veille()
         // la molette d'une souris glisse au lieu de sauter, comme dans un navigateur
         DefilementDoux.shared.demarre()
         #if DEBUG

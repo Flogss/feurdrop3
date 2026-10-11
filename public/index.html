@@ -767,8 +767,8 @@
           <h1>Contrôle des dépôts</h1>
           <p class="page-sub" id="depots-sub">—</p>
         </div>
-        <!-- « Tout vérifier » : l'API La Poste sur le serveur, les pages
-             officielles (Mondial Relay, DHL, FedEx, GLS) par l'app du Mac -->
+        <!-- « Tout vérifier » : les API officielles sur le serveur, les pages
+             officielles (Mondial Relay, GLS, DHL sans cle) par l'app du Mac -->
         <button class="btn btn-primary depots-tout" id="depots-tout" type="button">
           <svg class="icon"><use href="#i-refresh"/></svg><span>Tout vérifier</span>
         </button>
@@ -807,7 +807,7 @@
         <button class="card metric depot-metric cat-confirme" data-depots-filtre="confirme" type="button">
           <span class="eyebrow">Postés confirmés</span>
           <span class="metric-value" id="depots-n-confirme">0</span>
-          <span class="metric-sub">pris en charge par le transporteur</span>
+          <span class="metric-sub" id="depots-n-confirme-sous">sortis de la liste, gardés dans l'historique</span>
         </button>
         <button class="card metric depot-metric cat-non_confirme" data-depots-filtre="non_confirme" type="button">
           <span class="eyebrow">Non confirmés</span>
@@ -817,7 +817,7 @@
         <button class="card metric depot-metric cat-a_verifier" data-depots-filtre="a_verifier" type="button">
           <span class="eyebrow">À vérifier</span>
           <span class="metric-value" id="depots-n-a_verifier">0</span>
-          <span class="metric-sub">pas encore lu, inconnu ou en échec</span>
+          <span class="metric-sub" id="depots-n-a-verifier-sous">inconnu, illisible ou en échec répété</span>
         </button>
         <button class="card metric depot-metric cat-bloque" data-depots-filtre="bloque" type="button">
           <span class="eyebrow">Vérification bloquée</span>
@@ -836,8 +836,14 @@
             <svg class="icon"><use href="#i-edit"/></svg><span>Constater <b id="depots-constater-n">0</b> à la main</span>
           </button>
           <button class="btn btn-sm btn-secondary" id="depots-relancer" type="button">
-            <svg class="icon"><use href="#i-refresh"/></svg><span>Relancer La Poste</span>
+            <svg class="icon"><use href="#i-refresh"/></svg><span>Relancer les API</span>
           </button>
+        </div>
+        <!-- l'app Drop du Mac : en ligne (elle lit seule les pages officielles) ou hors ligne -->
+        <div class="depots-mac" id="depots-mac" hidden>
+          <span class="depots-mac-point" aria-hidden="true"></span>
+          <span class="depots-mac-texte" id="depots-mac-texte"></span>
+          <a class="btn btn-sm btn-ghost" id="depots-mac-ouvrir" href="feurdrop://depots/verifier" hidden><svg class="icon"><use href="#i-external"/></svg><span>Ouvrir l'app du Mac</span></a>
         </div>
         <div class="depots-methodes" id="depots-methodes" aria-label="Méthode de vérification par transporteur" hidden></div>
       </article>
@@ -847,10 +853,13 @@
           <div class="journal-filtres" role="tablist" aria-label="Filtrer les colis" id="depots-filtres">
             <button class="journal-filtre active" data-filtre="tous" type="button" role="tab" aria-selected="true">Tous</button>
             <button class="journal-filtre" data-filtre="attention" type="button" role="tab" aria-selected="false">À regarder</button>
-            <button class="journal-filtre" data-filtre="confirme" type="button" role="tab" aria-selected="false">Confirmés</button>
             <button class="journal-filtre" data-filtre="non_confirme" type="button" role="tab" aria-selected="false">Non confirmés</button>
             <button class="journal-filtre" data-filtre="a_verifier" type="button" role="tab" aria-selected="false">À vérifier</button>
+            <button class="journal-filtre" data-filtre="en_attente" type="button" role="tab" aria-selected="false">En attente</button>
             <button class="journal-filtre" data-filtre="bloque" type="button" role="tab" aria-selected="false">Bloquées</button>
+            <span class="journal-filtres-sep" aria-hidden="true"></span>
+            <button class="journal-filtre" data-filtre="confirme" type="button" role="tab" aria-selected="false">Confirmés</button>
+            <button class="journal-filtre" data-filtre="retires" type="button" role="tab" aria-selected="false">Retirés</button>
           </div>
           <div class="depots-champs">
             <input class="field field-sm" type="search" id="depots-recherche" placeholder="Numéro de suivi…" autocomplete="off" spellcheck="false" aria-label="Rechercher un numéro de suivi" />
@@ -858,7 +867,7 @@
             <select class="field field-sm" id="depots-expediteur" aria-label="Expéditeur"><option value="">Tous les expéditeurs</option></select>
           </div>
         </div>
-        <div class="depots-entete" aria-hidden="true">
+        <div class="depots-entete" id="depots-entete" aria-hidden="true">
           <span>Colis</span><span>FeurDrop</span><span>Contrôle</span><span>Dernier statut transporteur</span><span>Vérifié</span><span></span>
         </div>
         <div class="depots-lignes" id="depots-lignes"></div>

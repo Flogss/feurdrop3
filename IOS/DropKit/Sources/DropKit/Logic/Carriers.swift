@@ -22,7 +22,6 @@ public enum Carrier {
         case "DPD": "DPD"
         case "GLS": "GLS"
         case "DHL": "DHL"
-        case "FEDEX": "FedEx"
         case "BJ": "BJ (boîtes jaunes)"
         case "LIT": "LIT"
         case "SPECIAL": "Spéciaux"
@@ -45,7 +44,6 @@ public enum Carrier {
         case "DPD": RGB(255, 92, 92)
         case "GLS": RGB(96, 160, 255)
         case "DHL": RGB(255, 196, 0)
-        case "FEDEX": RGB(120, 120, 255)
         case "BJ": RGB(255, 214, 51)
         case "LIT": RGB(64, 208, 214)
         case "SPECIAL": RGB(255, 164, 76)

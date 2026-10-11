@@ -62,8 +62,12 @@ struct ServeurReel {
     /// le controle des depots : la page, et le detail d'un colis (lecture seule)
     @Test func controleDesDepots() async throws {
         let vue = try await api.depots()
-        #expect(vue.compteurs.total == vue.lignes.count)
-        #expect(DepotCategorie.allCases.reduce(0) { $0 + vue.compteurs.nombre($1) } == vue.compteurs.total)
+        // la liste active + les confirmes (historique) + les retires = tout
+        let historique = vue.historique ?? DepotsHistorique(confirmes: [], retires: [])
+        if vue.historique != nil {
+            #expect(vue.compteurs.total == vue.lignes.count + historique.confirmes.count + historique.retires.count)
+        }
+        #expect(DepotCategorie.allCases.reduce(0) { $0 + vue.compteurs.nombre($1) } + (vue.compteurs.retires ?? 0) == vue.compteurs.total)
         _ = try await api.depotsResume()
         if let ligne = vue.lignes.first {
             let detail = try await api.depot(ligne.colisId)

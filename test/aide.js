@@ -18,6 +18,8 @@ function environnementDeTest() {
   process.env.TELEGRAM_BOT_TOKEN = "000000:jeton-de-test";
   process.env.SUIVI_BOT_TOKEN = "";
   process.env.OKAPI_KEY = "";
+  // jamais les vraies API des transporteurs depuis les tests
+  for (const v of ["UPS_CLIENT_ID", "UPS_CLIENT_SECRET", "UPS_API_URL", "DHL_API_KEY", "DHL_API_URL"]) delete process.env[v];
   // le mot de passe du dashboard, pour les tests seulement (empreinte
   // Argon2id allegee, pour aller vite) ; jamais le vrai
   process.env.DASHBOARD_PASSWORD_HASH = EMPREINTE_TEST;

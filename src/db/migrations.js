@@ -435,6 +435,30 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 8,
+    nom: "controle des depots : sortie de la file (confirmes, inconnus)",
+    applique(db) {
+      // Un depot prouve quitte la file active : on garde quand (confirme_le)
+      // et par quoi (preuve_le, preuve_libelle). Un numero que le transporteur
+      // dit inconnu a plusieurs reprises est retire de la file (archive_*),
+      // avec la raison -- le colis lui-meme n'est jamais touche.
+      const colonnes = db.prepare("PRAGMA table_info(controle_suivis)").all().map((c) => c.name);
+      for (const [nom, type] of [
+        ["confirme_le", "TEXT"],
+        ["preuve_le", "TEXT"],
+        ["preuve_libelle", "TEXT"],
+        ["archive_le", "TEXT"],
+        ["archive_motif", "TEXT"],
+        ["archive_detail", "TEXT"],
+        ["inconnu_premier_le", "TEXT"],
+        ["inconnu_lectures", "INTEGER NOT NULL DEFAULT 0"],
+      ]) {
+        if (!colonnes.includes(nom)) db.exec(`ALTER TABLE controle_suivis ADD COLUMN ${nom} ${type}`);
+      }
+      db.exec("CREATE INDEX IF NOT EXISTS idx_controle_suivis_archive ON controle_suivis(archive_le)");
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

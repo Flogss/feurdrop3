@@ -62,11 +62,25 @@ struct DepotDetailSheet: View {
         let c = d.controle
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                DepotBadge(controle: c, long: true)
-                Text(c.raison)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let retrait = d.retire {
+                    // retire de la liste (numero inconnu) : on le dit d'abord
+                    Label("Retiré de la liste", systemImage: "tray")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.text2)
+                        .padding(.horizontal, 9)
+                        .frame(height: 24)
+                        .background(.white.opacity(0.08), in: .capsule)
+                    Text("\(retrait.motif ?? "Retiré de la file de contrôle"). Le colis et son étiquette sont gardés ; « Vérifier maintenant » le remet en contrôle.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    DepotBadge(controle: c, long: true)
+                    Text(c.raison)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
@@ -79,9 +93,12 @@ struct DepotDetailSheet: View {
                     info("Vérification", methode(d))
                 }
                 GridRow {
-                    info("Statut transporteur", d.lecture?.statutBrut ?? c.statutTransporteur(manuel: d.manuel, verifie: d.verifieLe != nil))
+                    info("Statut transporteur", d.lecture?.statutBrut ?? c.statutTransporteur(manuel: d.manuel, verifie: d.verifieLe != nil, navigateur: d.transporteur.methode == "navigateur"))
                     info("Vérifié", verifie(d))
                 }
+            }
+            if c.cat == .confirme, let le = d.confirmeLe {
+                info("Confirmé", "\(ServerDate.shortDayTime(le)) · sorti de la liste", couleur: Theme.text2)
             }
             if let suite = c.suite, let libelle = suite.libelle {
                 // apres la prise en charge : note, sans alerte -- le depot est prouve
@@ -99,7 +116,7 @@ struct DepotDetailSheet: View {
                     EmptyStateView(symbol: "clock", title: "Aucun événement pour l'instant",
                                    subtitle: d.manuel ? "Rien n'est lu automatiquement chez ce transporteur."
                                        : d.transporteur.methode == "navigateur" ? "La page officielle n'a pas encore été lue par le Mac."
-                                       : "La Poste n'a encore rien remonté pour ce numéro.")
+                                       : "Le transporteur n'a encore rien remonté pour ce numéro.")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(d.evenements.enumerated()), id: \.element.id) { i, e in
@@ -131,6 +148,8 @@ struct DepotDetailSheet: View {
         switch d.transporteur.methode {
         case "manuel": return "À la main (page officielle)"
         case "navigateur": return "Page officielle lue sur le Mac"
+        case "ups": return "API UPS (officielle)"
+        case "dhl": return "API DHL (officielle)"
         default: return "API La Poste (officielle)"
         }
     }

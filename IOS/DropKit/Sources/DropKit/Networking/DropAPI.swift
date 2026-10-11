@@ -253,6 +253,11 @@ public struct DropAPI: Sendable {
         try await client.send(.post, "/api/depots/campagne/annuler")
     }
 
+    /// L'app du Mac se signale (toutes les 10 s) : y a-t-il des pages a lire ?
+    public func signaleAgent(nom: String) async throws -> DepotAgentSignal {
+        try await client.send(.get, "/api/depots/agent", query: [URLQueryItem(name: "nom", value: nom)])
+    }
+
     /// L'app du Mac : un lot de pages a lire (un seul transporteur), avec un bail.
     public func travailCampagne(agent: String, lot: Int = 6) async throws -> DepotTravail {
         try await client.send(.get, "/api/depots/campagne/travail", query: [URLQueryItem(name: "agent", value: agent), URLQueryItem(name: "lot", value: String(lot))])

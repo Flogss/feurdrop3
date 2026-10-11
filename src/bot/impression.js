@@ -71,7 +71,6 @@ const CARRIER_DOTS = {
   DPD: "🔴",
   GLS: "🔵",
   DHL: "🟠",
-  FEDEX: "🟣",
   BJ: "🟨",
   LIT: "🧻",
   SPECIAL: "⭐",

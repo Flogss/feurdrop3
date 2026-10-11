@@ -19,7 +19,7 @@
 
   const ETAPES = ["a_imprimer", "imprime", "en_drop", "drope"];
   const NOMS = { a_imprimer: "Pas imprimé", imprime: "Imprimé", en_drop: "En cours de drop", drope: "Drop" };
-  const CONNUS = new Set(["MR", "LP", "CHRONO", "UPS", "DPD", "GLS", "DHL", "FEDEX"]);
+  const CONNUS = new Set(["MR", "LP", "CHRONO", "UPS", "DPD", "GLS", "DHL"]);
   const TOUS = 2000; // tout l'historique (le serveur plafonne au meme nombre)
   const APERCU = 5; // colis montres par groupe avant "Afficher les autres"
   const LOT = 100; // colis ajoutes a chaque "Afficher plus"

@@ -81,12 +81,6 @@ const TRANSPORTEURS = {
       { re: /^(\d{10})$/ },
     ],
   },
-  FEDEX: {
-    nom: "FedEx",
-    page: "https://www.fedex.com/fedextrack/",
-    lien: (n) => `https://www.fedex.com/fedextrack/?trknbr=${n}`,
-    motifs: [{ re: /^(\d{12,22})$/ }],
-  },
   GLS: {
     nom: "GLS",
     page: "https://gls-group.com/FR/fr/suivi-colis/",

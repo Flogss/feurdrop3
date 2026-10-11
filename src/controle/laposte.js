@@ -56,9 +56,16 @@ function lisCode(code) {
   return { etape: "unknown", physique: false };
 }
 
+// Le code ne suffit pas : son libelle doit le confirmer. Un libelle qui dit
+// que le colis n'est pas encore entre les mains de La Poste (« va bientôt nous
+// être confié », « pas encore remis », « en attente de dépôt ») n'est jamais
+// une preuve, quel que soit son code.
+const PAS_ENCORE_REMIS = /va bient[oô]t nous [eê]tre confi|pr[ée]paration chez|pas encore ([ée]t[ée] )?(remis|d[ée]pos|confi|pris)|n.a pas (encore )?[ée]t[ée] (remis|d[ée]pos|confi)|en attente (de|du) (d[ée]p[oô]t|prise en charge|remise|colis)|[ée]tiquette|annonc[ée]|d[ée]claratif/i;
+
 // Un evenement La Poste dans la forme commune du controle des depots.
 function versEvenement(e) {
-  const lu = lisCode(e.code);
+  let lu = lisCode(e.code);
+  if (lu.physique && PAS_ENCORE_REMIS.test(e.label || "")) lu = { etape: "info_received", physique: false, contredit: true };
   return {
     cle: `${e.code || "?"}|${e.date || ""}|${e.order ?? ""}`,
     survenuLe: e.date || null,

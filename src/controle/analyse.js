@@ -5,7 +5,8 @@
 // evenements (deja traduits : API La Poste, page lue sur le Mac, constat fait
 // a la main) -> un des quatre statuts, et son explication.
 //
-//   confirme      « Posté confirmé » : un evenement PHYSIQUE prouve que le
+//   confirme      « Posté confirmé » : un evenement PHYSIQUE, date APRES la
+//                 reception de l'etiquette par FeurDrop, prouve que le
 //                 transporteur a eu le colis (depose, pris en charge, en
 //                 transit, en point relais, livre... ou un retour : on ne
 //                 retourne que ce qu'on a eu). Ce qui arrive ENSUITE (retour,
@@ -14,17 +15,25 @@
 //                 prouve et ne se defait jamais.
 //   non_confirme  « Non confirmé » : le transporteur ne connait que
 //                 l'etiquette ou les informations electroniques.
-//   a_verifier    « À vérifier » : pas encore lu, numero inconnu ou ambigu,
-//                 page illisible, lecture en echec -- pas assez pour conclure.
+//   a_verifier    « À vérifier » : numero inconnu ou ambigu, page illisible,
+//                 lecture en echec -- lu, mais pas assez pour conclure.
+//   en_attente    « En attente de lecture » : rien n'a encore ete lu (le Mac
+//                 est hors ligne, la file de l'API n'y est pas encore) ; ce
+//                 n'est pas un verdict.
 //   bloque        « Vérification bloquée » : le site refuse la consultation
 //                 automatique (protection, pause) ou impose une verification
 //                 a la main (UPS). Ce n'est JAMAIS « non deposé ».
 //
 // Regles : jamais « confirme » sans un evenement physique date ; un code ou
 // un libelle inconnu ne prouve rien ; une erreur reseau ou un CAPTCHA ne
-// disent rien du colis. Un scan physique ANTERIEUR a la reception de
-// l'etiquette compte aussi (boites jaunes deja passees en point relais), et
-// la raison le dit.
+// disent rien du colis.
+//
+// Un scan ANTERIEUR a la reception de l'etiquette ne prouve RIEN pour ce
+// depot : FeurDrop ne peut pas deposer un colis avant d'avoir son etiquette.
+// C'est un ancien parcours du meme numero (etiquette reutilisee, numero deja
+// vu sur un autre colis -- les evenements sont ranges par numero). Les
+// accepter faisait passer en « Posté confirmé » des colis encore en attente
+// de depot (regle retiree en octobre 2026).
 
 const { jourParis, ajouteJours, jourDeLaSemaine } = require("../dates");
 
@@ -33,7 +42,9 @@ const LIBELLES = {
   non_confirme: "Non confirmé",
   a_verifier: "À vérifier",
   bloque: "Vérification bloquée",
+  en_attente: "En attente de lecture",
 };
+const ETAPES_PHYSIQUES = new Set(["in_transit", "out_for_delivery", "available_for_pickup", "delivered", "exception"]);
 
 const ETAPES_FR = {
   info_received: "Étiquette créée",
@@ -46,9 +57,10 @@ const ETAPES_FR = {
 };
 
 const HEURE = 3600 * 1000;
-// "Avant la reception de l'etiquette" : les dates portent leur fuseau, la
-// marge ne couvre que les ecarts d'horloge.
-const MARGE_ANCIEN = 2 * HEURE;
+// "Avant la reception de l'etiquette" : les dates portent leur fuseau ; la
+// marge couvre les ecarts d'horloge et un bot qui aurait traite l'etiquette
+// en retard. Un ancien parcours date, lui, de jours ou de semaines.
+const MARGE_ANCIEN = 6 * HEURE;
 
 const PREUVE_FR = {
   in_transit: "Pris en charge",
@@ -57,7 +69,10 @@ const PREUVE_FR = {
   exception: "Pris en charge (suite : retour ou souci)",
 };
 const CONSTAT_PERIME = 24 * HEURE; // un "pas encore" constate a la main est a refaire le lendemain
-const SOURCES_FR = { laposte: "API La Poste", navigateur: "page officielle lue sur le Mac", manuel: "constat à la main" };
+// les erreurs qui ne disent rien du colis (le transporteur ou la page n'a pas repondu)
+const ERREURS_TECHNIQUES = new Set(["passagere", "incomplet", "autre_numero"]);
+
+const SOURCES_FR = { laposte: "API La Poste", ups: "API UPS", dhl: "API DHL", navigateur: "page officielle lue sur le Mac", manuel: "constat à la main" };
 
 const sqlVersMs = (s) => (s ? Date.parse(`${String(s).replace(" ", "T")}Z`) : null);
 
@@ -118,7 +133,8 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   const retenus = [...lusTransporteur, ...(dernierConstat ? [dernierConstat] : [])].sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity));
 
   const dernier = decrit(lusTransporteur[0] || null);
-  const livre = lusTransporteur.some((e) => e.etape === "delivered" && !e.incident);
+  // (une livraison d'un ancien parcours ne dit rien de ce colis)
+  const livre = lusTransporteur.some((e) => e.etape === "delivered" && !e.incident && !ancien(e));
   const commun = {
     dernierEvenement: dernier,
     dernierStatut: dernier ? { etape: dernier.etape, libelle: ETAPES_FR[dernier.etape] || "Statut non reconnu" } : null,
@@ -131,7 +147,10 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   const resultat = (categorie, raison, extra = {}) => ({ categorie, libelle: LIBELLES[categorie], raison, enRetard: false, preuve: null, ...commun, ...extra });
 
   // --- preuve physique : le depot est prouve, et le reste --------------------------
-  const preuves = retenus.filter((e) => e.ms != null && e.physique).sort((a, b) => a.ms - b.ms || (a.ordre ?? 0) - (b.ordre ?? 0));
+  // (datee, d'une etape physique, APRES la reception de l'etiquette, pas dans
+  // le futur ; un constat a la main est date de l'instant ou il est fait)
+  const physiques = retenus.filter((e) => e.ms != null && e.physique && (e.source === "manuel" || ETAPES_PHYSIQUES.has(e.etape)) && e.ms <= maintenant + HEURE);
+  const preuves = physiques.filter((e) => !ancien(e)).sort((a, b) => a.ms - b.ms || (a.ordre ?? 0) - (b.ordre ?? 0));
   if (preuves.length) {
     const p = preuves.find((e) => e.etape !== "delivered" && e.etape !== "exception") || preuves.find((e) => e.etape !== "delivered") || preuves[0];
     const preuve = decrit(p);
@@ -141,11 +160,10 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     const suite = apres ? { libelle: apres.libelle || ETAPES_FR[apres.etape], le: apres.survenuLe, etape: apres.etape, retour: Boolean(apres.incident) } : null;
     if (p.source === "manuel") return resultat("confirme", `Prise en charge constatée à la main sur la page officielle le ${heureLisible(p.ms)}.`, { preuve, suite });
     const seulementLivre = preuves.every((e) => e.etape === "delivered");
-    const avant = ancien(p) ? ` (scan antérieur à la réception de l'étiquette, le ${heureLisible(recuMs)})` : "";
     const ou = p.source && p.source !== "laposte" ? ` — ${SOURCES_FR[p.source] || p.source}` : "";
     const raison = seulementLivre
-      ? `Livré le ${heureLisible(preuve.ms)}${avant} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé${ou}.`
-      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${heureLisible(preuve.ms)}${avant} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}${ou}.`;
+      ? `Livré le ${heureLisible(preuve.ms)} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé${ou}.`
+      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${heureLisible(preuve.ms)} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}${ou}.`;
     return resultat("confirme", raison, { preuve, suite });
   }
 
@@ -160,6 +178,17 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   }
   if (dernierConstat && dernierConstat.code === "MANUEL_PROBLEME") {
     return resultat("a_verifier", `Problème signalé à la main le ${heureLisible(dernierConstat.ms)}, sans prise en charge visible : à regarder sur la page officielle.`, { enRetard: true });
+  }
+
+  // --- un ancien parcours seulement : ce n'est pas CE depot ---------------------------
+  const anciens = physiques.filter(ancien);
+  if (anciens.length) {
+    const dernierAncien = anciens.reduce((a, b) => (b.ms > a.ms ? b : a));
+    return resultat(
+      "non_confirme",
+      `Aucune prise en charge depuis la réception de l'étiquette (${heureLisible(recuMs)}) : le suivi ne montre qu'un ancien parcours de ce numéro (dernier scan le ${heureLisible(dernierAncien.ms)}, « ${dernierAncien.libelle || ETAPES_FR[dernierAncien.etape]} »).`,
+      { enRetard: retard, ancienParcours: true }
+    );
   }
 
   // --- etiquette seulement ---------------------------------------------------------------
@@ -188,26 +217,37 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     return resultat("bloque", `${transporteur.nom} a affiché une vérification anti-robot à la dernière lecture : ${suivi.erreur || "consultation refusée"}.`, { enRetard: retard });
   }
   if (!configure) {
-    return resultat("a_verifier", "L'API La Poste n'est pas configurée (OKAPI_KEY) : aucune vérification automatique possible.", { enRetard: true });
+    const api = transporteur.methode === "laposte" ? "L'API La Poste n'est pas configurée (OKAPI_KEY)" : `L'API officielle de ${transporteur.nom} n'est pas configurée`;
+    return resultat("a_verifier", `${api} : aucune vérification automatique possible.`, { enRetard: true });
   }
   if (suivi?.code_erreur === "invalide") return resultat("a_verifier", `Numéro refusé par ${transporteur.nom} : ${suivi.erreur || "format invalide"}.`, { enRetard: true });
   if (suivi?.code_erreur === "ambigu") return resultat("a_verifier", `${suivi.erreur || "Plusieurs envois pour ce numéro"} : à choisir sur la page officielle.`, { enRetard: true });
-  if (suivi?.code_erreur) return resultat("a_verifier", `Dernière vérification en échec : ${suivi.erreur || suivi.code_erreur}. Rien n'est conclu sur le colis.`, { enRetard: retard });
+  // une panne, un delai, une page incomplete : une erreur technique, pas un
+  // verdict -- la lecture est refaite d'elle-meme ; au 4e echec de suite, a regarder
+  const technique = suivi?.code_erreur && ERREURS_TECHNIQUES.has(suivi.code_erreur) && (suivi.essais || 0) < 4;
+  if (suivi?.code_erreur && !technique) return resultat("a_verifier", `Dernière vérification en échec : ${suivi.erreur || suivi.code_erreur}. Rien n'est conclu sur le colis.`, { enRetard: retard });
+  const echec = technique ? ` Dernière tentative en échec (${suivi.erreur || suivi.code_erreur}) : nouvel essai automatique, rien n'est conclu.` : "";
   if (!suivi || suivi.trouve == null) {
+    // rien n'a encore ete lu : ce n'est pas un verdict
     return resultat(
-      "a_verifier",
-      transporteur.methode === "navigateur"
-        ? `Pas encore vérifié : ${transporteur.nom} se lit sur sa page officielle, depuis l'app Drop du Mac (« Tout vérifier »).`
-        : "Pas encore vérifié : la vérification automatique est en file d'attente.",
-      { enRetard: retard }
+      "en_attente",
+      (transporteur.methode === "navigateur"
+        ? `En attente de lecture : ${transporteur.nom} se lit sur sa page officielle, par l'app Drop du Mac (dès qu'elle est ouverte et connectée).`
+        : `En attente de lecture : ${transporteur.nom} est dans la file de vérification automatique.`) + echec,
+      { enRetard: false, erreurTechnique: Boolean(technique) }
     );
   }
+  if (suivi.trouve === 1) {
+    return resultat("a_verifier", `Connu de ${transporteur.nom}, sans évènement lisible : à regarder sur la page officielle.${echec}`, { enRetard: retard });
+  }
+  // inconnu du transporteur : normal juste apres le drop (pas encore de
+  // prise en charge) ; au-dela du delai, a regarder -- et retire de la file
+  // s'il le reste (relu 12 h plus tard pour en etre sur)
+  if (!retard) return resultat("non_confirme", `Pas encore connu de ${transporteur.nom} (délai normal après un drop) : pas de prise en charge.`, { enRetard: false });
   return resultat(
     "a_verifier",
-    retard
-      ? `Toujours inconnu de ${transporteur.nom} ${depuis} h après le drop : numéro ou transporteur à vérifier.`
-      : `Pas encore connu de ${transporteur.nom} (délai normal après un drop).`,
-    { enRetard: retard }
+    `Toujours inconnu de ${transporteur.nom} ${depuis} h après le drop : numéro ou transporteur à vérifier. S'il le reste à la prochaine lecture, il sort de la file.`,
+    { enRetard: true, inconnu: true }
   );
 }
 

@@ -149,6 +149,47 @@ import Testing
     let compteurs = try decoder.decode(DepotsCompteurs.self, from: Data(#"{"confirme":1,"non_confirme":0,"a_verifier":2,"bloque":0,"nonConfirmeHorsDelai":0,"aConstater":0,"attention":0,"total":3,"sansNumero":0}"#.utf8))
     #expect(compteurs.anomalie == nil)
     #expect(compteurs.nombre(.aVerifier) == 2)
+    #expect(compteurs.nombre(.enAttente) == 0)
+}
+
+@Test func laListeActiveEtLHistorique() throws {
+    // GET /api/depots apres la correction : la liste active, l'historique
+    // (confirmes, retires), « en attente », et l'etat du Mac
+    let json = """
+    {"etat":{"enCours":false,"derniereSynchro":null,"dernierBilan":null,"derniereErreur":null,"file":{"enAttente":0},
+      "methodes":{"laposte":{"nom":"API La Poste (officielle)","configure":true,"pause":null,"derniereReussite":null},
+                  "ups":{"nom":"API UPS (officielle)","configure":false,"pause":null,"derniereReussite":null},
+                  "dhl":{"nom":"API DHL (officielle)","configure":false,"pause":null,"derniereReussite":null},
+                  "navigateur":{"nom":"Page officielle lue sur le Mac","configure":true,"pause":null,"derniereReussite":null}},
+      "transporteurs":[],"affichageJours":30,"delaiScanHeures":48,
+      "mac":{"actif":false,"nom":"Mac · MacBook Air","le":"2026-10-11T20:00:00.000Z","pagesDues":3}},
+     "compteurs":{"confirme":1,"non_confirme":0,"a_verifier":0,"bloque":0,"en_attente":1,"anomalie":0,"nonConfirmeHorsDelai":0,"aConstater":0,"attention":0,
+      "actifs":1,"retires":1,"total":3,"sansNumero":0,"horsControle":[]},
+     "lignes":[{"colisId":9,"numero":"4278870071","expediteur":"Bob","transporteur":{"code":"MR","nom":"Mondial Relay","methode":"navigateur"},
+      "statutInterne":{"status":"dropped","libelle":"Dropé","dropeLe":"2026-10-11 10:00:00","imprimeLe":null,"paye":false},
+      "controle":{"categorie":"en_attente","libelle":"En attente de lecture","raison":"En attente de lecture : …","enRetard":false,"preuve":null,
+        "dernierEvenement":null,"dernierStatut":null,"constat":null,"livre":false,"suite":null,"erreurTechnique":false},
+      "attention":false,"aConstater":false,"verifieLe":null,"essaiLe":null,"prochaineLe":"2026-10-11 20:00:00","erreur":null,"lecture":null,
+      "confirmeLe":null,"retire":null,"lien":null}],
+     "historique":{"confirmes":[{"colisId":7,"numero":"6A12345678901","expediteur":"Alice","transporteur":{"code":"LP","nom":"La Poste","methode":"laposte"},
+        "dropeLe":"2026-10-09 18:44:15","confirmeLe":"2026-10-10 01:04:00","preuve":{"le":"2026-10-09T20:30:00+02:00","statut":"Votre colis a été déposé","source":"laposte"},
+        "suite":null,"livre":false,"retire":null,"lien":null}],
+      "retires":[{"colisId":8,"numero":"6A11000000001","expediteur":"Chloé","transporteur":{"code":"LP","nom":"La Poste","methode":"laposte"},
+        "dropeLe":"2026-10-07 10:00:00","confirmeLe":null,"preuve":null,"suite":null,"livre":false,
+        "retire":{"le":"2026-10-11 08:00:00","motif":"inconnu de La Poste : 2 lectures sur 13 h, drop il y a 96 h"},"lien":null}]}}
+    """
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let vue = try decoder.decode(DepotsVue.self, from: Data(json.utf8))
+    #expect(vue.lignes.first?.controle.cat == .enAttente)
+    #expect(vue.compteurs.nombre(.enAttente) == 1)
+    #expect(vue.historique?.confirmes.first?.confirmeLe == "2026-10-10 01:04:00")
+    #expect(vue.historique?.retires.first?.retire?.motif?.contains("inconnu") == true)
+    #expect(vue.etat.mac?.pagesDues == 3)
+    #expect(vue.etat.apisConfigurees.count == 1)
+    // la somme : la liste active, les confirmes et les retires
+    #expect(DepotCategorie.allCases.reduce(0) { $0 + vue.compteurs.nombre($1) } + (vue.compteurs.retires ?? 0) == vue.compteurs.total)
+    #expect(try decoder.decode(DepotAgentSignal.self, from: Data(#"{"aLire":4,"campagne":null}"#.utf8)).aLire == 4)
 }
 
 @Test func impressionDesTransporteursChoisis() throws {

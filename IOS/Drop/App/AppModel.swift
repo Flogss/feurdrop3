@@ -80,20 +80,10 @@ final class AppModel {
     @ObservationIgnored lazy var journal = JournalModel(app: self)
     @ObservationIgnored lazy var depots = DepotsModel(app: self)
     #if os(macOS)
-    /// « Tout vérifier » : ce Mac lit les pages officielles (Mondial Relay, DHL...)
+    /// Ce Mac lit les pages officielles (Mondial Relay, GLS...) : tout seul,
+    /// tant que l'app est ouverte -- sa veille est lancee au demarrage
+    /// (AppDelegate), pas par une fenetre.
     @ObservationIgnored lazy var verificateur = VerificateurPages(app: self)
-
-    /// Tant que l'app du Mac est ouverte : une campagne « Tout vérifier » lancee
-    /// d'ailleurs (le site, l'iPhone) qui attend le Mac est prise ici, toute
-    /// seule. Un coup d'oeil toutes les 10 s, rien de plus.
-    func surveilleVerificationsMac() async {
-        while !Task.isCancelled {
-            if connecte, !verificateur.enCours, let etat = try? await api.campagne(), etat.active, etat.attendMac == true {
-                verificateur.demarre()
-            }
-            try? await Task.sleep(for: .seconds(10))
-        }
-    }
     #endif
 
     /// `feurdrop://depots/verifier` (le bouton du site « Ouvrir l'app Drop du
@@ -103,7 +93,7 @@ final class AppModel {
         if url.host() == "depots" {
             #if os(macOS)
             pageMac = .depots
-            if url.path().contains("verifier") { verificateur.demarre() }
+            if url.path().contains("verifier") { verificateur.demarre(visible: true) }
             #endif
         }
     }

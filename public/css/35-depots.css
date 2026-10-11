@@ -12,6 +12,10 @@
 .cat-non_confirme { --cat: var(--warn-rgb); }
 .cat-a_verifier { --cat: var(--info-rgb); }
 .cat-bloque { --cat: var(--violet-300); }
+/* en attente de lecture : rien n'est conclu, gris lavande, sans alerte */
+.cat-en_attente { --cat: 168 166 196; }
+/* retire de la file (numero inconnu) : discret */
+.cat-retire { --cat: 140 138 160; }
 
 /* --- Bandeau (API non configuree, pause demandee, erreur) --------------------- */
 
@@ -316,14 +320,19 @@
 
 /* --- Ecrans larges : un vrai tableau ------------------------------------------------ */
 
+/* les filtres (liste active + historique) et les champs sur une ligne quand il y a la place */
+@media (min-width: 1280px) {
+  .depots-outils { flex-direction: row; align-items: center; justify-content: space-between; }
+  .depots-outils .journal-filtres { min-width: 0; }
+  .depots-champs { flex: 1; max-width: 520px; }
+}
+
 @media (min-width: 640px) {
   .depots-champs { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 @media (min-width: 960px) {
   .depots-compteurs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .depots-outils { flex-direction: row; align-items: center; justify-content: space-between; }
-  .depots-champs { flex: 1; max-width: 560px; }
   .depots-entete,
   .depot-ligne {
     grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 1.8fr) minmax(0, 0.8fr) 76px;
@@ -486,3 +495,42 @@
 @keyframes pulse-point { 50% { opacity: 0.35; transform: scale(0.7); } }
 @media (max-width: 639px) { .campagne-chiffres { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .depot-detail-suite dd .depot-sous { color: var(--text-3); }
+
+/* --- Le Mac (lecture des pages officielles) ------------------------------------------ */
+
+.depots-mac {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.depots-mac b { color: var(--text-2); font-weight: 650; }
+.depots-mac-texte { flex: 1 1 260px; min-width: 0; }
+.depots-mac-point {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgb(var(--warn-rgb));
+  box-shadow: 0 0 10px rgb(var(--warn-rgb) / 0.6);
+}
+.depots-mac.is-actif .depots-mac-point {
+  background: rgb(var(--teal-rgb));
+  box-shadow: 0 0 10px rgb(var(--teal-rgb) / 0.7);
+  animation: depot-pulse 1800ms var(--ease-out) infinite;
+}
+.depots-mac.is-actif b { color: rgb(var(--teal-rgb)); }
+@media (prefers-reduced-motion: reduce) { .depots-mac.is-actif .depots-mac-point { animation: none; } }
+
+/* --- L'historique (confirmes, retires) ------------------------------------------------ */
+
+.journal-filtres-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line-2); }
+.depot-ligne.is-histo::after { display: none; }
+.depot-ligne.is-histo.cat-retire .depot-evenement-texte { color: var(--text-3); font-size: 13px; }
+.depot-ligne.is-histo .depot-numero { color: var(--text-2); }

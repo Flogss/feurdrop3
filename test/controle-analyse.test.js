@@ -51,19 +51,22 @@ test("etiquette creee sans prise en charge : non confirme, dans le delai puis ho
   assert.equal(vieux.enRetard, true);
 });
 
-test("numero inconnu du transporteur : verification necessaire, sans affoler dans le delai", () => {
+test("numero inconnu du transporteur : pas encore pris en charge dans le delai, a regarder au-dela", () => {
   const recent = analyse({ colis: colis(3), suivi: { trouve: 0 }, evenements: [] });
-  assert.equal(recent.categorie, "a_verifier");
+  assert.equal(recent.categorie, "non_confirme");
   assert.equal(recent.enRetard, false);
   const vieux = analyse({ colis: colis(80), suivi: { trouve: 0 }, evenements: [] });
+  assert.equal(vieux.categorie, "a_verifier");
   assert.equal(vieux.enRetard, true);
+  assert.equal(vieux.inconnu, true);
   assert.match(vieux.raison, /Toujours inconnu/);
 });
 
-test("pas encore verifie : en file d'attente", () => {
+test("pas encore lu : « En attente de lecture », pas un verdict", () => {
   const r = analyse({ colis: colis(1), suivi: null, evenements: [] });
-  assert.equal(r.categorie, "a_verifier");
-  assert.match(r.raison, /file d'attente/);
+  assert.equal(r.categorie, "en_attente");
+  assert.equal(r.libelle, "En attente de lecture");
+  assert.match(r.raison, /file de vérification/);
 });
 
 test("livre : depot prouve, la preuve reste la prise en charge", () => {
@@ -84,22 +87,29 @@ test("numero invalide ; erreur ; ce qu'on savait reste", () => {
   assert.equal(garde.categorie, "confirme");
 });
 
-test("scans anterieurs a la reception de l'etiquette : ils prouvent le depot, et c'est dit", () => {
-  const r = analyse({ colis: colis(24, 48), evenements: [lp(2000, "DI1"), lp(2100, "PC1")] });
-  assert.equal(r.categorie, "confirme");
-  assert.equal(r.preuve.code, "PC1");
-  assert.match(r.raison, /antérieur à la réception de l'étiquette/);
-  // un incident d'un ancien parcours n'est pas une anomalie de ce depot
+test("FAUX POSITIF corrige : des scans ANTERIEURS a la reception de l'etiquette ne prouvent pas ce depot", () => {
+  // un ancien parcours du numero (etiquette reutilisee) : non confirme, et c'est dit
+  const r = analyse({ colis: colis(24, 48), evenements: [lp(2000, "DI1"), lp(2100, "PC1"), lp(60, "DR1")] });
+  assert.equal(r.categorie, "non_confirme");
+  assert.equal(r.ancienParcours, true);
+  assert.match(r.raison, /ancien parcours/);
+  assert.equal(r.livre, false, "la livraison d'un ancien parcours ne dit rien de ce colis");
+  // un incident d'un ancien parcours non plus
   const ancienRetour = analyse({ colis: colis(24, 48), evenements: [lp(2000, "RE1", "Retourné à l'expéditeur"), lp(2100, "PC1")] });
-  assert.equal(ancienRetour.categorie, "confirme");
+  assert.equal(ancienRetour.categorie, "non_confirme");
   // une etiquette creee avant la reception du fichier est normale
   const etiquette = analyse({ colis: colis(5, 30), evenements: [lp(200, "DR1")] });
   assert.equal(etiquette.categorie, "non_confirme");
+  // un nouveau scan apres la reception : c'est lui la preuve
+  const nouveau = analyse({ colis: colis(24, 48), evenements: [lp(10, "ET1", "En transit"), lp(2000, "DI1"), lp(2100, "PC1")] });
+  assert.equal(nouveau.categorie, "confirme");
+  assert.equal(nouveau.preuve.code, "ET1");
 });
 
-test("cas reel : en point de retrait avant la reception de l'etiquette -> depot confirme, avec les deux dates", () => {
-  // 6B00017912600 : etiquette recue par FeurDrop le 09/10 a 17:20 UTC ; La
-  // Poste l'avait en transit la veille et en point de retrait le matin
+test("FAUX POSITIF corrige, cas reel : 6B00017912600 en point de retrait la veille de la reception de son etiquette -> non confirme", () => {
+  // etiquette recue par FeurDrop le 09/10 a 17:20 UTC ; La Poste l'avait en
+  // transit le 08/10 et en point de retrait le 09/10 au matin : ce n'est pas
+  // un depot de FeurDrop (il etait « Posté confirmé » avant la correction)
   const r = analyseDepot({
     colis: { status: "dropped", created_at: "2026-10-09 17:20:59", dropped_at: "2026-10-09 18:44:15" },
     suivi: { trouve: 1 },
@@ -113,26 +123,41 @@ test("cas reel : en point de retrait avant la reception de l'etiquette -> depot 
     transporteur: LP,
     maintenant: Date.parse("2026-10-10T08:00:00Z"),
   });
-  assert.equal(r.categorie, "confirme");
-  assert.equal(r.preuve.code, "ET1");
-  assert.match(r.raison, /08\/10 13:34 \(scan antérieur à la réception de l'étiquette, le 09\/10 19:20\)/);
+  assert.equal(r.categorie, "non_confirme");
+  assert.match(r.raison, /ancien parcours/);
 });
 
-test("boite jaune : en point relais puis de nouveau en transit, depot confirme sans anomalie", () => {
+test("boite jaune : ancien passage en point relais, puis un vrai scan apres la reception -> confirme par le nouveau scan", () => {
   const r = analyseDepot({
     colis: { type: "bj", status: "dropped", created_at: "2026-10-09 12:50:15", dropped_at: "2026-10-09 14:47:15" },
     suivi: { trouve: 1 },
     evenements: [
       { code: "ET1", label: "Votre colis est en transit sur nos plateformes logistiques.", date: "2026-10-09T19:30:00+02:00" },
-      { code: "AG1", label: "Votre colis est disponible dans votre point de retrait", date: "2026-10-09T10:57:00+02:00" },
-      { code: "MD1", label: "Votre colis est sur son site de distribution.", date: "2026-10-09T08:35:31+02:00" },
+      { code: "AG1", label: "Votre colis est disponible dans votre point de retrait", date: "2026-10-09T00:57:00+02:00" },
+      { code: "MD1", label: "Votre colis est sur son site de distribution.", date: "2026-10-08T22:35:31+02:00" },
       { code: "DR1", label: "Votre Colissimo va bientôt nous être confié !", date: "2026-10-08T20:11:00+02:00" },
     ].map(versEvenement),
     transporteur: LP,
     maintenant: Date.parse("2026-10-09T20:00:00Z"),
   });
   assert.equal(r.categorie, "confirme");
-  assert.equal(r.preuve.code, "MD1");
+  assert.equal(r.preuve.code, "ET1");
+});
+
+test("un code physique dont le libelle dit le contraire n'est pas une preuve", () => {
+  for (const label of ["Votre Colissimo va bientôt nous être confié !", "L'expéditeur ne nous a pas encore remis votre colis", "Votre colis est en attente de dépôt"]) {
+    const e = versEvenement({ code: "PC1", label, date: isoIlYa(2) });
+    assert.equal(e.physique, false, label);
+  }
+  const r = analyse({ colis: colis(10), evenements: [versEvenement({ code: "ET1", label: "Votre colis est en attente de prise en charge", date: isoIlYa(2) })] });
+  assert.notEqual(r.categorie, "confirme");
+});
+
+test("un evenement date dans le futur ou sans date n'est jamais une preuve", () => {
+  const futur = analyse({ colis: colis(10), evenements: [lp(-30, "PC1", "Votre colis a été déposé")] });
+  assert.notEqual(futur.categorie, "confirme");
+  const sansDate = analyse({ colis: colis(10), evenements: [versEvenement({ code: "PC1", label: "Déposé", date: null })] });
+  assert.notEqual(sansDate.categorie, "confirme");
 });
 
 test("apres la prise en charge, un retour ou un souci ne defait jamais le depot (pas d'anomalie)", () => {
@@ -154,10 +179,11 @@ test("apres la prise en charge, un retour ou un souci ne defait jamais le depot 
 
 test("« Votre colis est mis à disposition du vendeur » apres une prise en charge : posté confirmé, sans alerte", () => {
   const { lisPage } = require("../src/controle/pages");
+  // la mise en page reelle de Mondial Relay : date, titre du jour, puis heure / evenement
   const page = lisPage("MR", {
     titre: "Suivi de colis - Mondial Relay",
-    texte: "STATUT\nVotre colis est mis à disposition du vendeur\nSUIVI GLOBAL DE MON COLIS\nColis livré au destinataire\nSUIVI DÉTAILLÉ DE MON COLIS\n12/10/2026\nVotre colis est mis à disposition du vendeur\n09:12\n09/10/2026\nColis pris en charge en Point Relais\n20:31\nColis en préparation chez l'expéditeur\n12:42\nJe m'informe",
-  });
+    texte: "NUMÉRO DE COLIS\n78870015\nSTATUT\nSUIVI GLOBAL DE MON COLIS\nColis en préparation chez l'expéditeur\nColis remis à Mondial Relay\nColis livré au destinataire\nSUIVI DÉTAILLÉ DE MON COLIS\n12/10/2026\nVotre colis est mis à disposition du vendeur\n09:12\nVotre colis est mis à disposition du vendeur\n09/10/2026\nColis pris en charge en Point Relais\n20:31\nColis pris en charge en Point Relais\n12:42\nColis en préparation chez l'expéditeur\nJe m'informe",
+  }, "4278870015");
   assert.equal(page.etat, "trouve");
   const r = analyse({ colis: colis(100, 120), transporteur: transporteur("MR"), evenements: page.evenements });
   assert.equal(r.categorie, "confirme");
@@ -173,23 +199,23 @@ test("statut transporteur non reconnu : verification necessaire, pas une preuve"
   assert.match(r.raison, /non reconnu/);
 });
 
-test("UPS (consultation automatisee interdite) : bloque, a la main, jamais « non depose »", () => {
+test("UPS sans identifiants d'API (lecture du site interdite) : a la main, jamais « non depose »", () => {
   const ups = transporteur("UPS");
   assert.equal(ups.methode, "manuel");
   const r = analyse({ colis: colis(30), transporteur: ups, suivi: null, evenements: [] });
   assert.equal(r.categorie, "bloque");
   assert.equal(r.libelle, "Vérification bloquée");
-  assert.match(r.raison, /interdisent toute consultation automatisée/);
+  assert.match(r.raison, /interdisent la lecture automatisée/);
   assert.equal(r.manuel, true);
   assert.ok(ups.lien("1Z999AA10123456784").includes("1Z999AA10123456784"), "lien officiel avec le numero");
 });
 
-test("pages lues sur le Mac (Mondial Relay, DHL, FedEx, GLS) : en attente, bloquee, lecture coupee", () => {
-  for (const code of ["MR", "DHL", "FEDEX", "GLS"]) assert.equal(transporteur(code).methode, "navigateur", code);
+test("pages lues sur le Mac (Mondial Relay, GLS, DHL sans cle) : en attente, bloquee, lecture coupee", () => {
+  for (const code of ["MR", "DHL", "GLS"]) assert.equal(transporteur(code).methode, "navigateur", code);
   const mr = transporteur("MR");
   const attente = analyse({ colis: colis(5), transporteur: mr, suivi: null, evenements: [] });
-  assert.equal(attente.categorie, "a_verifier");
-  assert.match(attente.raison, /Tout vérifier/);
+  assert.equal(attente.categorie, "en_attente");
+  assert.match(attente.raison, /app Drop du Mac/);
   // un defi anti-robot a la derniere lecture : bloque, rien de conclu sur le colis
   const defi = analyse({ colis: colis(30), transporteur: mr, suivi: { trouve: null, code_erreur: "bloque", erreur: "le site affiche une vérification anti-robot" }, evenements: [] });
   assert.equal(defi.categorie, "bloque");
@@ -203,7 +229,15 @@ test("pages lues sur le Mac (Mondial Relay, DHL, FedEx, GLS) : en attente, bloqu
   // une erreur reseau du Mac ne dit rien du colis, et n'efface pas une preuve
   const reseau = analyse({ colis: colis(30), transporteur: mr, suivi: { trouve: 1, code_erreur: "passagere", erreur: "page non lue sur le Mac : délai dépassé" }, evenements: [] });
   assert.equal(reseau.categorie, "a_verifier");
-  assert.match(reseau.raison, /Rien n'est conclu/);
+  assert.match(reseau.raison, /rien n'est conclu/);
+  // jamais lu, une panne : toujours « en attente » (une erreur technique n'est pas un verdict)
+  const panne = analyse({ colis: colis(30), transporteur: mr, suivi: { trouve: null, essais: 1, code_erreur: "passagere", erreur: "délai dépassé" }, evenements: [] });
+  assert.equal(panne.categorie, "en_attente");
+  assert.equal(panne.erreurTechnique, true);
+  assert.match(panne.raison, /délai dépassé.*rien n'est conclu/);
+  // au 4e echec de suite : a regarder
+  const tenace = analyse({ colis: colis(30), transporteur: mr, suivi: { trouve: null, essais: 4, code_erreur: "passagere", erreur: "délai dépassé" }, evenements: [] });
+  assert.equal(tenace.categorie, "a_verifier");
 });
 
 test("transporteur en pause : bloque, et on dit jusqu'a quand", () => {

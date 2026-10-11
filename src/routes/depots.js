@@ -28,8 +28,8 @@ router.post("/relancer", (req, res) => {
 
 // --- « Tout vérifier » --------------------------------------------------------------
 
-// Lance (ou complete) la campagne : l'API La Poste part aussitot sur le
-// serveur ; les pages officielles attendent l'app Drop du Mac.
+// Lance (ou complete) la campagne : les API officielles partent aussitot sur
+// le serveur ; les pages officielles attendent l'app Drop du Mac.
 router.post("/campagne", (req, res) => {
   res.status(202).json(depots.nouvelleCampagne({ par: qui(req), force: Boolean(req.body?.force) }));
 });
@@ -41,6 +41,12 @@ router.get("/campagne", (req, res) => {
 
 router.post("/campagne/annuler", (req, res) => {
   res.json(depots.annuleCampagne() || depots.campagne());
+});
+
+// L'app du Mac se signale (toutes les 10 s, meme sans campagne) : la page
+// sait qu'elle est en ligne, et l'app sait s'il y a des pages a lire.
+router.get("/agent", (req, res) => {
+  res.json(depots.agent({ nom: String(req.query.nom || qui(req) || "Mac") }));
 });
 
 // L'app du Mac : un petit lot de pages a lire (meme transporteur), avec un bail.

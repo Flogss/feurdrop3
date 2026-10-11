@@ -32,7 +32,6 @@ const CARRIER_LABELS = {
   DPD: "DPD",
   GLS: "GLS",
   DHL: "DHL",
-  FEDEX: "FedEx",
   BJ: "BJ (boîtes jaunes)",
   Inconnu: "Non reconnu",
 };

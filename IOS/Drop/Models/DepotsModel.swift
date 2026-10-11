@@ -2,8 +2,10 @@ import SwiftUI
 import DropKit
 
 /// Le controle des depots : ce que les transporteurs disent des colis dropes.
-/// Le serveur verifie a son rythme (API La Poste) ; la page ne fait que lire
-/// sa base -- seuls « Vérifier » et « Relancer » font interroger La Poste.
+/// Le serveur verifie a son rythme (API officielles) et l'app du Mac lit les
+/// pages officielles ; la page ne fait que lire la base. La liste ne garde que
+/// ce qui reste a trancher ; les depots prouves et les numeros retires sont
+/// dans l'historique.
 @Observable
 final class DepotsModel {
     @ObservationIgnored private unowned let app: AppModel
@@ -28,16 +30,22 @@ final class DepotsModel {
     enum Filtre: Hashable {
         case tous, attention
         case categorie(DepotCategorie)
+        /// l'historique : les depots prouves, les numeros retires
+        case confirmes, retires
 
         var libelle: String {
             switch self {
             case .tous: "Tous"
             case .attention: "À regarder"
-            case .categorie(let c): c == .aVerifier ? "À vérifier" : c == .bloque ? "Bloquées" : c == .confirme ? "Postés confirmés" : "Non confirmés"
+            case .categorie(let c): c == .aVerifier ? "À vérifier" : c == .bloque ? "Bloquées" : c == .enAttente ? "En attente" : c == .confirme ? "Postés confirmés" : "Non confirmés"
+            case .confirmes: "Confirmés"
+            case .retires: "Retirés"
             }
         }
 
-        static let tousLesFiltres: [Filtre] = [.tous, .attention] + DepotCategorie.allCases.map { .categorie($0) }
+        var historique: Bool { self == .confirmes || self == .retires }
+
+        static let tousLesFiltres: [Filtre] = [.tous, .attention, .categorie(.nonConfirme), .categorie(.aVerifier), .categorie(.enAttente), .categorie(.bloque), .confirmes, .retires]
     }
 
     init(app: AppModel) {
@@ -49,13 +57,14 @@ final class DepotsModel {
 
     /// la liste filtree
     var lignes: [DepotLigne] {
-        guard let vue else { return [] }
+        guard let vue, !filtre.historique else { return [] }
         let q = recherche.replacingOccurrences(of: " ", with: "").uppercased()
         return vue.lignes.filter { l in
             switch filtre {
             case .tous: break
             case .attention: if !l.attention { return false }
             case .categorie(let c): if l.controle.cat != c { return false }
+            case .confirmes, .retires: return false
             }
             if let transporteur, l.transporteur.code != transporteur { return false }
             if let expediteur, l.expediteur != expediteur { return false }
@@ -64,16 +73,40 @@ final class DepotsModel {
         }
     }
 
-    var filtreActif: Bool { filtre != .tous || transporteur != nil || expediteur != nil || !recherche.isEmpty }
+    /// l'historique filtre (confirmes ou retires)
+    var historique: [DepotHistorique] {
+        guard let h = vue?.historique else { return [] }
+        let liste: [DepotHistorique] = switch filtre {
+        case .confirmes: h.confirmes
+        case .retires: h.retires
+        default: []
+        }
+        let q = recherche.replacingOccurrences(of: " ", with: "").uppercased()
+        return liste.filter { l in
+            if let transporteur, l.transporteur.code != transporteur { return false }
+            if let expediteur, l.expediteur != expediteur { return false }
+            if !q.isEmpty, !l.numero.contains(q) { return false }
+            return true
+        }
+    }
+
+    var filtreActif: Bool { (filtre != .tous && !filtre.historique) || transporteur != nil || expediteur != nil || !recherche.isEmpty }
+
+    private var tousLesColis: [(code: String, nom: String, expediteur: String)] {
+        let actifs = (vue?.lignes ?? []).map { (code: $0.transporteur.code, nom: $0.transporteur.nom, expediteur: $0.expediteur) }
+        let h = vue?.historique
+        let anciens = ((h?.confirmes ?? []) + (h?.retires ?? [])).map { (code: $0.transporteur.code, nom: $0.transporteur.nom, expediteur: $0.expediteur) }
+        return actifs + anciens
+    }
 
     var transporteursPresents: [(code: String, nom: String)] {
         var vus: [String: String] = [:]
-        for l in vue?.lignes ?? [] { vus[l.transporteur.code] = l.transporteur.nom }
+        for l in tousLesColis { vus[l.code] = l.nom }
         return vus.map { (code: $0.key, nom: $0.value) }.sorted { $0.nom.localizedCompare($1.nom) == .orderedAscending }
     }
 
     var expediteursPresents: [String] {
-        Set((vue?.lignes ?? []).map(\.expediteur)).sorted { $0.localizedCompare($1) == .orderedAscending }
+        Set(tousLesColis.map(\.expediteur)).sorted { $0.localizedCompare($1) == .orderedAscending }
     }
 
     /// les colis a constater sur la page officielle, dans l'ordre de la liste
@@ -136,9 +169,9 @@ final class DepotsModel {
     /// la derniere campagne masquee par l'utilisateur
     var campagneMasquee: Int?
 
-    /// « Tout vérifier » : l'API La Poste part aussitot sur le serveur ; les
-    /// pages officielles attendent l'app du Mac (qui s'y met d'elle-meme, et
-    /// sur ce Mac tout de suite).
+    /// « Tout vérifier » : les API officielles partent aussitot sur le
+    /// serveur ; les pages officielles attendent l'app du Mac (qui s'y met
+    /// d'elle-meme, et sur ce Mac tout de suite, fenetre visible).
     func toutVerifier() async {
         guard !lancement else { return }
         lancement = true
@@ -149,7 +182,7 @@ final class DepotsModel {
         let total = etat.compteurs?.total ?? 0
         app.toasts.show(total > 0 ? "\(Format.count(total, "colis à vérifier", "colis à vérifier")) : c'est parti" : "Rien à vérifier : tout est déjà confirmé ou lu à l'instant", style: total > 0 ? .success : .info)
         #if os(macOS)
-        if etat.attendMac == true { app.verificateur.demarre() }
+        if etat.attendMac == true { app.verificateur.demarre(visible: true) }
         #endif
         await refresh()
     }
@@ -194,11 +227,11 @@ final class DepotsModel {
         if detail.enAttenteDuMac == true {
             app.toasts.show("\(detail.numero) : le Mac va lire la page officielle", style: .info)
             #if os(macOS)
-            app.verificateur.demarre()
+            app.verificateur.demarre(visible: true)
             #endif
             await relisCampagne()
         } else {
-            app.toasts.show("\(detail.numero) : \(detail.controle.libelle.lowercased())")
+            app.toasts.show("\(detail.numero) : \(detail.controle.libelle.lowercased())" + (detail.controle.cat == .confirme ? " (dans l'historique)" : ""))
         }
         await refresh()
         return detail
@@ -226,7 +259,7 @@ final class DepotsModel {
         relance = true
         defer { relance = false }
         guard await app.perform({ try await app.api.relanceDepots() }) != nil else { return }
-        app.toasts.show("Vérifications relancées, au rythme de La Poste", style: .info)
+        app.toasts.show("Vérifications relancées, au rythme de chaque transporteur", style: .info)
         await refresh()
     }
 }

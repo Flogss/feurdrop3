@@ -1,20 +1,27 @@
 import Foundation
 
 // Le controle des depots : une question -- le transporteur a-t-il pris en
-// charge ce colis ? (`GET /api/depots`). Le serveur interroge l'API officielle
-// La Poste (La Poste, Colissimo, Chronopost, DPD) ; l'app du Mac lit les pages
-// officielles de Mondial Relay, DHL, FedEx et GLS (« Tout vérifier ») ; UPS se
-// constate a la main (ses conditions interdisent la consultation automatisee).
-// Ouvrir la page ne fait que lire la base du serveur.
+// charge ce colis ? (`GET /api/depots`). Le serveur interroge les API
+// officielles (La Poste pour La Poste, Colissimo, Chronopost, DPD ; UPS et
+// DHL quand leurs cles sont posees) ; l'app du Mac lit seule les pages
+// officielles de Mondial Relay, GLS (et DHL sans cle) ; UPS sans API se
+// constate a la main (ses conditions interdisent la lecture automatisee).
+// La liste ne garde que ce qui reste a trancher : un depot prouve passe dans
+// l'historique, un numero inconnu du transporteur en est retire.
 
-/// Les quatre statuts, dans l'ordre des compteurs.
+/// Les statuts d'un colis de la liste active (le dernier : rien n'a encore
+/// ete lu, ce n'est pas un verdict).
 public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
     case confirme
     case nonConfirme = "non_confirme"
     case aVerifier = "a_verifier"
     case bloque
+    case enAttente = "en_attente"
 
     public var id: String { rawValue }
+
+    /// les quatre compteurs de la page
+    public static let compteurs: [DepotCategorie] = [.confirme, .nonConfirme, .aVerifier, .bloque]
 
     /// le libelle complet (compteurs, detail)
     public var libelle: String {
@@ -23,6 +30,7 @@ public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
         case .nonConfirme: "Non confirmés"
         case .aVerifier: "À vérifier"
         case .bloque: "Vérification bloquée"
+        case .enAttente: "En attente de lecture"
         }
     }
 
@@ -33,6 +41,7 @@ public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
         case .nonConfirme: "Non confirmé"
         case .aVerifier: "À vérifier"
         case .bloque: "Vérif. bloquée"
+        case .enAttente: "En attente"
         }
     }
 }
@@ -41,7 +50,44 @@ public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
 public struct DepotsVue: Codable, Sendable, Equatable {
     public var etat: DepotsEtat
     public var compteurs: DepotsCompteurs
+    /// la liste active : ce qui reste a trancher
     public var lignes: [DepotLigne]
+    /// les depots prouves (sortis de la liste) et les numeros retires
+    public var historique: DepotsHistorique?
+}
+
+public struct DepotsHistorique: Codable, Sendable, Equatable {
+    public var confirmes: [DepotHistorique]
+    public var retires: [DepotHistorique]
+}
+
+/// Une ligne de l'historique : un depot prouve (quand, par quoi), ou un
+/// numero retire de la file (pourquoi). Le colis lui-meme n'est jamais touche.
+public struct DepotHistorique: Codable, Sendable, Equatable, Identifiable {
+    public var colisId: Int
+    public var numero: String
+    public var expediteur: String
+    public var transporteur: DepotTransporteur
+    public var dropeLe: String?
+    /// quand le depot a ete prouve (heure du serveur, UTC)
+    public var confirmeLe: String?
+    public var preuve: DepotPreuve?
+    public var suite: DepotSuite?
+    public var livre: Bool?
+    public var retire: DepotRetrait?
+    public var lien: String?
+    public var id: Int { colisId }
+}
+
+public struct DepotPreuve: Codable, Sendable, Equatable {
+    public var le: String?
+    public var statut: String?
+    public var source: String?
+}
+
+public struct DepotRetrait: Codable, Sendable, Equatable {
+    public var le: String?
+    public var motif: String?
 }
 
 /// `GET /api/depots/resume` : la pastille du dashboard.
@@ -62,6 +108,12 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
     public var aConstater: Int
     /// ce qui demande un regard (badge de l'outil)
     public var attention: Int
+    /// rien n'a encore ete lu (le Mac ou la file du serveur s'en charge)
+    public var enAttente: Int?
+    /// la liste active (sans les confirmes ni les retires)
+    public var actifs: Int?
+    /// les numeros retires de la file (inconnus du transporteur)
+    public var retires: Int?
     public var total: Int
     /// dropes sans numero de suivi lisible
     public var sansNumero: Int
@@ -74,6 +126,7 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
         case .nonConfirme: nonConfirme
         case .aVerifier: aVerifier
         case .bloque: bloque
+        case .enAttente: enAttente ?? 0
         }
     }
 }
@@ -103,8 +156,27 @@ public struct DepotsEtat: Codable, Sendable, Equatable {
     public var lecture: [DepotLecture]?
     /// « Tout vérifier » : la campagne en cours (ou la derniere)
     public var campagne: DepotCampagneEtat?
+    /// l'app du Mac : en ligne ? combien de pages l'attendent ?
+    public var mac: DepotMac?
 
     public var laPoste: DepotMethode? { methodes["laposte"] }
+    /// les API officielles posees sur le serveur (La Poste, UPS, DHL)
+    public var apisConfigurees: [DepotMethode] { ["laposte", "ups", "dhl"].compactMap { methodes[$0] }.filter(\.configure) }
+}
+
+public struct DepotMac: Codable, Sendable, Equatable {
+    /// s'est signale il y a moins de 45 s
+    public var actif: Bool?
+    public var nom: String?
+    /// le dernier signal (ISO)
+    public var le: String?
+    public var pagesDues: Int?
+}
+
+/// `GET /api/depots/agent` : l'app du Mac se signale.
+public struct DepotAgentSignal: Codable, Sendable, Equatable {
+    /// des pages officielles a lire (campagne en cours ou file)
+    public var aLire: Int
 }
 
 public struct DepotLecture: Codable, Sendable, Equatable, Identifiable {
@@ -179,6 +251,8 @@ public struct DepotLigne: Codable, Sendable, Equatable, Identifiable {
     public var lien: String?
     /// la memoire de la derniere lecture
     public var lecture: DepotLectureMemoire?
+    public var confirmeLe: String?
+    public var retire: DepotRetrait?
 
     public var id: Int { colisId }
     public var manuel: Bool { transporteur.methode == "manuel" }
@@ -198,6 +272,8 @@ public struct DepotLectureMemoire: Codable, Sendable, Equatable {
     public var methodeLibelle: String {
         switch methode {
         case "laposte": "API La Poste (officielle)"
+        case "ups": "API UPS (officielle)"
+        case "dhl": "API DHL (officielle)"
         case "navigateur": "Page officielle lue sur le Mac"
         case "manuel": "Constat à la main"
         default: "—"
@@ -243,6 +319,12 @@ public struct DepotControle: Codable, Sendable, Equatable {
     /// apres la prise en charge (retour, « mis a disposition du vendeur »,
     /// livraison) : pour le detail, sans alerte
     public var suite: DepotSuite?
+    /// la derniere lecture a echoue (reseau, page incomplete) : rien de conclu
+    public var erreurTechnique: Bool?
+    /// inconnu du transporteur au-dela du delai : sortira de la liste s'il le reste
+    public var inconnu: Bool?
+    /// seul un ancien parcours de ce numero (avant l'etiquette) est visible
+    public var ancienParcours: Bool?
 
     public var cat: DepotCategorie { DepotCategorie(rawValue: categorie) ?? .aVerifier }
 }
@@ -298,6 +380,8 @@ public struct DepotDetail: Codable, Sendable, Equatable, Identifiable {
     public var lecture: DepotLectureMemoire?
     /// le Mac va lire (ou lit) sa page officielle
     public var enAttenteDuMac: Bool?
+    public var confirmeLe: String?
+    public var retire: DepotRetrait?
 
     public var id: Int { colisId }
     public var manuel: Bool { transporteur.methode == "manuel" }
@@ -312,7 +396,7 @@ public struct DepotEvenement: Codable, Sendable, Equatable, Identifiable {
     public var etape: String?
     public var physique: Bool
     public var incident: String?
-    /// "laposte", "navigateur" (page lue sur le Mac) ou "manuel" (constat)
+    /// "laposte", "ups", "dhl", "navigateur" (page lue sur le Mac) ou "manuel" (constat)
     public var source: String?
 }
 
@@ -367,6 +451,8 @@ public struct DepotCampagneCompteurs: Codable, Sendable, Equatable {
     public var bloques: Int
     public var erreurs: Int
     public var aConstater: Int
+    /// numeros retires de la file a la lecture (inconnus)
+    public var retires: Int?
 
     /// la part faite (0...1)
     public var avancee: Double { total > 0 ? Double(total - restants) / Double(total) : 1 }
@@ -437,7 +523,8 @@ public struct DepotResultatsReponse: Codable, Sendable, Equatable {
 
 public struct DepotResultatPage: Codable, Sendable, Equatable {
     public var numero: String
-    /// "trouve", "introuvable", "ambigu", "illisible", "bloque", "erreur", "ignore"
+    /// "trouve", "introuvable", "ambigu", "illisible", "bloque", "erreur",
+    /// "incomplet", "autre_numero", "ignore"
     public var etat: String
     public var resultat: String?
 }
