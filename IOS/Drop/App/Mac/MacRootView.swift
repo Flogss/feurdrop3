@@ -148,6 +148,8 @@ struct MacRootView: View {
         .sensoryFeedback(.selection, trigger: app.pageMac)
         .task { await demarre() }
         .task(id: app.pageMac) { await boucle() }
+        // « Tout vérifier » lance ailleurs : ce Mac lit les pages officielles
+        .task(id: app.connecte) { if app.connecte { await app.surveilleVerificationsMac() } }
         .onReceive(NotificationCenter.default.publisher(for: .dropAllerA)) { note in
             if let page = note.object as? MacPage { va(vers: page) }
         }

@@ -16,6 +16,7 @@ struct DropApp: App {
         WindowGroup {
             RootView()
                 .environment(app)
+                .onOpenURL { app.ouvre($0) }
                 #if DEBUG
                 .onAppear { PerfProbe.shared.start() }
                 #endif
@@ -47,6 +48,7 @@ struct DropApp: App {
                 .preferredColorScheme(.dark)
                 .tint(Theme.violet)
                 .frame(minWidth: 940, minHeight: 640)
+                .onOpenURL { app.ouvre($0) }
         }
         .defaultSize(width: 1280, height: 860)
         // pas de barre de titre grise : le fond vivant prend toute la fenetre,

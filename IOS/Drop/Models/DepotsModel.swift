@@ -33,7 +33,7 @@ final class DepotsModel {
             switch self {
             case .tous: "Tous"
             case .attention: "À regarder"
-            case .categorie(let c): c == .aVerifier ? "Vérif. nécessaire" : c == .bloque ? "Bloquées" : c == .anomalie ? "Anomalies" : c == .confirme ? "Confirmés" : "Non confirmés"
+            case .categorie(let c): c == .aVerifier ? "À vérifier" : c == .bloque ? "Bloquées" : c == .confirme ? "Postés confirmés" : "Non confirmés"
             }
         }
 
@@ -90,6 +90,7 @@ final class DepotsModel {
                     vue = nouvelle
                     resume = nouvelle.compteurs
                     loadError = nil
+                    if let c = nouvelle.etat.campagne, campagne == nil || c.active || campagne?.active == true { campagne = c }
                 }
             }
             resumeLu = .now
@@ -101,10 +102,19 @@ final class DepotsModel {
 
     /// La page ouverte se relit toutes les 15 s (plus vite pendant un passage).
     func surveille() async {
+        var tour = 0
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(vue?.etat.enCours == true ? 3 : 15))
+            // pendant « Tout vérifier » : la progression toutes les 2 s
+            let campagneActive = campagne?.active == true
+            try? await Task.sleep(for: .seconds(campagneActive ? 2 : vue?.etat.enCours == true ? 3 : 15))
             if Task.isCancelled { break }
-            await refresh()
+            tour += 1
+            if campagneActive {
+                await relisCampagne()
+                if tour % 5 == 0 { await refresh() }
+            } else {
+                await refresh()
+            }
         }
     }
 
@@ -118,6 +128,62 @@ final class DepotsModel {
 
     // MARK: Actions
 
+    // MARK: « Tout vérifier »
+
+    /// la campagne en cours (ou la derniere), relue toutes les 2 s pendant
+    private(set) var campagne: DepotCampagneEtat?
+    private(set) var lancement = false
+    /// la derniere campagne masquee par l'utilisateur
+    var campagneMasquee: Int?
+
+    /// « Tout vérifier » : l'API La Poste part aussitot sur le serveur ; les
+    /// pages officielles attendent l'app du Mac (qui s'y met d'elle-meme, et
+    /// sur ce Mac tout de suite).
+    func toutVerifier() async {
+        guard !lancement else { return }
+        lancement = true
+        defer { lancement = false }
+        campagneMasquee = nil
+        guard let etat = await app.perform({ try await app.api.lanceCampagne() }) else { return }
+        withAnimation(Theme.spring) { campagne = etat }
+        let total = etat.compteurs?.total ?? 0
+        app.toasts.show(total > 0 ? "\(Format.count(total, "colis à vérifier", "colis à vérifier")) : c'est parti" : "Rien à vérifier : tout est déjà confirmé ou lu à l'instant", style: total > 0 ? .success : .info)
+        #if os(macOS)
+        if etat.attendMac == true { app.verificateur.demarre() }
+        #endif
+        await refresh()
+    }
+
+    func annuleCampagne() async {
+        guard let etat = await app.perform({ try await app.api.annuleCampagne() }) else { return }
+        withAnimation(Theme.spring) { campagne = etat }
+        #if os(macOS)
+        app.verificateur.arrete()
+        #endif
+        app.toasts.show("Vérification annulée : ce qui a été lu est gardé", style: .info)
+        await refresh()
+    }
+
+    /// la progression, relue pendant une campagne
+    func relisCampagne() async {
+        guard let etat = try? await app.api.campagne() else { return }
+        let avant = campagne?.compteurs?.verifies
+        let finie = campagne?.active == true && !etat.active
+        if etat != campagne { withAnimation(Theme.spring) { campagne = etat } }
+        if etat.compteurs?.verifies != avant || finie { await refresh() }
+        if finie, let n = etat.compteurs {
+            celebration += 1
+            app.toasts.show("Vérification terminée : \(Format.count(n.confirmes, "posté confirmé", "postés confirmés")), \(Format.count(n.nonConfirmes, "non confirmé", "non confirmés"))" + (n.bloques > 0 ? ", \(Format.count(n.bloques, "bloqué", "bloqués"))" : ""))
+        }
+    }
+
+    /// Couper ou rallumer la lecture automatique d'un transporteur sur le Mac.
+    func lecture(_ code: String, active: Bool) async {
+        guard await app.perform({ try await app.api.lectureDepots(code, active: active) }) != nil else { return }
+        app.toasts.show(active ? "Lecture automatique rallumée" : "Lecture automatique coupée : constat à la main", style: .info)
+        await refresh()
+    }
+
     /// « Vérifier » : une lecture tout de suite. Renvoie le detail a jour.
     @discardableResult
     func verifie(_ colisID: Int) async -> DepotDetail? {
@@ -125,7 +191,15 @@ final class DepotsModel {
         enVerification.insert(colisID)
         defer { enVerification.remove(colisID) }
         guard let detail = await app.perform({ try await app.api.verifieDepot(colisID) }) else { return nil }
-        app.toasts.show("\(detail.numero) : \(detail.controle.libelle.lowercased())")
+        if detail.enAttenteDuMac == true {
+            app.toasts.show("\(detail.numero) : le Mac va lire la page officielle", style: .info)
+            #if os(macOS)
+            app.verificateur.demarre()
+            #endif
+            await relisCampagne()
+        } else {
+            app.toasts.show("\(detail.numero) : \(detail.controle.libelle.lowercased())")
+        }
         await refresh()
         return detail
     }

@@ -167,6 +167,7 @@ struct ConnexionView: View {
                     SecureField("", text: $motDePasse)
                 }
             }
+            .textFieldStyle(.plain)
             .textContentType(.password)
             .autocorrectionDisabled()
             .sansMajuscules()

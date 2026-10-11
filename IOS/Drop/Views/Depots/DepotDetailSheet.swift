@@ -76,12 +76,16 @@ struct DepotDetailSheet: View {
                 }
                 GridRow {
                     info("Expéditeur", d.expediteur)
-                    info("Vérification", d.manuel ? "À la main (page officielle)" : "API La Poste (officielle)")
+                    info("Vérification", methode(d))
                 }
                 GridRow {
-                    info("Statut transporteur", c.statutTransporteur(manuel: d.manuel, verifie: d.verifieLe != nil))
+                    info("Statut transporteur", d.lecture?.statutBrut ?? c.statutTransporteur(manuel: d.manuel, verifie: d.verifieLe != nil))
                     info("Vérifié", verifie(d))
                 }
+            }
+            if let suite = c.suite, let libelle = suite.libelle {
+                // apres la prise en charge : note, sans alerte -- le depot est prouve
+                info("Après la prise en charge", "\(libelle)\(suite.le.map { " · \(ServerDate.shortDayTime($0))" } ?? "") — sans effet sur le dépôt, déjà prouvé", couleur: Theme.text2)
             }
             if let erreur = d.erreur {
                 info("Dernière erreur", erreur.message ?? erreur.code, couleur: Theme.danger)
@@ -93,7 +97,9 @@ struct DepotDetailSheet: View {
                 Text("Chronologie").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text2)
                 if d.evenements.isEmpty {
                     EmptyStateView(symbol: "clock", title: "Aucun événement pour l'instant",
-                                   subtitle: d.manuel ? "Rien n'est lu automatiquement chez ce transporteur." : "La Poste n'a encore rien remonté pour ce numéro.")
+                                   subtitle: d.manuel ? "Rien n'est lu automatiquement chez ce transporteur."
+                                       : d.transporteur.methode == "navigateur" ? "La page officielle n'a pas encore été lue par le Mac."
+                                       : "La Poste n'a encore rien remonté pour ce numéro.")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(d.evenements.enumerated()), id: \.element.id) { i, e in
@@ -120,8 +126,18 @@ struct DepotDetailSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func methode(_ d: DepotDetail) -> String {
+        if let l = d.lecture, l.methode != nil { return l.methodeLibelle + (l.par.map { " · \($0)" } ?? "") }
+        switch d.transporteur.methode {
+        case "manuel": return "À la main (page officielle)"
+        case "navigateur": return "Page officielle lue sur le Mac"
+        default: return "API La Poste (officielle)"
+        }
+    }
+
     private func verifie(_ d: DepotDetail) -> String {
         if d.manuel { return d.controle.constat.map { "constaté \(ilYa($0.le))" } ?? "jamais (à la main)" }
+        if d.enAttenteDuMac == true { return "le Mac va lire la page officielle" }
         var texte = ilYa(d.verifieLe ?? d.essaiLe)
         if let prochaine = d.prochaineLe { texte += " · prochaine \(ServerDate.shortDayTime(prochaine))" }
         return texte
@@ -138,13 +154,15 @@ struct DepotDetailSheet: View {
             Text("Constat sur la page officielle").font(.subheadline.weight(.semibold))
             Text(d.manuel
                  ? "Ouvre le suivi officiel, puis note ce que tu y vois :"
+                 : d.transporteur.methode == "navigateur"
+                 ? "La lecture automatique n'a pas pu trancher pour ce colis : ouvre le suivi officiel, puis note ce que tu y vois :"
                  : "L'API La Poste ne permet pas de trancher pour ce colis : ouvre le suivi officiel, puis note ce que tu y vois :")
                 .font(.footnote)
                 .foregroundStyle(Theme.text2)
             HStack(spacing: 8) {
                 bouton(.pris, "Pris en charge", "checkmark", .confirme)
                 bouton(.pasEncore, "Pas encore", "clock", .nonConfirme)
-                bouton(.probleme, "Problème", "exclamationmark.triangle.fill", .anomalie)
+                bouton(.probleme, "Problème", "exclamationmark.triangle.fill", .aVerifier)
             }
             if let constat = d.controle.constat {
                 Button("Effacer le constat (\(ilYa(constat.le)))") { Task { await constate(.annule) } }
@@ -196,14 +214,15 @@ struct DepotDetailSheet: View {
     private func evenement(_ e: DepotEvenement, preuve: DepotEvenementResume?, premier: Bool, dernier: Bool) -> some View {
         let estPreuve = preuve != nil && e.survenuLe == preuve?.le && e.code == preuve?.code
         let manuel = e.source == "manuel"
+        // une suite apres la prise en charge (retour, souci) : notee, sans alerte
         let incident = e.incident != nil || e.etape == "exception"
-        let couleur: Color = incident ? Theme.danger : estPreuve ? Theme.teal : manuel ? Theme.violetLight : premier ? Theme.violetBright : Theme.text3
+        let couleur: Color = estPreuve ? Theme.teal : incident ? Theme.violetLight.opacity(0.6) : manuel ? Theme.violetLight : premier ? Theme.violetBright : Theme.text3
         return HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 0) {
                 Circle()
                     .fill(couleur)
                     .frame(width: 11, height: 11)
-                    .shadow(color: couleur.opacity(premier || estPreuve || incident ? 0.8 : 0), radius: 5)
+                    .shadow(color: couleur.opacity(premier || estPreuve ? 0.8 : 0), radius: 5)
                     .padding(.top, 4)
                 if !dernier {
                     Rectangle().fill(Theme.hairline).frame(width: 1.5).frame(maxHeight: .infinity)
@@ -227,7 +246,7 @@ struct DepotDetailSheet: View {
                 Text(ServerDate.shortDayTime(e.survenuLe) + (e.lieu.map { " · \($0)" } ?? ""))
                     .font(.caption)
                     .foregroundStyle(Theme.text2)
-                Text(manuel ? "constat sur la page officielle" : "La Poste · \(e.code ?? "?")\(e.etape == "unknown" ? " (code non reconnu)" : "")")
+                Text(manuel ? "constat sur la page officielle" : e.source == "navigateur" ? "page officielle lue sur le Mac" : "La Poste · \(e.code ?? "?")\(e.etape == "unknown" ? " (code non reconnu)" : "")")
                     .font(.caption2.monospaced())
                     .foregroundStyle(Theme.text3)
             }
@@ -271,7 +290,7 @@ struct DepotDetailSheet: View {
                     .frame(height: 50)
                 }
                 .boutonVerreFort(Theme.violetDeep)
-                .disabled(lp?.configure != true || lp?.pause != nil || model.enVerification.contains(d.colisId))
+                .disabled((d.transporteur.methode == "laposte" && (lp?.configure != true || lp?.pause != nil)) || model.enVerification.contains(d.colisId))
             }
             if ouvert.serie != nil {
                 Button(action: suivant) {

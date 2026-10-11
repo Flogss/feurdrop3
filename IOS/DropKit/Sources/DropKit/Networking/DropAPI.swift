@@ -236,6 +236,40 @@ public struct DropAPI: Sendable {
         _ = try await client.raw(.post, "/api/depots/relancer")
     }
 
+    // MARK: « Tout vérifier »
+
+    /// Lance (ou complete) la campagne : l'API La Poste part aussitot, les
+    /// pages officielles attendent l'app du Mac.
+    public func lanceCampagne(force: Bool = false) async throws -> DepotCampagneEtat {
+        struct Corps: Encodable { let force: Bool }
+        return try await client.send(.post, "/api/depots/campagne", body: Corps(force: force))
+    }
+
+    public func campagne() async throws -> DepotCampagneEtat {
+        try await client.send(.get, "/api/depots/campagne")
+    }
+
+    public func annuleCampagne() async throws -> DepotCampagneEtat {
+        try await client.send(.post, "/api/depots/campagne/annuler")
+    }
+
+    /// L'app du Mac : un lot de pages a lire (un seul transporteur), avec un bail.
+    public func travailCampagne(agent: String, lot: Int = 6) async throws -> DepotTravail {
+        try await client.send(.get, "/api/depots/campagne/travail", query: [URLQueryItem(name: "agent", value: agent), URLQueryItem(name: "lot", value: String(lot))])
+    }
+
+    /// L'app du Mac : ce qu'elle a vu sur chaque page.
+    public func envoieResultats(agent: String, _ resultats: [DepotPageLue]) async throws -> DepotResultatsReponse {
+        struct Corps: Encodable { let agent: String; let resultats: [DepotPageLue] }
+        return try await client.send(.post, "/api/depots/campagne/resultats", body: Corps(agent: agent, resultats: resultats), timeout: 30)
+    }
+
+    /// Couper ou rallumer la lecture automatique d'un transporteur.
+    public func lectureDepots(_ code: String, active: Bool) async throws -> DepotsEtat {
+        struct Corps: Encodable { let active: Bool }
+        return try await client.send(.post, "/api/depots/lecture/\(code)", body: Corps(active: active))
+    }
+
     // MARK: - Statistiques
 
     public func revenue() async throws -> RevenueSummary {

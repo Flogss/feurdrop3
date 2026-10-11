@@ -119,6 +119,34 @@ import Testing
     #expect(vue.etat.transporteurs.last?.automatique == false)
 }
 
+@Test func toutVerifierSeDecodeEtLeMacRendSesPages() throws {
+    // GET /api/depots/campagne, tel que le serveur le rend
+    let json = """
+    {"campagne":{"id":2,"statut":"active","creeLe":"2026-10-11 16:54:21","finLe":null,"par":"site","force":true},
+     "compteurs":{"total":6,"verifies":2,"restants":4,"confirmes":1,"nonConfirmes":1,"aVerifier":0,"bloques":0,"erreurs":0,"aConstater":0,"annules":0},
+     "parTransporteur":[{"code":"MR","nom":"Mondial Relay","methode":"navigateur","total":4,"faits":2,"restants":2,"bloques":0,"erreurs":0,"aConstater":0,"message":null}],
+     "attendMac":true,"agent":{"le":"2026-10-11T16:55:00.000Z","nom":"Mac · MacBook Air","actif":true}}
+    """
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let etat = try decoder.decode(DepotCampagneEtat.self, from: Data(json.utf8))
+    #expect(etat.active)
+    #expect(etat.compteurs?.avancee == 2.0 / 6.0)
+    #expect(etat.parTransporteur?.first?.methode == "navigateur")
+    #expect(etat.agent?.actif == true)
+    // un lot de travail, puis ce que le Mac renvoie (cles en camelCase, comme le serveur les lit)
+    let lot = try decoder.decode(DepotTravail.self, from: Data(#"{"campagne":2,"pauseMs":2500,"items":[{"numero":"4278870015","transporteur":"MR","nom":"Mondial Relay","url":"https://www.mondialrelay.fr/suivi-de-colis/?numeroExpedition=4278870015"}]}"#.utf8))
+    #expect(lot.items.first?.numero == "4278870015")
+    let page = DepotPageLue(numero: "4278870015", transporteur: "MR", url: lot.items[0].url, titre: "Suivi de colis - Mondial Relay", texte: "SUIVI DÉTAILLÉ DE MON COLIS", erreur: nil)
+    let objet = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(page)) as? [String: Any])
+    #expect(objet["numero"] as? String == "4278870015")
+    #expect(objet["transporteur"] as? String == "MR")
+    // un serveur sans « anomalie » (quatre statuts) se lit aussi
+    let compteurs = try decoder.decode(DepotsCompteurs.self, from: Data(#"{"confirme":1,"non_confirme":0,"a_verifier":2,"bloque":0,"nonConfirmeHorsDelai":0,"aConstater":0,"attention":0,"total":3,"sansNumero":0}"#.utf8))
+    #expect(compteurs.anomalie == nil)
+    #expect(compteurs.nombre(.aVerifier) == 2)
+}
+
 @Test func impressionDesTransporteursChoisis() throws {
     let data = try JSONEncoder().encode(PrintRequest.carriers(["MR", "LP"]))
     let objet = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])

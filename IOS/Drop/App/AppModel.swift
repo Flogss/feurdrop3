@@ -79,21 +79,50 @@ final class AppModel {
     @ObservationIgnored lazy var tracking = TrackingModel(app: self)
     @ObservationIgnored lazy var journal = JournalModel(app: self)
     @ObservationIgnored lazy var depots = DepotsModel(app: self)
+    #if os(macOS)
+    /// « Tout vérifier » : ce Mac lit les pages officielles (Mondial Relay, DHL...)
+    @ObservationIgnored lazy var verificateur = VerificateurPages(app: self)
+
+    /// Tant que l'app du Mac est ouverte : une campagne « Tout vérifier » lancee
+    /// d'ailleurs (le site, l'iPhone) qui attend le Mac est prise ici, toute
+    /// seule. Un coup d'oeil toutes les 10 s, rien de plus.
+    func surveilleVerificationsMac() async {
+        while !Task.isCancelled {
+            if connecte, !verificateur.enCours, let etat = try? await api.campagne(), etat.active, etat.attendMac == true {
+                verificateur.demarre()
+            }
+            try? await Task.sleep(for: .seconds(10))
+        }
+    }
+    #endif
+
+    /// `feurdrop://depots/verifier` (le bouton du site « Ouvrir l'app Drop du
+    /// Mac ») : la page du controle, et la verification.
+    func ouvre(_ url: URL) {
+        guard url.scheme == "feurdrop", connecte else { return }
+        if url.host() == "depots" {
+            #if os(macOS)
+            pageMac = .depots
+            if url.path().contains("verifier") { verificateur.demarre() }
+            #endif
+        }
+    }
 
     init() {
         let enregistre = UserDefaults.standard.string(forKey: "drop.serveur").flatMap(URL.init(string:))
         let adresse = enregistre ?? Self.defaultServer
         serverURL = adresse
+        api = DropAPI(baseURL: adresse)
         #if DEBUG
-        // verification au simulateur contre un serveur LOCAL de test :
-        // `-drop.serveur http://localhost:3001 -DropJetonTest <jeton>` pose une
-        // session que ce serveur a deja delivree (rien n'est contourne : il
-        // la verifie a chaque requete). Jamais pour un autre serveur.
+        // verification contre un serveur LOCAL de test :
+        // `-drop.serveur http://localhost:3001 -DropJetonTest <jeton>` pose, en
+        // memoire seulement, une session que ce serveur a deja delivree (rien
+        // n'est contourne : il la verifie a chaque requete). Jamais pour un
+        // autre serveur.
         if let jeton = UserDefaults.standard.string(forKey: "DropJetonTest"), adresse.host() == "localhost" || adresse.host() == "127.0.0.1" {
-            Trousseau.garde(jeton, pour: adresse)
+            api.client.definitJeton(jeton)
         }
         #endif
-        api = DropAPI(baseURL: adresse)
         connecte = api.client.jeton != nil
         #if DEBUG
         // verification au simulateur : `-DropOnglet stats` ouvre un onglet

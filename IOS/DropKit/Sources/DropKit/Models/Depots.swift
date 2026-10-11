@@ -1,40 +1,38 @@
 import Foundation
 
-// Le controle des depots : ce que les transporteurs disent des colis dropes
-// (`GET /api/depots`). Le serveur interroge l'API officielle La Poste (La
-// Poste, Colissimo, Chronopost, DPD) a son rythme ; UPS et DHL se constatent
-// sur leur page officielle ; Mondial Relay n'est pas controle (seulement
-// compte). Ouvrir la page ne fait que lire la base du serveur.
+// Le controle des depots : une question -- le transporteur a-t-il pris en
+// charge ce colis ? (`GET /api/depots`). Le serveur interroge l'API officielle
+// La Poste (La Poste, Colissimo, Chronopost, DPD) ; l'app du Mac lit les pages
+// officielles de Mondial Relay, DHL, FedEx et GLS (« Tout vérifier ») ; UPS se
+// constate a la main (ses conditions interdisent la consultation automatisee).
+// Ouvrir la page ne fait que lire la base du serveur.
 
-/// Les cinq categories, dans l'ordre des compteurs.
+/// Les quatre statuts, dans l'ordre des compteurs.
 public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
     case confirme
     case nonConfirme = "non_confirme"
     case aVerifier = "a_verifier"
     case bloque
-    case anomalie
 
     public var id: String { rawValue }
 
     /// le libelle complet (compteurs, detail)
     public var libelle: String {
         switch self {
-        case .confirme: "Dépôts confirmés"
-        case .nonConfirme: "Dépôts non confirmés"
-        case .aVerifier: "Vérification nécessaire"
+        case .confirme: "Postés confirmés"
+        case .nonConfirme: "Non confirmés"
+        case .aVerifier: "À vérifier"
         case .bloque: "Vérification bloquée"
-        case .anomalie: "Anomalies de suivi"
         }
     }
 
     /// le libelle court (badge d'une ligne, filtres)
     public var court: String {
         switch self {
-        case .confirme: "Confirmé"
+        case .confirme: "Posté confirmé"
         case .nonConfirme: "Non confirmé"
-        case .aVerifier: "Vérif. nécessaire"
+        case .aVerifier: "À vérifier"
         case .bloque: "Vérif. bloquée"
-        case .anomalie: "Anomalie"
         }
     }
 }
@@ -56,7 +54,8 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
     public var nonConfirme: Int
     public var aVerifier: Int
     public var bloque: Int
-    public var anomalie: Int
+    /// (anciennes versions du serveur)
+    public var anomalie: Int?
     /// non confirmes au-dela du delai normal d'un premier scan
     public var nonConfirmeHorsDelai: Int
     /// UPS, DHL... a regarder sur la page officielle
@@ -75,7 +74,6 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
         case .nonConfirme: nonConfirme
         case .aVerifier: aVerifier
         case .bloque: bloque
-        case .anomalie: anomalie
         }
     }
 }
@@ -101,8 +99,22 @@ public struct DepotsEtat: Codable, Sendable, Equatable {
     public var transporteurs: [DepotTransporteurCompte]
     public var affichageJours: Int
     public var delaiScanHeures: Int
+    /// les transporteurs que le Mac sait lire, et l'interrupteur de chacun
+    public var lecture: [DepotLecture]?
+    /// « Tout vérifier » : la campagne en cours (ou la derniere)
+    public var campagne: DepotCampagneEtat?
 
     public var laPoste: DepotMethode? { methodes["laposte"] }
+}
+
+public struct DepotLecture: Codable, Sendable, Equatable, Identifiable {
+    public var code: String
+    public var nom: String
+    /// la lecture automatique sur le Mac est allumee
+    public var active: Bool
+    /// le site a affiche une protection : pause jusqu'a...
+    public var pause: DepotPause?
+    public var id: String { code }
 }
 
 public struct DepotBilan: Codable, Sendable, Equatable {
@@ -139,9 +151,10 @@ public struct DepotPause: Codable, Sendable, Equatable {
 public struct DepotTransporteurCompte: Codable, Sendable, Equatable, Identifiable {
     public var code: String
     public var nom: String
-    /// "laposte" (automatique) ou "manuel" (page officielle)
+    /// "laposte" (API, serveur), "navigateur" (page lue sur le Mac) ou "manuel"
     public var methode: String
     public var colis: Int
+    public var pause: DepotPause?
     public var id: String { code }
     public var automatique: Bool { methode != "manuel" }
 }
@@ -164,9 +177,32 @@ public struct DepotLigne: Codable, Sendable, Equatable, Identifiable {
     public var erreur: DepotErreurNumero?
     /// le suivi officiel, numero deja saisi
     public var lien: String?
+    /// la memoire de la derniere lecture
+    public var lecture: DepotLectureMemoire?
 
     public var id: Int { colisId }
     public var manuel: Bool { transporteur.methode == "manuel" }
+}
+
+/// Ce qu'on retient de la derniere lecture d'un numero.
+public struct DepotLectureMemoire: Codable, Sendable, Equatable {
+    /// "laposte", "navigateur", "manuel"
+    public var methode: String?
+    /// le statut tel que le transporteur l'ecrit
+    public var statutBrut: String?
+    /// l'adresse lue (page officielle)
+    public var page: String?
+    /// qui l'a lue ("Mac de …")
+    public var par: String?
+
+    public var methodeLibelle: String {
+        switch methode {
+        case "laposte": "API La Poste (officielle)"
+        case "navigateur": "Page officielle lue sur le Mac"
+        case "manuel": "Constat à la main"
+        default: "—"
+        }
+    }
 }
 
 public struct DepotTransporteur: Codable, Sendable, Equatable {
@@ -204,8 +240,18 @@ public struct DepotControle: Codable, Sendable, Equatable {
     public var constat: DepotConstat?
     public var livre: Bool
     public var manuel: Bool?
+    /// apres la prise en charge (retour, « mis a disposition du vendeur »,
+    /// livraison) : pour le detail, sans alerte
+    public var suite: DepotSuite?
 
     public var cat: DepotCategorie { DepotCategorie(rawValue: categorie) ?? .aVerifier }
+}
+
+public struct DepotSuite: Codable, Sendable, Equatable {
+    public var libelle: String?
+    public var le: String?
+    public var etape: String?
+    public var retour: Bool?
 }
 
 public struct DepotEvenementResume: Codable, Sendable, Equatable {
@@ -249,6 +295,9 @@ public struct DepotDetail: Codable, Sendable, Equatable, Identifiable {
     /// pourquoi ce transporteur se verifie a la main
     public var raisonManuel: String?
     public var liens: DepotLiens?
+    public var lecture: DepotLectureMemoire?
+    /// le Mac va lire (ou lit) sa page officielle
+    public var enAttenteDuMac: Bool?
 
     public var id: Int { colisId }
     public var manuel: Bool { transporteur.methode == "manuel" }
@@ -263,7 +312,7 @@ public struct DepotEvenement: Codable, Sendable, Equatable, Identifiable {
     public var etape: String?
     public var physique: Bool
     public var incident: String?
-    /// "laposte" ou "manuel" (constat sur la page officielle)
+    /// "laposte", "navigateur" (page lue sur le Mac) ou "manuel" (constat)
     public var source: String?
 }
 
@@ -282,4 +331,113 @@ public enum DepotConstatChoix: String, Sendable, CaseIterable, Identifiable {
     case annule
 
     public var id: String { rawValue }
+}
+
+// MARK: - « Tout vérifier »
+
+/// `GET /api/depots/campagne` : la campagne en cours (ou la derniere).
+public struct DepotCampagneEtat: Codable, Sendable, Equatable {
+    public var campagne: DepotCampagne?
+    public var compteurs: DepotCampagneCompteurs?
+    public var parTransporteur: [DepotCampagneTransporteur]?
+    /// des pages attendent l'app du Mac
+    public var attendMac: Bool?
+    /// le dernier Mac qui a demande du travail
+    public var agent: DepotAgent?
+
+    public var active: Bool { campagne?.statut == "active" }
+}
+
+public struct DepotCampagne: Codable, Sendable, Equatable, Identifiable {
+    public var id: Int
+    /// "active", "terminee", "annulee"
+    public var statut: String
+    public var creeLe: String?
+    public var finLe: String?
+    public var par: String?
+}
+
+public struct DepotCampagneCompteurs: Codable, Sendable, Equatable {
+    public var total: Int
+    public var verifies: Int
+    public var restants: Int
+    public var confirmes: Int
+    public var nonConfirmes: Int
+    public var aVerifier: Int
+    public var bloques: Int
+    public var erreurs: Int
+    public var aConstater: Int
+
+    /// la part faite (0...1)
+    public var avancee: Double { total > 0 ? Double(total - restants) / Double(total) : 1 }
+}
+
+public struct DepotCampagneTransporteur: Codable, Sendable, Equatable, Identifiable {
+    public var code: String
+    public var nom: String
+    public var methode: String
+    public var total: Int
+    public var faits: Int
+    public var restants: Int
+    public var bloques: Int
+    public var erreurs: Int
+    public var aConstater: Int
+    public var message: String?
+    public var id: String { code }
+}
+
+public struct DepotAgent: Codable, Sendable, Equatable {
+    public var le: String?
+    public var nom: String?
+    public var actif: Bool?
+}
+
+/// `GET /api/depots/campagne/travail` : un lot de pages a lire (un seul transporteur).
+public struct DepotTravail: Codable, Sendable, Equatable {
+    public var campagne: Int?
+    /// une pause entre deux pages (le rythme d'une personne)
+    public var pauseMs: Int?
+    public var items: [DepotPageALire]
+}
+
+public struct DepotPageALire: Codable, Sendable, Equatable, Identifiable, Hashable {
+    public var numero: String
+    public var transporteur: String
+    public var nom: String
+    public var url: String
+    public var id: String { numero }
+}
+
+/// Ce que le Mac a vu sur une page officielle (le serveur le lit lui-meme).
+public struct DepotPageLue: Codable, Sendable, Equatable {
+    public var numero: String
+    public var transporteur: String
+    public var url: String?
+    public var titre: String?
+    public var texte: String?
+    /// la page n'a pas pu etre lue (reseau, delai)
+    public var erreur: String?
+
+    public init(numero: String, transporteur: String, url: String?, titre: String?, texte: String?, erreur: String?) {
+        self.numero = numero
+        self.transporteur = transporteur
+        self.url = url
+        self.titre = titre
+        self.texte = texte
+        self.erreur = erreur
+    }
+}
+
+/// `POST /api/depots/campagne/resultats` : chaque page, et l'etat qui suit.
+public struct DepotResultatsReponse: Codable, Sendable, Equatable {
+    public var resultats: [DepotResultatPage]
+    public var campagne: DepotCampagne?
+    public var compteurs: DepotCampagneCompteurs?
+}
+
+public struct DepotResultatPage: Codable, Sendable, Equatable {
+    public var numero: String
+    /// "trouve", "introuvable", "ambigu", "illisible", "bloque", "erreur", "ignore"
+    public var etat: String
+    public var resultat: String?
 }

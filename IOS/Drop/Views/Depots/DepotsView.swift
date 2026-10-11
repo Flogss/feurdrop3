@@ -1,10 +1,10 @@
 import SwiftUI
 import DropKit
 
-/// Le controle des depots, comme sur le site : cinq compteurs qui filtrent,
-/// l'etat des verifications (et « Relancer »), la methode de chaque
-/// transporteur, puis la liste -- statut FeurDrop et parole du transporteur
-/// cote a cote. Toucher un colis ouvre sa chronologie.
+/// Le controle des depots, comme sur le site : « Tout vérifier » et sa
+/// progression, quatre compteurs qui filtrent, l'etat des verifications, la
+/// methode de chaque transporteur, puis la liste -- statut FeurDrop et parole
+/// du transporteur cote a cote. Toucher un colis ouvre sa chronologie.
 struct DepotsView: View {
     @Environment(AppModel.self) private var app
     @State private var largeur: CGFloat = 0
@@ -20,6 +20,7 @@ struct DepotsView: View {
                     EmptyStateView(symbol: "exclamationmark.triangle", title: "Contrôle indisponible", subtitle: erreur)
                         .surfaceCard()
                 } else if let vue = model.vue {
+                    CampagneCard()
                     compteurs(vue.compteurs)
                     PassageCard(vue: vue) { ouvreSerie() }
                     liste(vue)
@@ -66,11 +67,8 @@ struct DepotsView: View {
                 ForEach(toutes) { cat in compteur(cat, c) }
             }
         } else {
-            VStack(spacing: 10) {
-                compteur(.confirme, c)
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                    ForEach(toutes.dropFirst()) { cat in compteur(cat, c) }
-                }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(toutes) { cat in compteur(cat, c) }
             }
         }
     }
@@ -122,10 +120,9 @@ struct DepotsView: View {
     private func sousCompteur(_ cat: DepotCategorie, _ c: DepotsCompteurs) -> String {
         switch cat {
         case .confirme: "pris en charge par le transporteur"
-        case .nonConfirme: c.nonConfirmeHorsDelai > 0 ? "dont \(c.nonConfirmeHorsDelai) hors délai" : "étiquette seule, pas de scan"
-        case .aVerifier: "inconnu, refusé ou ambigu"
-        case .bloque: c.aConstater > 0 ? "dont \(c.aConstater) à constater" : "site protégé ou en pause"
-        case .anomalie: "incident ou incohérence"
+        case .nonConfirme: c.nonConfirmeHorsDelai > 0 ? "dont \(c.nonConfirmeHorsDelai) hors délai" : "étiquette seule"
+        case .aVerifier: "pas encore lu, inconnu ou en échec"
+        case .bloque: c.aConstater > 0 ? "dont \(c.aConstater) à constater" : "site protégé ou à la main"
         }
     }
 
@@ -357,7 +354,7 @@ private struct PassageCard: View {
         } label: {
             HStack(spacing: 6) {
                 if app.depots.relance || etat.enCours { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
-                Text("Relancer les vérifications en attente")
+                Text("Relancer La Poste")
             }
             .font(.subheadline.weight(.semibold))
             .fixedSize()
@@ -401,6 +398,7 @@ private struct PassageCard: View {
     private func methode(_ t: DepotTransporteurCompte, _ lp: DepotMethode?) -> some View {
         let (texte, symbole, couleur): (String, String, Color) =
             !t.automatique ? ("à la main", "pencil", Theme.violetLight)
+            : t.methode == "navigateur" ? (t.pause != nil ? ("bloqué", "lock.fill", Theme.warn) : ("lu sur le Mac", "desktopcomputer", Theme.teal))
             : lp?.configure != true ? ("non configuré", "info.circle", Theme.warn)
             : lp?.pause != nil ? ("en pause", "clock", Theme.warn)
             : ("automatique", "bolt.fill", Theme.teal)
@@ -454,7 +452,7 @@ private struct DepotRow: View {
                     Text("\(ligne.transporteur.nom) · \(ligne.expediteur)")
                         .lineLimit(1)
                     Spacer(minLength: 8)
-                    Text(statutTransporteur + (c.livre && c.cat != .anomalie ? " · livré" : ""))
+                    Text(statutTransporteur + (c.suite?.retour == true ? " · retour" : c.livre ? " · livré" : ""))
                         .lineLimit(1)
                 }
                 .font(.caption)
@@ -541,16 +539,14 @@ struct DepotBadge: View {
 }
 
 extension DepotCategorie {
-    /// confirme (sarcelle), non confirme (ambre), verification necessaire
-    /// (bleu), bloquee (lavande : rien n'a pu etre lu, pas une alerte),
-    /// anomalie (rouge) -- comme sur le site
+    /// poste confirme (sarcelle), non confirme (ambre), a verifier (bleu),
+    /// bloquee (lavande : rien n'a pu etre lu, pas une alerte) -- comme sur le site
     var couleur: Color {
         switch self {
         case .confirme: Theme.teal
         case .nonConfirme: Theme.warn
         case .aVerifier: Theme.info
         case .bloque: Theme.violetLight
-        case .anomalie: Theme.danger
         }
     }
 
@@ -560,7 +556,6 @@ extension DepotCategorie {
         case .nonConfirme: "clock"
         case .aVerifier: "magnifyingglass"
         case .bloque: "lock.fill"
-        case .anomalie: "exclamationmark.triangle.fill"
         }
     }
 }
