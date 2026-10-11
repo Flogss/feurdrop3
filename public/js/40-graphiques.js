@@ -125,7 +125,7 @@ function scrollChartSVG(items, { highlightBest = false, animate = false, spacing
           <stop offset="0" stop-color="#ded0ff" stop-opacity="0.9"/>
           <stop offset="1" stop-color="#9162ff" stop-opacity="0"/>
         </radialGradient>
-        <filter id="lueur${uid}" x="-10%" y="-60%" width="120%" height="220%">
+        <filter id="lueur${uid}" filterUnits="userSpaceOnUse" x="-40" y="-40" width="${W + 80}" height="${H + 80}">
           <feGaussianBlur stdDeviation="4" result="flou"/>
           <feMerge><feMergeNode in="flou"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
@@ -282,11 +282,11 @@ function scrollBarChartSVG(items, { highlightBest = false, animate = false, spac
           <stop offset="0.5" stop-color="#9162ff"/>
           <stop offset="1" stop-color="#6e40f0"/>
         </linearGradient>
-        <filter id="lueur-barre${uid}" x="-60%" y="-30%" width="220%" height="160%">
+        <filter id="lueur-barre${uid}" filterUnits="userSpaceOnUse" x="-40" y="-40" width="${W + 80}" height="${H + 80}">
           <feGaussianBlur stdDeviation="6" result="flou"/>
           <feMerge><feMergeNode in="flou"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
-        <filter id="flou-cap${uid}" x="-50%" y="-200%" width="200%" height="500%"><feGaussianBlur stdDeviation="3.5"/></filter>
+        <filter id="flou-cap${uid}" filterUnits="userSpaceOnUse" x="-40" y="-40" width="${W + 80}" height="${H + 80}"><feGaussianBlur stdDeviation="3.5"/></filter>
       </defs>
       ${chartGrid(W, padTop, plotH)}
       ${rects}

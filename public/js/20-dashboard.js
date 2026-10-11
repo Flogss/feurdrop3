@@ -719,7 +719,7 @@ function donutSVG(items, { animate, total, label, format, uid }) {
       const len = frac * circonference;
       const gap = items.length > 1 ? 3 : 0;
       const plein = Math.max(len - gap, 0.01);
-      const couleur = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
+      const couleur = it.autres ? "#5b5470" : CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
       const seg = `<circle class="donut-seg" data-i="${i}" data-plein="${plein}" data-debut="${offset / circonference}" data-frac="${frac}"
         style="--seg:${couleur}" cx="${cx}" cy="${cy}" r="${rayon}" fill="none" stroke="${couleur}"
         stroke-width="${epaisseur}" stroke-dasharray="${animate ? `0 ${circonference}` : `${plein} ${circonference}`}" stroke-dashoffset="${-offset}"
@@ -756,7 +756,7 @@ function donutLegend(items, { animate, total, format }) {
     .map((it, i) => {
       const frac = total ? it.value / total : 0;
       const pct = Math.round(frac * 100);
-      const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
+      const color = it.autres ? "#5b5470" : CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
       return `
       <div class="donut-legend-item${animate ? " cache" : ""}" data-i="${i}">
         <span class="donut-swatch" style="background:${color};box-shadow:0 0 10px ${color}"></span>
@@ -883,11 +883,19 @@ for (const id of ["donut-sender", "suivi-donut"]) {
   }
 }
 
+// Beaucoup d'expediteurs : les 9 premiers ont leur part, le reste est
+// regroupe en une seule (« 94 autres ») -- un anneau de 100 parts ne se lit pas.
+const DONUT_PARTS = 9;
 function renderDonut(bySender, animate, riche) {
-  const items = bySender
+  const tous = bySender
     .map((s) => ({ name: s.sender_name, value: s.dropped_value }))
     .filter((s) => s.value > 0)
     .sort((a, b) => b.value - a.value);
+  const items = tous.length > DONUT_PARTS + 1 ? tous.slice(0, DONUT_PARTS) : tous;
+  if (items.length < tous.length) {
+    const reste = tous.slice(DONUT_PARTS);
+    items.push({ name: `${reste.length} autres`, value: reste.reduce((s, x) => s + x.value, 0), autres: true });
+  }
   renderDonutInto($("donut-sender"), items, { animate, label: "total", format: euroCompact, riche });
 }
 

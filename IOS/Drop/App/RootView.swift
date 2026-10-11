@@ -70,7 +70,10 @@ struct RootView: View {
         }
         .overlay {
             if lancement {
-                LaunchSequence(cible: nil, onRevelation: revele, onFin: { lancement = false })
+                LaunchSequence(cible: nil, apresConnexion: app.vientDeSeConnecter, onRevelation: revele, onFin: {
+                    lancement = false
+                    app.vientDeSeConnecter = false
+                })
             }
         }
         .task { await demarre() }

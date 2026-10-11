@@ -129,11 +129,13 @@ struct MacRootView: View {
             if lancement {
                 LaunchSequence(
                     cible: cadreMarque,
+                    apresConnexion: app.vientDeSeConnecter,
                     onRevelation: revele,
                     onLogoPose: { marquePosee = true },
                     onFin: {
                         marquePosee = true
                         lancement = false
+                        app.vientDeSeConnecter = false
                     }
                 )
             }

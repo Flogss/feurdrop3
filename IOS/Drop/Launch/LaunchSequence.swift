@@ -1,28 +1,61 @@
 import SwiftUI
 
-/// Le calendrier du lancement (en secondes), le meme sur le site :
-/// - 0,12 : un point violet s'allume au loin, dans l'espace graphite ;
-/// - 0,30 → 1,30 : la meteorite plonge vers le centre sur une courbe, en
-///   accelerant (sa trainee s'allonge, les etoiles s'etirent, la lumiere se
-///   courbe autour d'elle), puis freine et se comprime juste avant l'impact ;
-/// - 1,30 : l'impact -- un eclair contenu, un trait anamorphique, deux ondes
-///   de choc qui font onduler le fond, des etincelles, une legere secousse ;
-/// - 1,30 → 2,20 : les fragments jaillissent, ralentissent, puis reviennent
-///   en spirale dessiner le symbole de DROP (la fleche qui tombe dans le
-///   bac : la chute de la meteorite) ;
-/// - 2,12 : la lumiere se condense en logo, un reflet le traverse ;
-/// - 2,45 : une onde de lumiere part du logo et ouvre l'interface, qui
-///   arrive avec ses propres animations ; le logo rejoint sa place dans la
-///   barre (Mac) ou se dissout dans l'onde (iPhone).
+/// Le calendrier du lancement (en secondes), le meme sur le site
+/// (public/lancement-rendu.js) :
+/// - 0,30 : au loin, une lumiere violette ; un point s'y allume ;
+/// - 0,70 → 2,30 : la meteorite se met en route, accelere, passe tout pres
+///   en traversant l'ecran (sa trainee s'etire et seme des braises, les
+///   etoiles filent, la camera la suit), puis freine et s'immobilise au
+///   centre en fin de spirale ;
+/// - 2,30 → 2,72 : immobile, la roche se fissure : la lumiere violette monte
+///   dans ses failles, en deux battements ;
+/// - 2,72 : elle se fragmente -- chaque piece se detache a son tour, une
+///   onde de choc douce (pas d'eclair blanc) ;
+/// - 2,94 → 3,72 : ses eclats deviennent energie et sont attires un par un
+///   sur le symbole de DROP, qu'ils tracent en arrivant ;
+/// - 3,72 : le symbole se condense en logo, un reflet le traverse ;
+/// - 4,00 : une onde part du logo et ouvre l'interface ; le logo rejoint sa
+///   place dans la barre (Mac) ou se dissout dans l'onde (iPhone).
 nonisolated enum Scenario {
-    static let point = 0.12
-    static let depart = 0.30
-    static let impact = 1.30
-    static let logo = 2.12
-    static let revelation = 2.45
-    static let dureeRevelation = 0.8
-    static let vol = 0.62
-    static let fin = 3.30
+    static let point = 0.3
+    static let depart = 0.7
+    static let arrivee = 2.3
+    static let eclat = 2.72
+    static let attraction = 2.94
+    static let logo = 3.72
+    static let revelation = 4.0
+    static let dureeRevelation = 0.95
+    static let vol = 0.66
+    static let fin = 5.05
+    /// le trace du symbole suit l'arrivee des eclats
+    static let traceDebut = attraction + 0.32
+    static let traceDuree = 0.42
+}
+
+/// Ou la sequence commence : la scene entiere (premiere ouverture, ou plus
+/// de 6 h apres la derniere), une entree courte (l'energie se rassemble en
+/// logo), ou juste apres le mot de passe (le coeur deja au centre).
+nonisolated enum EntreeLancement: Sendable {
+    case complet, retour, connexion
+
+    var instant: Double {
+        switch self {
+        case .complet: 0
+        case .retour: 2.95
+        case .connexion: 2.58
+        }
+    }
+
+    private static let cle = "drop.lancement.complet"
+
+    /// l'entree de cette ouverture (et la note, si c'est la scene entiere)
+    static func choisie(apresConnexion: Bool) -> EntreeLancement {
+        if apresConnexion { return .connexion }
+        let dernier = UserDefaults.standard.double(forKey: cle)
+        if dernier > 0, Date.now.timeIntervalSince1970 - dernier < 6 * 3600 { return .retour }
+        UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: cle)
+        return .complet
+    }
 }
 
 /// La sequence de lancement, par-dessus l'interface (deja prete dessous) :
@@ -34,6 +67,8 @@ struct LaunchSequence: View {
     /// ou poser le logo a la fin (coordonnees de la fenetre) ; sans cible,
     /// il se dissout dans l'onde
     var cible: CGRect?
+    /// juste apres le mot de passe : la sequence reprend au coeur de la meteorite
+    var apresConnexion = false
     var onRevelation: () -> Void
     var onLogoPose: () -> Void = {}
     var onFin: () -> Void
@@ -49,7 +84,7 @@ struct LaunchSequence: View {
     @Environment(\.displayScale) private var displayScale
 
     #if DEBUG
-    /// `-DropIntroFige 1.3` : la sequence arretee a cet instant (photos)
+    /// `-DropIntroFige 3.1` : la sequence arretee a cet instant (photos)
     nonisolated static let fige: Double? = {
         let v = UserDefaults.standard.double(forKey: "DropIntroFige")
         return v > 0 ? v : nil
@@ -85,7 +120,13 @@ struct LaunchSequence: View {
             }
             #endif
             // mouvements reduits : pas de meteorite, le logo puis l'onde
-            recommence(a: reduceMotion ? Scenario.logo : 0)
+            var entree = EntreeLancement.choisie(apresConnexion: apresConnexion)
+            #if DEBUG
+            if Self.fige != nil { entree = .complet }
+            #endif
+            let depart = reduceMotion ? Scenario.logo - 0.15 : entree.instant
+            moteur.entree(depart)
+            recommence(a: depart)
             moteur.demarre()
         }
         .onDisappear { moteur.arrete() }
@@ -102,7 +143,7 @@ struct LaunchSequence: View {
 
     /// toucher pendant la sequence : on passe au logo
     private func accelere() {
-        if Date.now.timeIntervalSince(debut) < Scenario.logo - 0.05 { recommence(a: Scenario.logo) }
+        if Date.now.timeIntervalSince(debut) < Scenario.logo - 0.25 { recommence(a: Scenario.logo - 0.25) }
     }
 
     private func recommence(a instant: Double) {
@@ -110,8 +151,8 @@ struct LaunchSequence: View {
         moteur.recommence(a: instant)
     }
 
-    /// Les moments ou l'app reagit : le retour tactile de l'impact et du
-    /// logo, l'ouverture de l'interface, la pose du logo, la fin.
+    /// Les moments ou l'app reagit : le retour tactile de la fragmentation et
+    /// du logo, l'ouverture de l'interface, la pose du logo, la fin.
     private func deroule() async {
         #if DEBUG
         if let fige = Self.fige {
@@ -127,8 +168,8 @@ struct LaunchSequence: View {
             return !Task.isCancelled
         }
         let deja = Date.now.timeIntervalSince(debut)
-        if deja < Scenario.impact {
-            guard await attends(Scenario.impact) else { return }
+        if deja < Scenario.eclat {
+            guard await attends(Scenario.eclat) else { return }
             Haptics.impact()
         }
         guard await attends(Scenario.logo - 0.05) else { return }
@@ -150,11 +191,12 @@ struct LaunchSequence: View {
 
     // MARK: Le logo
 
-    /// Le logo : il se condense dans la lumiere des particules, un reflet le
-    /// traverse, puis il rejoint la barre ou se dissout dans l'onde.
+    /// Le logo : il se condense sous les traits de lumiere (flou, surexpose,
+    /// puis net), un reflet le traverse, puis il rejoint la barre ou se
+    /// dissout dans l'onde.
     @ViewBuilder
     private func logo(_ t: Double, _ d: DecorLancement, _ origine: CGPoint) -> some View {
-        let apparition = lisse((t - Scenario.logo) / 0.24)
+        let apparition = lisse((t - Scenario.logo) / 0.36)
         if apparition > 0 {
             let r = t - Scenario.revelation
             let geste = logoApres(r, d, origine)
@@ -164,11 +206,13 @@ struct LaunchSequence: View {
                     RadialGradient(colors: [Theme.violet.opacity(0.55 * apparition * geste.lueur), .clear], center: .center, startRadius: 0, endRadius: geste.cote * 1.1)
                         .frame(width: geste.cote * 2.6, height: geste.cote * 2.6)
                     MarqueDrop(cote: geste.cote)
-                        .overlay { Reflet(progres: (t - (Scenario.logo + 0.12)) / 0.42, cote: geste.cote) }
+                        .overlay { Reflet(progres: (t - (Scenario.logo + 0.14)) / 0.46, cote: geste.cote) }
                         .shadow(color: Theme.violet.opacity(0.8 * geste.lueur), radius: geste.cote * 0.22, y: geste.cote * 0.05)
-                        .scaleEffect(geste.echelle * (0.86 + 0.14 * sortDouce(apparition)))
+                        .brightness(0.5 * (1 - apparition))
+                        .scaleEffect(geste.echelle * (0.9 + 0.1 * sortDouce(apparition)))
+                        .rotationEffect(.degrees(geste.rotation))
                 }
-                .blur(radius: geste.flou)
+                .blur(radius: geste.flou + 8 * (1 - apparition))
                 .opacity(apparition * geste.opacite)
                 .position(geste.centre)
                 .allowsHitTesting(false)
@@ -183,6 +227,7 @@ struct LaunchSequence: View {
         var flou: CGFloat = 0
         var opacite: Double = 1
         var lueur: Double = 1
+        var rotation: Double = 0
     }
 
     private func logoApres(_ r: Double, _ d: DecorLancement, _ origine: CGPoint) -> Geste {
@@ -191,13 +236,15 @@ struct LaunchSequence: View {
         if let cible {
             // il vole jusqu'a la barre, en arc, et se pose a la taille de la marque
             let f = entreeSortie(min(r / Scenario.vol, 1))
+            let arc = sin(.pi * f)
             let arrivee = CGPoint(x: cible.midX - origine.x, y: cible.midY - origine.y)
             g.centre = CGPoint(
                 x: d.centre.x + (arrivee.x - d.centre.x) * f,
-                y: d.centre.y + (arrivee.y - d.centre.y) * f - sin(.pi * f) * 50 * d.k
+                y: d.centre.y + (arrivee.y - d.centre.y) * f - arc * 56 * d.k
             )
             g.cote = d.cote + (cible.width - d.cote) * f
-            g.echelle = 1 + 0.06 * sin(.pi * f)
+            g.echelle = 1 + 0.07 * arc
+            g.rotation = -8 * arc
             g.lueur = 1 - 0.6 * f
             g.opacite = r >= Scenario.vol ? 0 : 1
         } else {
@@ -241,7 +288,7 @@ private final class CacheDecor {
     }
 }
 
-// MARK: - Le decor : la course et les particules
+// MARK: - Le decor : la course, la roche, les eclats
 
 nonisolated private func lisse(_ x: Double) -> Double { lisseLancement(x) }
 
@@ -258,215 +305,282 @@ nonisolated private func sortDouce(_ x: Double) -> Double {
     1 - pow(1 - min(max(x, 0), 1), 3)
 }
 
-/// un tirage stable dans 0...1
+/// un tirage stable dans 0...1 (le meme que le site)
 nonisolated private func tirage(_ i: Int, _ k: Int) -> Double {
     let x = sin(Double(i) * 12.9898 + Double(k) * 78.233) * 43758.5453
     return x - x.rounded(.down)
+}
+
+/// Catmull-Rom centripete : une courbe douce qui passe par chaque point
+/// (x, y, profondeur)
+nonisolated private func courbe(_ points: [SIMD3<Double>], parSegment: Int) -> [SIMD3<Double>] {
+    let P = [2 * points[0] - points[1]] + points + [2 * points[points.count - 1] - points[points.count - 2]]
+    func pas(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Double { max(sqrt(hypot(b.x - a.x, b.y - a.y)), 1e-3) }
+    func mel(_ a: SIMD3<Double>, _ b: SIMD3<Double>, _ ta: Double, _ tb: Double, _ t: Double) -> SIMD3<Double> {
+        a * ((tb - t) / (tb - ta)) + b * ((t - ta) / (tb - ta))
+    }
+    var sortie: [SIMD3<Double>] = []
+    for i in 1..<(P.count - 2) {
+        let (p0, p1, p2, p3) = (P[i - 1], P[i], P[i + 1], P[i + 2])
+        let t0 = 0.0, t1 = t0 + pas(p0, p1), t2 = t1 + pas(p1, p2), t3 = t2 + pas(p2, p3)
+        for j in 0..<parSegment {
+            let t = t1 + (t2 - t1) * Double(j) / Double(parSegment)
+            let A1 = mel(p0, p1, t0, t1, t), A2 = mel(p1, p2, t1, t2, t), A3 = mel(p2, p3, t2, t3, t)
+            let B1 = mel(A1, A2, t0, t2, t), B2 = mel(A2, A3, t1, t3, t)
+            sortie.append(mel(B1, B2, t1, t2, t))
+        }
+    }
+    sortie.append(points[points.count - 1])
+    return sortie
+}
+
+/// l'avancee le long de la course : un depart doux, une pleine vitesse vers
+/// 45 % du trajet, puis un long freinage jusqu'a l'arret
+nonisolated private func profil(_ tau: Double) -> Double {
+    (1 - cos(.pi * pow(min(max(tau, 0), 1), 0.8))) / 2
 }
 
 nonisolated struct DecorLancement: Sendable {
     let taille: CGSize
     /// l'echelle : 1 sur un telephone, plus sur un grand ecran
     let k: CGFloat
-    let depart: CGPoint
-    let controle: CGPoint
     let centre: CGPoint
     /// le cote du logo
     let cote: CGFloat
-    let diag: CGFloat
-    let particules: [Particule]
-    let braises: [Braise]
-    let etincelles: [Etincelle]
+    /// la roche immobile au centre, et a pleine profondeur
+    let R0: Double
+    let Rmax: Double
+    let zFin: Double
+    /// la course, echantillonnee : x, y, profondeur, distance parcourue
+    let X: [Double], Y: [Double], Z: [Double], L: [Double]
+    var longueur: Double { L[L.count - 1] }
+    /// la lumiere au loin, d'ou vient la meteorite
+    var lointain: CGPoint { CGPoint(x: X[0], y: Y[0]) }
 
-
-    struct Particule {
-        let cible: CGPoint
-        let direction: CGVector
-        let elan: CGFloat
-        let debut: Double
-        let duree: Double
-        let spirale: CGFloat
-        let rayon: CGFloat
-        let blanche: Bool
-    }
-
-    struct Braise {
-        let naissance: Double
-        let position: CGPoint
-        let vitesse: CGVector
-        let vie: Double
-        let rayon: CGFloat
-        let eclat: Double
-    }
-
-    struct Etincelle {
-        let direction: CGVector
-        let elan: CGFloat
-        let vie: Double
-        let largeur: CGFloat
-    }
+    /// pour la carte graphique, en paquets de quatre nombres
+    let eclats: [SIMD4<Float>]      // 4 par eclat
+    let braises: [SIMD4<Float>]     // 2 par braise
+    let etincelles: [SIMD4<Float>]  // 2 par etincelle
+    let segments: [SIMD4<Float>]    // 2 par segment du symbole
 
     struct Meteore {
         var position: CGPoint = .zero
+        var rayon: Double = 0
         var intensite: Double = 0
-        var halo: Double = 1
-        var direction = CGVector(dx: 1, dy: 0)
+        var direction = CGVector(dx: -1, dy: 0)
         var vitesse: Double = 0
         var profondeur: Double = 0
+        var rotation: Double = 0
+        var fissures: Double = 0
+        var dissolution: Double = 0
+        var chaleur: Double = 0
     }
 
     init(taille: CGSize) {
         self.taille = taille
-        let w = taille.width, h = taille.height
+        let w = Double(taille.width), h = Double(taille.height)
         let petit = min(w, h)
         let k = min(max(petit / 400, 0.9), 1.7)
         self.k = k
-        let depart = CGPoint(x: 0.10 * w, y: 0.15 * h)
-        self.depart = depart
-        let controle = CGPoint(x: 0.74 * w, y: 0.02 * h)
-        self.controle = controle
         let centre = CGPoint(x: 0.5 * w, y: (w > h ? 0.47 : 0.42) * h)
         self.centre = centre
         let cote = min(max(petit * 0.30, 96), 150)
         self.cote = cote
-        diag = hypot(w, h)
+        R0 = cote * 0.25
+        zFin = 0.62
+        Rmax = R0 / zFin
 
-        // les particules : 45 % sur le contour du carre, 55 % sur le symbole
-        let nombre = w > 900 ? 480 : 340
+        // la spirale : du fond (en haut a droite), tout pres en traversant,
+        // puis le freinage jusqu'au centre
+        let portrait = h > w * 1.15
+        let F: [SIMD3<Double>] = portrait
+            ? [[0.86, 0.1, 0.04], [0.66, 0.15, 0.14], [0.26, 0.26, 0.58], [0.13, 0.45, 0.92], [0.27, 0.62, 1.0], [0.66, 0.6, 0.86], [0.68, 0.5, 0.72]]
+            : [[0.86, 0.14, 0.04], [0.64, 0.19, 0.14], [0.31, 0.3, 0.56], [0.15, 0.55, 0.92], [0.3, 0.8, 1.0], [0.58, 0.79, 0.86], [0.64, 0.61, 0.72]]
+        let points = F.map { SIMD3<Double>($0.x * w, $0.y * h, $0.z) } + [SIMD3<Double>(Double(centre.x), Double(centre.y), 0.62)]
+        let echant = courbe(points, parSegment: 70)
+        var X: [Double] = [], Y: [Double] = [], Z: [Double] = [], L: [Double] = []
+        for (i, p) in echant.enumerated() {
+            X.append(p.x); Y.append(p.y); Z.append(p.z)
+            L.append(i == 0 ? 0 : L[i - 1] + hypot(p.x - X[i - 1], p.y - Y[i - 1]))
+        }
+        self.X = X; self.Y = Y; self.Z = Z; self.L = L
+        let longueur = L[L.count - 1]
+        func surCourse(_ s0: Double) -> SIMD3<Double> {
+            let s = min(max(s0, 0), longueur)
+            var a = 0, b = L.count - 1
+            while b - a > 1 {
+                let m = (a + b) / 2
+                if L[m] < s { a = m } else { b = m }
+            }
+            let f = L[b] > L[a] ? (s - L[a]) / (L[b] - L[a]) : 0
+            return SIMD3(X[a] + (X[b] - X[a]) * f, Y[a] + (Y[b] - Y[a]) * f, Z[a] + (Z[b] - Z[a]) * f)
+        }
+        func aInstant(_ t: Double) -> SIMD3<Double> {
+            surCourse(profil((t - Scenario.depart) / (Scenario.arrivee - Scenario.depart)) * longueur)
+        }
+
+        // les eclats de la roche : chacun part d'un point de la roche, jaillit,
+        // ralentit, devient energie, puis rejoint sa place sur le symbole
+        let nombre = w > 900 ? 440 : 320
         let surContour = Int(Double(nombre) * 0.45)
-        let cibles = ContourMarque.points(surContour)
-            + GlypheDrop.points(nombre - surContour).map { CGPoint(x: $0.x * 0.56, y: $0.y * 0.56) }
-        particules = cibles.enumerated().map { i, c in
-            let angle = tirage(i, 1) * 2 * .pi
-            return Particule(
-                cible: c,
-                direction: CGVector(dx: cos(angle), dy: sin(angle)),
-                elan: (200 + 560 * tirage(i, 2)) * k,
-                debut: Scenario.impact + 0.10 + 0.30 * tirage(i, 3),
-                duree: 0.48 + 0.24 * tirage(i, 4),
-                spirale: (0.18 + 0.25 * tirage(i, 5)) * (tirage(i, 6) < 0.5 ? -1 : 1),
-                rayon: (0.75 + 1.1 * tirage(i, 7)) * k,
-                blanche: tirage(i, 8) < 0.28
-            )
+        let cibles = ContourMarque.points(surContour) + GlypheDrop.points(nombre - surContour).map { CGPoint(x: $0.x * 0.56, y: $0.y * 0.56) }
+        var E: [SIMD4<Float>] = []
+        E.reserveCapacity(nombre * 4)
+        for (i, c) in cibles.enumerated() {
+            let a = tirage(i, 1) * 2 * .pi, r = sqrt(tirage(i, 2)) * 0.92
+            let dev = (tirage(i, 3) - 0.5) * 1.1
+            let s = Double(i) / Double(nombre - 1)
+            E.append(SIMD4(Float(cos(a) * r), Float(sin(a) * r), Float(cos(a + dev)), Float(sin(a + dev))))
+            E.append(SIMD4(Float((80 + 560 * pow(tirage(i, 4), 1.7)) * k), Float((tirage(i, 5) - 0.5) * 12),
+                           Float((1.3 + 1.6 * tirage(i, 6) + 5.5 * pow(tirage(i, 14), 6)) * k), Float(tirage(i, 7))))
+            E.append(SIMD4(Float(c.x), Float(c.y), Float(Scenario.attraction + s * 0.34 + 0.04 * tirage(i, 8)), Float(0.32 + 0.07 * tirage(i, 9))))
+            E.append(SIMD4(Float((0.16 + 0.3 * tirage(i, 10)) * (tirage(i, 11) < 0.82 ? 1 : -1)), tirage(i, 12) < 0.3 ? 1 : 0, Float(s), Float(0.6 + 0.8 * tirage(i, 13))))
         }
+        eclats = E
 
-        // les etincelles de l'impact
-        etincelles = (0..<48).map { i in
-            let angle = (Double(i) + tirage(i, 11)) / 48 * 2 * .pi
-            return Etincelle(
-                direction: CGVector(dx: cos(angle), dy: sin(angle)),
-                elan: (380 + 760 * tirage(i, 12)) * k,
-                vie: 0.45 + 0.4 * tirage(i, 13),
-                largeur: (0.7 + 0.8 * tirage(i, 14)) * k
-            )
+        // quelques etincelles a l'eclat : de l'elan, pas un feu d'artifice
+        var T: [SIMD4<Float>] = []
+        for i in 0..<28 {
+            let a = (Double(i) + tirage(i, 11)) / 28 * 2 * .pi
+            T.append(SIMD4(Float(cos(a)), Float(sin(a)), Float((300 + 520 * tirage(i, 12)) * k), Float(0.4 + 0.35 * tirage(i, 13))))
+            T.append(SIMD4(Float((0.6 + 0.6 * tirage(i, 14)) * k), 0, 0, 0))
         }
+        etincelles = T
 
-        // les braises semees pendant la course
-        var semees: [Braise] = []
-        let s = depart, q = controle, c = centre
-        func point(_ u: Double) -> CGPoint {
-            let v = 1 - u
-            return CGPoint(x: v * v * s.x + 2 * u * v * q.x + u * u * c.x, y: v * v * s.y + 2 * u * v * q.y + u * u * c.y)
+        // les braises semees par la trainee, plus nombreuses quand elle va vite
+        let nB = w > 900 ? 120 : 84
+        var B: [SIMD4<Float>] = []
+        var pose = 0, i = 0
+        while pose < nB && i < nB * 6 {
+            defer { i += 1 }
+            let tau = 0.06 + 0.86 * tirage(i, 21)
+            let t = Scenario.depart + tau * (Scenario.arrivee - Scenario.depart)
+            let p0 = aInstant(t - 0.01), p1 = aInstant(t)
+            let v = hypot(p1.x - p0.x, p1.y - p0.y) * 100
+            if tirage(i, 22) > min(v / (0.9 * max(w, h)), 1) * 1.1 + 0.08 { continue }
+            let l = max(hypot(p1.x - p0.x, p1.y - p0.y), 1e-3)
+            let dx = (p1.x - p0.x) / l, dy = (p1.y - p0.y) / l
+            let recul = (40 + 170 * tirage(i, 23)) * k, cote2 = (-110 + 220 * tirage(i, 24)) * k
+            B.append(SIMD4(Float(t), Float(p1.x), Float(p1.y), Float(0.45 + 0.65 * tirage(i, 25))))
+            B.append(SIMD4(Float(-dx * recul - dy * cote2), Float(-dy * recul + dx * cote2),
+                           Float((0.55 + 1.1 * tirage(i, 26)) * k * (0.45 + 0.55 * min(p1.z, 1))), Float(0.35 + 0.65 * tirage(i, 27))))
+            pose += 1
         }
-        for i in 0..<72 {
-            let tau = 0.08 + 0.9 * pow(tirage(i, 21), 0.7)
-            let naissance = Scenario.depart + tau * (Scenario.impact - Scenario.depart)
-            let u = DecorLancement.progression(naissance)
-            let p = point(u)
-            let avant = point(max(u - 0.01, 0))
-            var dir = CGVector(dx: p.x - avant.x, dy: p.y - avant.y)
-            let l = max(hypot(dir.dx, dir.dy), 0.001)
-            dir = CGVector(dx: dir.dx / l, dy: dir.dy / l)
-            let recul = (30 + 160 * tirage(i, 22)) * k
-            let cote = (-150 + 300 * tirage(i, 23)) * k
-            let z = DecorLancement.profondeur(u)
-            semees.append(Braise(
-                naissance: naissance,
-                position: p,
-                vitesse: CGVector(dx: -dir.dx * recul - dir.dy * cote, dy: -dir.dy * recul + dir.dx * cote),
-                vie: 0.25 + 0.4 * tirage(i, 24),
-                rayon: (0.5 + 1.0 * tirage(i, 25)) * k * (0.4 + 0.6 * z),
-                eclat: 0.35 + 0.65 * tirage(i, 26)
-            ))
+        braises = B
+
+        // le symbole trace en lumiere : contour, puis tige, pointe et bac, dans
+        // l'ordre ou les eclats arrivent
+        var segments: [SIMD4<Float>] = []
+        func ajoute(_ traits: [[CGPoint]], echelle: CGFloat, glyphe: Bool, de: Double, a: Double) {
+            let paires = traits.flatMap { t in zip(t, t.dropFirst()).map { ($0.0, $0.1) } }
+            let total = paires.reduce(0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
+            var cumul: CGFloat = 0
+            for (p, q) in paires {
+                let l = hypot(q.x - p.x, q.y - p.y)
+                segments.append(SIMD4(Float(p.x * echelle), Float(p.y * echelle), Float(q.x * echelle), Float(q.y * echelle)))
+                segments.append(SIMD4(Float(de + (a - de) * Double(cumul / total)), Float(de + (a - de) * Double((cumul + l) / total)), glyphe ? 1 : 0, 0))
+                cumul += l
+            }
         }
-        braises = semees
+        ajoute([ContourMarque.trait()], echelle: 1, glyphe: false, de: 0, a: 0.45)
+        ajoute(GlypheDrop.traits(), echelle: 0.56, glyphe: true, de: 0.45, a: 1)
+        self.segments = segments
     }
 
     // MARK: La course
 
-    /// l'avancee sur la courbe : elle accelere, puis freine avant l'impact
-    static func progression(_ t: Double) -> Double {
-        let tau = min(max((t - Scenario.depart) / (Scenario.impact - Scenario.depart), 0), 1)
-        return 1 - pow(1 - pow(tau, 2.4), 1.7)
-    }
-
-    /// la profondeur : un point au loin, puis tout pres
-    static func profondeur(_ u: Double) -> Double { 0.10 + 0.90 * pow(u, 1.6) }
-
-    func point(_ u: Double) -> CGPoint {
-        let v = 1 - u
-        return CGPoint(
-            x: v * v * depart.x + 2 * u * v * controle.x + u * u * centre.x,
-            y: v * v * depart.y + 2 * u * v * controle.y + u * u * centre.y
-        )
-    }
-
-    func meteore(_ t: Double) -> Meteore {
-        guard t >= Scenario.point, t < Scenario.impact else { return Meteore() }
-        var m = Meteore()
-        let u = Self.progression(t)
-        m.position = point(u)
-        m.profondeur = Self.profondeur(u)
-        if t < Scenario.depart {
-            // le point lointain s'allume, scintille
-            let f = lisse((t - Scenario.point) / 0.14)
-            m.intensite = 0.8 * f * (1 + 0.6 * exp(-(t - Scenario.point) / 0.07))
-            let tangente = CGVector(dx: controle.x - depart.x, dy: controle.y - depart.y)
-            let l = hypot(tangente.dx, tangente.dy)
-            m.direction = CGVector(dx: tangente.dx / l, dy: tangente.dy / l)
-        } else {
-            let avant = point(Self.progression(t - 1.0 / 120))
-            let v = CGVector(dx: (m.position.x - avant.x) * 120, dy: (m.position.y - avant.y) * 120)
-            let vitesse = hypot(v.dx, v.dy)
-            if vitesse > 1 { m.direction = CGVector(dx: v.dx / vitesse, dy: v.dy / vitesse) }
-            m.vitesse = min(vitesse / (1.4 * max(taille.width, taille.height)), 1)
-            let compression = lisse((t - (Scenario.impact - 0.13)) / 0.13)
-            let scintille = 1 + 0.07 * sin(t * 53) + 0.05 * sin(t * 31 + 1)
-            m.intensite = (0.78 + 0.5 * m.vitesse) * scintille * (1 + 1.4 * compression)
+    func surCourse(_ s0: Double) -> SIMD3<Double> {
+        let s = min(max(s0, 0), longueur)
+        var a = 0, b = L.count - 1
+        while b - a > 1 {
+            let m = (a + b) / 2
+            if L[m] < s { a = m } else { b = m }
         }
-        let compression = lisse((t - (Scenario.impact - 0.13)) / 0.13)
-        m.halo = 80 * m.profondeur * k * (1 + 0.25 * compression)
+        let f = L[b] > L[a] ? (s - L[a]) / (L[b] - L[a]) : 0
+        return SIMD3(X[a] + (X[b] - X[a]) * f, Y[a] + (Y[b] - Y[a]) * f, Z[a] + (Z[b] - Z[a]) * f)
+    }
+
+    func aInstant(_ t: Double) -> SIMD3<Double> {
+        surCourse(profil((t - Scenario.depart) / (Scenario.arrivee - Scenario.depart)) * longueur)
+    }
+
+    /// l'etat de la meteorite a l'instant t
+    func meteore(_ t: Double) -> Meteore {
+        var m = Meteore(position: lointain)
+        guard t >= Scenario.point - 0.05, t <= Scenario.eclat + 0.3 else { return m }
+        m.rotation = 0.85 * t + 0.5 * sin(0.7 * t)
+        if t < Scenario.depart {
+            // le point lointain s'allume, palpite
+            let p0 = aInstant(Scenario.depart), p1 = surCourse(4)
+            let l = max(hypot(p1.x - p0.x, p1.y - p0.y), 1e-3)
+            m.position = CGPoint(x: p0.x, y: p0.y)
+            m.profondeur = p0.z
+            m.direction = CGVector(dx: (p1.x - p0.x) / l, dy: (p1.y - p0.y) / l)
+            m.intensite = lisse((t - Scenario.point) / 0.3) * (0.62 + 0.08 * sin(t * 11))
+        } else if t < Scenario.arrivee {
+            let p = aInstant(t), pa = aInstant(t - 1.0 / 120)
+            let vx = (p.x - pa.x) * 120, vy = (p.y - pa.y) * 120, v = hypot(vx, vy)
+            m.position = CGPoint(x: p.x, y: p.y)
+            m.profondeur = p.z
+            if v > 1 {
+                m.direction = CGVector(dx: vx / v, dy: vy / v)
+            } else {
+                let pb = aInstant(t - 0.05)
+                let l = max(hypot(p.x - pb.x, p.y - pb.y), 1e-3)
+                m.direction = CGVector(dx: (p.x - pb.x) / l, dy: (p.y - pb.y) / l)
+            }
+            m.vitesse = min(v / (1.05 * max(Double(taille.width), Double(taille.height))), 1)
+            let scintille = 1 + 0.06 * sin(t * 47) + 0.04 * sin(t * 29 + 1)
+            m.intensite = (0.66 + 0.6 * m.vitesse) * scintille * (0.62 + 0.38 * lisse((t - Scenario.depart) / 0.25))
+            m.chaleur = 0.35 + 0.65 * m.vitesse
+        } else {
+            // immobile au centre : elle flotte a peine, se fissure, la lumiere
+            // monte en deux battements, puis elle se fragmente
+            let h = t - Scenario.arrivee
+            m.position = CGPoint(x: centre.x, y: centre.y + sin(h * 3.2) * 1.2 * k * (1 - lisse((t - Scenario.eclat + 0.1) / 0.1)))
+            m.profondeur = zFin
+            let pb = aInstant(Scenario.arrivee - 0.08)
+            let l = max(hypot(m.position.x - pb.x, m.position.y - pb.y), 1e-3)
+            m.direction = CGVector(dx: (m.position.x - pb.x) / l, dy: (m.position.y - pb.y) / l)
+            m.fissures = lisse((h - 0.03) / (Scenario.eclat - Scenario.arrivee - 0.05))
+            let battement = 0.22 * exp(-pow(t - (Scenario.eclat - 0.24), 2) / 0.0012) + 0.32 * exp(-pow(t - (Scenario.eclat - 0.06), 2) / 0.0012)
+            m.intensite = 0.78 + 0.35 * m.fissures + battement
+            m.chaleur = 0.25 + 0.3 * (1 - lisse(h / 0.3))
+            m.dissolution = lisse((t - Scenario.eclat) / 0.17)
+        }
+        m.rayon = max(Rmax * m.profondeur, 0.5)
         return m
     }
 
+    static let pointsTrainee = 28
+
     /// la trainee : les dernieres positions, de la tete vers la queue
-    func trainee(_ t: Double) -> [Float] {
-        let n = 26
-        guard t > Scenario.depart, t < Scenario.impact else { return [Float](repeating: 0, count: 8) }
-        let retrait = 1 - lisse((t - (Scenario.impact - 0.14)) / 0.14)
-        let vitesse = meteore(t).vitesse
-        let monte = min((t - Scenario.depart) / 0.12, 1)
+    func trainee(_ t: Double, vitesse: Double) -> [Float] {
+        let n = Self.pointsTrainee
+        guard t > Scenario.depart, t < Scenario.arrivee + 0.35 else { return [Float](repeating: 0, count: 8) }
+        let retrait = 1 - lisse((t - (Scenario.arrivee - 0.2)) / 0.5)
+        let monte = min((t - Scenario.depart) / 0.18, 1)
+        let tTete = min(t, Scenario.arrivee)
         var sortie: [Float] = []
         sortie.reserveCapacity(n * 4)
         for j in 0..<n {
-            let tj = max(t - Double(j) * 0.0125 * retrait, Scenario.depart)
-            let u = Self.progression(tj)
-            let p = point(u)
+            let tj = max(tTete - Double(j) * 0.0135, Scenario.depart)
+            let p = aInstant(tj)
             let f = 1 - Double(j) / Double(n - 1)
             sortie += [
                 Float(p.x), Float(p.y),
-                Float(7.5 * k * Self.profondeur(u) * pow(f, 0.9) + 0.4),
-                Float(pow(f, 1.7) * (0.3 + 0.95 * vitesse) * monte),
+                Float(Rmax * p.z * 0.62 * pow(f, 0.75) * (0.45 + 0.55 * vitesse) + 0.5),
+                Float(pow(f, 1.5) * (0.25 + 1.05 * vitesse) * monte * retrait),
             ]
         }
         return sortie
     }
 
-    /// une secousse breve a l'impact (quelques points, amortie)
+    /// une secousse breve a l'eclat (quelques points, amortie)
     func secousse(_ a: Double) -> CGPoint {
-        guard a > 0, a < 0.45 else { return .zero }
-        let amplitude = 3.0 * k * exp(-a / 0.09)
-        return CGPoint(x: sin(a * 95) * amplitude, y: cos(a * 73) * amplitude * 0.8)
+        guard a > 0, a < 0.4 else { return .zero }
+        let amplitude = 2.2 * k * exp(-a / 0.08)
+        return CGPoint(x: sin(a * 90) * amplitude, y: cos(a * 71) * amplitude * 0.8)
     }
 
     /// l'onde qui ouvre l'interface : rayon, largeur du bord, eclat du bord
@@ -479,45 +593,5 @@ nonisolated struct DecorLancement: Sendable {
         // sur un telephone et sur un grand ecran
         let coin = hypot(max(centre.x, taille.width - centre.x), max(centre.y, taille.height - centre.y))
         return (cote * 0.6 + e * (coin + bord * 1.3), bord, pow(1 - s, 1.3) * 0.95)
-    }
-
-    // MARK: Pour la carte graphique
-
-    /// les particules, braises, etincelles et segments du symbole, en
-    /// paquets de quatre nombres (voir les structures des shaders)
-    func donneesGPU() -> (particules: [SIMD4<Float>], braises: [SIMD4<Float>], etincelles: [SIMD4<Float>], segments: [SIMD4<Float>]) {
-        var p: [SIMD4<Float>] = []
-        for x in particules {
-            p.append(SIMD4(Float(x.cible.x), Float(x.cible.y), Float(x.direction.dx), Float(x.direction.dy)))
-            p.append(SIMD4(Float(x.elan), Float(x.debut), Float(x.duree), Float(x.spirale)))
-            p.append(SIMD4(Float(x.rayon), x.blanche ? 1 : 0, 0, 0))
-        }
-        var b: [SIMD4<Float>] = []
-        for x in braises {
-            b.append(SIMD4(Float(x.naissance), Float(x.position.x), Float(x.position.y), Float(x.vie)))
-            b.append(SIMD4(Float(x.vitesse.dx), Float(x.vitesse.dy), Float(x.rayon), Float(x.eclat)))
-        }
-        var e: [SIMD4<Float>] = []
-        for x in etincelles {
-            e.append(SIMD4(Float(x.direction.dx), Float(x.direction.dy), Float(x.elan), Float(x.vie)))
-            e.append(SIMD4(Float(x.largeur), 0, 0, 0))
-        }
-        // le symbole : le contour (trace sur son pourtour), puis le glyphe
-        // (tige, pointe, bac, l'un apres l'autre), en parts de leur trace
-        var segments: [SIMD4<Float>] = []
-        func ajoute(_ traits: [[CGPoint]], echelle: CGFloat, glyphe: Bool) {
-            let paires = traits.flatMap { t in zip(t, t.dropFirst()).map { ($0.0, $0.1) } }
-            let total = paires.reduce(0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
-            var cumul: CGFloat = 0
-            for (a, b) in paires {
-                let l = hypot(b.x - a.x, b.y - a.y)
-                segments.append(SIMD4(Float(a.x * echelle), Float(a.y * echelle), Float(b.x * echelle), Float(b.y * echelle)))
-                segments.append(SIMD4(Float(cumul / total), Float((cumul + l) / total), glyphe ? 1 : 0, 0))
-                cumul += l
-            }
-        }
-        ajoute([ContourMarque.trait()], echelle: 1, glyphe: false)
-        ajoute(GlypheDrop.traits(), echelle: 0.56, glyphe: true)
-        return (p, b, e, segments)
     }
 }

@@ -53,6 +53,9 @@ final class AppModel {
     var connecte = false
     /// pourquoi l'ecran de connexion est revenu ("Session expirée…")
     var messageConnexion: String?
+    /// le mot de passe vient d'etre accepte : le lancement reprend au coeur
+    /// de la meteorite (la ou l'ecran de connexion l'a laissee)
+    var vientDeSeConnecter = false
     /// cette session : jusqu'a quand, combien d'appareils (les reglages)
     private(set) var session: InfoSession?
 
@@ -81,6 +84,15 @@ final class AppModel {
         let enregistre = UserDefaults.standard.string(forKey: "drop.serveur").flatMap(URL.init(string:))
         let adresse = enregistre ?? Self.defaultServer
         serverURL = adresse
+        #if DEBUG
+        // verification au simulateur contre un serveur LOCAL de test :
+        // `-drop.serveur http://localhost:3001 -DropJetonTest <jeton>` pose une
+        // session que ce serveur a deja delivree (rien n'est contourne : il
+        // la verifie a chaque requete). Jamais pour un autre serveur.
+        if let jeton = UserDefaults.standard.string(forKey: "DropJetonTest"), adresse.host() == "localhost" || adresse.host() == "127.0.0.1" {
+            Trousseau.garde(jeton, pour: adresse)
+        }
+        #endif
         api = DropAPI(baseURL: adresse)
         connecte = api.client.jeton != nil
         #if DEBUG
@@ -102,12 +114,20 @@ final class AppModel {
             api.client.definitJeton(s.jeton)
             reachedServer()
             messageConnexion = nil
-            withAnimation(Theme.spring) { connecte = true }
+            // le jeton est garde : l'ecran de connexion joue sa sortie, puis
+            // appelle `entreApresConnexion`
             return nil
         } catch {
             if let erreur = error as? APIError, erreur.isNetwork { return "Serveur injoignable. Vérifie la connexion et réessaie." }
             return (error as? LocalizedError)?.errorDescription ?? "Connexion impossible"
         }
+    }
+
+    /// Apres la sortie de l'ecran de connexion : le dashboard, et son lancement.
+    func entreApresConnexion() {
+        guard api.client.jeton != nil else { return }
+        vientDeSeConnecter = true
+        connecte = true
     }
 
     /// Se deconnecter (cet appareil), ou fermer toutes les sessions partout.
