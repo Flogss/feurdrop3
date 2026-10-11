@@ -1,10 +1,9 @@
 /* ==========================================================================
    Controle des depots
-   Chaque categorie a sa teinte : confirme (sarcelle), non confirme (ambre),
-   verification necessaire (bleu), verification bloquee (lavande : rien n'a
-   pu etre lu, ce n'est pas une alerte), anomalie (rouge). Ce qui demande un
-   regard ressort par une barre et un voile de sa couleur ; le reste reste
-   calme.
+   Chaque statut a sa teinte : poste confirme (sarcelle), non confirme
+   (ambre), a verifier (bleu), verification bloquee (lavande : rien n'a pu
+   etre lu, ce n'est pas une alerte). Ce qui demande un regard ressort par
+   une barre et un voile de sa couleur ; le reste reste calme.
    ========================================================================== */
 
 .tool-icon-teal { --c: var(--teal-rgb); }
@@ -13,7 +12,6 @@
 .cat-non_confirme { --cat: var(--warn-rgb); }
 .cat-a_verifier { --cat: var(--info-rgb); }
 .cat-bloque { --cat: var(--violet-300); }
-.cat-anomalie { --cat: var(--danger-rgb); }
 
 /* --- Bandeau (API non configuree, pause demandee, erreur) --------------------- */
 
@@ -45,8 +43,7 @@
   gap: var(--gap);
   margin-bottom: var(--gap);
 }
-/* cinq compteurs sur deux colonnes : les confirmes en tete, sur toute la largeur */
-.depots-compteurs > :first-child { grid-column: 1 / -1; }
+/* quatre compteurs : deux par ligne au telephone, quatre au bureau */
 .depot-metric { position: relative; isolation: isolate; }
 .depot-metric::before {
   content: "";
@@ -300,7 +297,8 @@
 .depot-evt:first-child .depot-evt-point { background: rgb(var(--violet-400)); box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.8); }
 .depot-evt.is-preuve .depot-evt-point { background: rgb(var(--teal-rgb)); box-shadow: 0 0 10px rgb(var(--teal-rgb) / 0.8); }
 .depot-evt.is-manuel .depot-evt-point { background: rgb(var(--violet-300)); box-shadow: 0 0 10px rgb(var(--violet-300) / 0.7); }
-.depot-evt.is-incident .depot-evt-point { background: var(--danger); box-shadow: 0 0 10px rgb(var(--danger-rgb) / 0.8); }
+/* une suite apres la prise en charge (retour, souci) : notee, sans alerte */
+.depot-evt.is-suite .depot-evt-point { background: rgb(var(--violet-300) / 0.6); box-shadow: none; }
 .depot-evt-corps { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .depot-evt-statut { font-size: 14px; font-weight: 600; line-height: 1.35; }
 .depot-evt-preuve {
@@ -323,8 +321,7 @@
 }
 
 @media (min-width: 960px) {
-  .depots-compteurs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .depots-compteurs > :first-child { grid-column: auto; }
+  .depots-compteurs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .depots-outils { flex-direction: row; align-items: center; justify-content: space-between; }
   .depots-champs { flex: 1; max-width: 560px; }
   .depots-entete,
@@ -353,3 +350,139 @@
 @media (prefers-reduced-motion: reduce) {
   #depots-synchro-point.is-busy { animation: none; }
 }
+
+/* --- « Tout vérifier » ---------------------------------------------------------- */
+
+.page-head .depots-tout { align-self: end; white-space: nowrap; }
+@media (max-width: 559px) { .page-head .depots-tout { grid-column: 1 / -1; width: 100%; } }
+
+/* l'interrupteur de lecture automatique d'un transporteur (pages lues sur le Mac) */
+.depot-methode-bascule {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: rgb(var(--m) / 0.16);
+  color: rgb(var(--m));
+  font: 650 11px/22px var(--font-sans);
+  cursor: pointer;
+  transition: background-color var(--t-2), transform var(--t-3) var(--ease-spring);
+}
+.depot-methode-bascule:hover { background: rgb(var(--m) / 0.26); }
+.depot-methode-bascule:active { transform: scale(0.94); }
+
+.depots-campagne {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: var(--gap);
+  animation: campagne-entre 620ms var(--ease-out) both;
+}
+@keyframes campagne-entre { from { opacity: 0; transform: translate3d(0, -10px, 0) scale(0.985); filter: blur(6px); } }
+/* pendant la campagne : une lueur violette passe lentement sur la carte */
+.depots-campagne.is-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgb(var(--accent-rgb) / 0.09) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: campagne-lueur 2.8s linear infinite;
+}
+@keyframes campagne-lueur { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+.campagne-tete { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.campagne-titres h2 { font: 660 16px/1.25 var(--font-display); letter-spacing: -0.015em; }
+.campagne-sous { margin-top: 4px; font-size: 13.5px; color: var(--text-2); line-height: 1.4; }
+.campagne-boutons { display: flex; gap: 6px; align-items: center; }
+.campagne-barre {
+  position: relative;
+  height: 8px;
+  margin: 16px 0 14px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  overflow: hidden;
+}
+.campagne-barre > span {
+  --p: 0;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--grad-accent);
+  box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.8);
+  transform-origin: left center;
+  transform: scaleX(var(--p));
+  transition: transform 700ms var(--ease-out);
+}
+.depots-campagne.is-active .campagne-barre > span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.45), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: campagne-reflet 1.6s ease-in-out infinite;
+}
+@keyframes campagne-reflet { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.campagne-chiffres {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.campagne-chiffres > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: rgb(var(--cat, 255 255 255) / 0.06);
+  box-shadow: inset 0 0 0 1px rgb(var(--cat, 255 255 255) / 0.12);
+  transition: opacity var(--t-3);
+}
+.campagne-chiffres b { font: 700 20px/1.1 var(--font-display); font-variant-numeric: tabular-nums; color: rgb(var(--cat, 255 255 255)); }
+.campagne-chiffres span { font-size: 12px; color: var(--text-2); }
+.campagne-chiffres > .is-zero { opacity: 0.45; }
+.campagne-transporteurs { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.campagne-ligne {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: rgb(255 255 255 / 0.025);
+  overflow: hidden;
+  font-size: 13px;
+}
+.campagne-methode { color: var(--text-3); font-size: 12px; }
+.campagne-detail { font-variant-numeric: tabular-nums; color: var(--text-2); }
+.campagne-message { grid-column: 1 / -1; color: rgb(var(--violet-300)); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campagne-ligne.is-bloque { box-shadow: inset 2px 0 0 rgb(var(--violet-300)); }
+.campagne-mini {
+  --p: 0;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--grad-accent);
+  transform-origin: left center;
+  transform: scaleX(var(--p));
+  transition: transform 600ms var(--ease-out);
+  opacity: 0.8;
+}
+.campagne-ligne.is-encours .campagne-detail::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: rgb(var(--violet-300));
+  box-shadow: 0 0 8px rgb(var(--accent-rgb));
+  animation: pulse-point 1.2s ease-in-out infinite;
+  vertical-align: 1px;
+}
+@keyframes pulse-point { 50% { opacity: 0.35; transform: scale(0.7); } }
+@media (max-width: 639px) { .campagne-chiffres { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.depot-detail-suite dd .depot-sous { color: var(--text-3); }

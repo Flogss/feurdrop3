@@ -52,7 +52,7 @@ Tant que `DASHBOARD_PASSWORD_HASH` est absente ou invalide, le dashboard reste
 | Portail expéditeur | `GET /api/portail/:jeton` | le jeton de l'expéditeur : ses colis, rien d'autre (limite d'essais par adresse) |
 | Agent d'impression | `GET /api/print/queue`, `GET /api/print/next`, `POST /api/print/done` | son jeton, en-tête `X-Print-Token` (et rien d'autre ne l'accepte) |
 | Bot Telegram | aucune route | il interroge Telegram lui-même (polling) |
-| **Dashboard** | **tout le reste** : la page, `app.js`, et les 71 routes de l'API ci-dessous | session valable (cookie du site ou jeton de l'app) ; écritures du site : jeton anti-CSRF + même origine |
+| **Dashboard** | **tout le reste** : la page, `app.js`, et les 77 routes de l'API ci-dessous | session valable (cookie du site ou jeton de l'app) ; écritures du site : jeton anti-CSRF + même origine |
 
 Routes de l'API protégées par la session. Le test `test/securite.test.js`
 les relit dans le code et vérifie que chacune répond 401 sans session :
@@ -66,7 +66,7 @@ les relit dans le code et vérifie que chacune répond 401 sans session :
 - **Tournées** : `GET /api/tour/choix`, `POST /api/tour/start|finish|end|dismiss-summary`
 - **Codes spéciaux** : `GET /api/special/paires`, `POST /api/special/paires/:id/fini`, `GET /api/special/code/:id`
 - **Suivi** : `GET /api/suivi/overview|live|recheck|label|search|ip-sortie`, `POST /api/suivi/recheck|verifier|annuler`
-- **Contrôle des dépôts** : `GET /api/depots`, `GET /api/depots/resume`, `GET /api/depots/:colisId`, `POST /api/depots/relancer`, `POST /api/depots/:colisId/verifier|constat`
+- **Contrôle des dépôts** : `GET /api/depots`, `GET /api/depots/resume`, `GET /api/depots/:colisId`, `POST /api/depots/relancer`, `POST /api/depots/:colisId/verifier|constat`, « Tout vérifier » : `POST /api/depots/campagne`, `GET /api/depots/campagne`, `POST /api/depots/campagne/annuler`, `GET /api/depots/campagne/travail` et `POST /api/depots/campagne/resultats` (l'app Drop du Mac, avec sa session), `POST /api/depots/lecture/:code`
 - **Notifications et réglages** : `GET /api/push/key`, `POST /api/push/subscribe|unsubscribe|seen|test`, `GET /api/config`, `GET /api/diagnostic`
 - **Sessions** : `GET /api/auth/session`, `GET /api/auth/sessions`, `POST /api/auth/deconnexion-partout`
 

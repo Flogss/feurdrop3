@@ -88,7 +88,8 @@ const CATEGORIES = [
 // (les evenements lus chez La Poste se relisent a partir des numeros sauvegardes)
 // ...et les sessions du dashboard : rien a restaurer (on se reconnecte), et
 // rien a laisser trainer dans un fichier
-const TABLES_INTERNES = new Set(["sqlite_sequence", "controle_transporteurs", "sessions"]);
+// ...et les campagnes « Tout verifier » : une tache en cours, pas une donnee
+const TABLES_INTERNES = new Set(["sqlite_sequence", "controle_transporteurs", "sessions", "controle_campagnes", "controle_campagne_items"]);
 
 const EXCLUSIONS = [
   "fichiers PDF et images des etiquettes (gardes chez Telegram : file_id dans les colis)",
@@ -99,7 +100,7 @@ const EXCLUSIONS = [
   "arrivees deja traitees (historique technique)",
   "sqlite_sequence (compteurs internes, recalcules a partir des identifiants)",
   "base du bot de suivi (suivi.db) : resultats de verification, regenerables",
-  "evenements des transporteurs du controle des depots (relus a la prochaine verification) et pauses des transporteurs",
+  "evenements des transporteurs du controle des depots (relus a la prochaine verification), pauses des transporteurs et campagnes « Tout verifier » en cours",
   "variables d'environnement (seuls leurs noms sont listes)",
 ];
 

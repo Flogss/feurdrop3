@@ -135,14 +135,36 @@ test("boite jaune : en point relais puis de nouveau en transit, depot confirme s
   assert.equal(r.preuve.code, "MD1");
 });
 
-test("incidents : retour, non distribuable ; un probleme resolu n'en est plus un", () => {
+test("apres la prise en charge, un retour ou un souci ne defait jamais le depot (pas d'anomalie)", () => {
   const retour = analyse({ colis: colis(100), evenements: [lp(5, "RE1", "Retourné à l'expéditeur"), lp(90, "PC1")] });
-  assert.equal(retour.categorie, "anomalie");
+  assert.equal(retour.categorie, "confirme");
+  assert.equal(retour.libelle, "Posté confirmé");
   assert.equal(retour.preuve.code, "PC1");
+  // la suite reste consultable dans le detail, sans alerte
+  assert.equal(retour.suite.libelle, "Retourné à l'expéditeur");
+  assert.equal(retour.suite.retour, true);
   const probleme = analyse({ colis: colis(50), evenements: [lp(5, "PB1", "Problème en cours"), lp(40, "PC1")] });
-  assert.equal(probleme.categorie, "anomalie");
-  const resolu = analyse({ colis: colis(50), evenements: [lp(2, "DI1"), lp(5, "PB1"), lp(40, "PC1")] });
-  assert.equal(resolu.categorie, "confirme");
+  assert.equal(probleme.categorie, "confirme");
+  const nonDistribuable = analyse({ colis: colis(50), evenements: [lp(5, "ND1", "Non distribuable"), lp(40, "PC1")] });
+  assert.equal(nonDistribuable.categorie, "confirme");
+  // un retour sans autre scan : on ne retourne que ce qu'on a eu
+  const seul = analyse({ colis: colis(100), evenements: [lp(5, "RE1", "Retourné à l'expéditeur")] });
+  assert.equal(seul.categorie, "confirme");
+});
+
+test("« Votre colis est mis à disposition du vendeur » apres une prise en charge : posté confirmé, sans alerte", () => {
+  const { lisPage } = require("../src/controle/pages");
+  const page = lisPage("MR", {
+    titre: "Suivi de colis - Mondial Relay",
+    texte: "STATUT\nVotre colis est mis à disposition du vendeur\nSUIVI GLOBAL DE MON COLIS\nColis livré au destinataire\nSUIVI DÉTAILLÉ DE MON COLIS\n12/10/2026\nVotre colis est mis à disposition du vendeur\n09:12\n09/10/2026\nColis pris en charge en Point Relais\n20:31\nColis en préparation chez l'expéditeur\n12:42\nJe m'informe",
+  });
+  assert.equal(page.etat, "trouve");
+  const r = analyse({ colis: colis(100, 120), transporteur: transporteur("MR"), evenements: page.evenements });
+  assert.equal(r.categorie, "confirme");
+  assert.match(r.raison, /Pris en charge le 09\/10 20:31/);
+  assert.match(r.suite.libelle, /mis à disposition du vendeur/);
+  // le « suivi global » (liste des etapes possibles) n'est pas une livraison
+  assert.equal(r.livre, false);
 });
 
 test("statut transporteur non reconnu : verification necessaire, pas une preuve", () => {
@@ -151,14 +173,37 @@ test("statut transporteur non reconnu : verification necessaire, pas une preuve"
   assert.match(r.raison, /non reconnu/);
 });
 
-test("transporteur sans verification automatique : bloque, jamais « non depose »", () => {
+test("UPS (consultation automatisee interdite) : bloque, a la main, jamais « non depose »", () => {
   const ups = transporteur("UPS");
+  assert.equal(ups.methode, "manuel");
   const r = analyse({ colis: colis(30), transporteur: ups, suivi: null, evenements: [] });
   assert.equal(r.categorie, "bloque");
   assert.equal(r.libelle, "Vérification bloquée");
-  assert.match(r.raison, /Access Denied/);
+  assert.match(r.raison, /interdisent toute consultation automatisée/);
   assert.equal(r.manuel, true);
   assert.ok(ups.lien("1Z999AA10123456784").includes("1Z999AA10123456784"), "lien officiel avec le numero");
+});
+
+test("pages lues sur le Mac (Mondial Relay, DHL, FedEx, GLS) : en attente, bloquee, lecture coupee", () => {
+  for (const code of ["MR", "DHL", "FEDEX", "GLS"]) assert.equal(transporteur(code).methode, "navigateur", code);
+  const mr = transporteur("MR");
+  const attente = analyse({ colis: colis(5), transporteur: mr, suivi: null, evenements: [] });
+  assert.equal(attente.categorie, "a_verifier");
+  assert.match(attente.raison, /Tout vérifier/);
+  // un defi anti-robot a la derniere lecture : bloque, rien de conclu sur le colis
+  const defi = analyse({ colis: colis(30), transporteur: mr, suivi: { trouve: null, code_erreur: "bloque", erreur: "le site affiche une vérification anti-robot" }, evenements: [] });
+  assert.equal(defi.categorie, "bloque");
+  const pause = analyse({ colis: colis(30), transporteur: mr, suivi: null, evenements: [], pause: { jusqua: sqlIlYa(-2), motif: "accès refusé" } });
+  assert.equal(pause.categorie, "bloque");
+  assert.match(pause.raison, /ouvrir à la main/);
+  // l'interrupteur coupe : la page se verifie a la main
+  const coupe = transporteur("MR", { lectureCoupee: ["MR"] });
+  assert.equal(coupe.methode, "manuel");
+  assert.equal(analyse({ colis: colis(30), transporteur: coupe, suivi: null, evenements: [] }).categorie, "bloque");
+  // une erreur reseau du Mac ne dit rien du colis, et n'efface pas une preuve
+  const reseau = analyse({ colis: colis(30), transporteur: mr, suivi: { trouve: 1, code_erreur: "passagere", erreur: "page non lue sur le Mac : délai dépassé" }, evenements: [] });
+  assert.equal(reseau.categorie, "a_verifier");
+  assert.match(reseau.raison, /Rien n'est conclu/);
 });
 
 test("transporteur en pause : bloque, et on dit jusqu'a quand", () => {
@@ -188,7 +233,8 @@ test("constats faits a la main sur la page officielle", () => {
   assert.match(perime.raison, /à revérifier/);
   assert.equal(perime.enRetard, true);
   const probleme = analyse({ colis: colis(30), transporteur: ups, evenements: [constat(1, "MANUEL_PROBLEME", { incident: "Problème signalé", etape: "exception" })] });
-  assert.equal(probleme.categorie, "anomalie");
+  assert.equal(probleme.categorie, "a_verifier");
+  assert.match(probleme.raison, /Problème signalé à la main/);
   // le dernier constat fait foi
   const corrige = analyse({
     colis: colis(30),

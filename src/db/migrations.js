@@ -392,6 +392,49 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    nom: "controle des depots : memoire des lectures et « Tout verifier »",
+    applique(db) {
+      // Ce que l'on retient de la derniere lecture d'un numero : le statut
+      // normalise (« confirme », « non_confirme »...), le statut brut du
+      // transporteur, la methode (API officielle, page lue sur le Mac,
+      // constat), l'adresse lue et qui l'a lue. Rien n'est jamais efface par
+      // un echec : les evenements restent, seule la ligne d'erreur change.
+      const colonnes = db.prepare("PRAGMA table_info(controle_suivis)").all().map((c) => c.name);
+      for (const [nom, type] of [["statut", "TEXT"], ["statut_brut", "TEXT"], ["methode_lecture", "TEXT"], ["page_url", "TEXT"], ["lu_par", "TEXT"]]) {
+        if (!colonnes.includes(nom)) db.exec(`ALTER TABLE controle_suivis ADD COLUMN ${nom} ${type}`);
+      }
+      // « Tout verifier » : une campagne et ses numeros. Le Mac prend les
+      // numeros a lire par petits lots (un bail de quelques minutes : un Mac
+      // qui s'endort les rend a la file), et chaque resultat est rattache a
+      // SON numero ; une campagne interrompue reprend la ou elle en etait.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS controle_campagnes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cree_le TEXT NOT NULL DEFAULT (datetime('now')),
+          par TEXT,
+          statut TEXT NOT NULL DEFAULT 'active',
+          fin_le TEXT,
+          force INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS controle_campagne_items (
+          campagne_id INTEGER NOT NULL,
+          numero TEXT NOT NULL,
+          transporteur TEXT,
+          methode TEXT NOT NULL,
+          etat TEXT NOT NULL DEFAULT 'attente',
+          tentatives INTEGER NOT NULL DEFAULT 0,
+          bail_jusqua TEXT,
+          resultat TEXT,
+          message TEXT,
+          maj_le TEXT,
+          PRIMARY KEY (campagne_id, numero)
+        );
+        CREATE INDEX IF NOT EXISTS idx_campagne_items_etat ON controle_campagne_items(campagne_id, methode, etat);
+      `);
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;
