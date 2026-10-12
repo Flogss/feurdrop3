@@ -21,7 +21,7 @@ function baseTemporaire() {
 
 test("base neuve : toutes les migrations, puis plus rien a faire", () => {
   const db = baseTemporaire();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   assert.equal(versionDe(db), VERSION_SCHEMA);
   for (const c of ["type", "file_id", "printed_at", "note", "source_message_id", "price_locked"]) {
     assert.ok(colonnes(db, "colis").includes(c), c);
@@ -135,4 +135,12 @@ test("base existante a migrer : copie verifiee d'abord, a cote de la base", () =
   base.ouvreBase();
   assert.equal(fs.readdirSync(path.join(dossier, "sauvegardes")).length, 1);
   base.fermeBase();
+});
+
+test("v9 : la lecture automatique de Mondial Relay est rallumee, les autres interrupteurs restent", () => {
+  const db = baseTemporaire();
+  appliqueMigrations(db, { journal: silencieux, jusqua: 8 });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('controle_lecture_coupee', 'MR,DHL')").run();
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [9]);
+  assert.equal(db.prepare("SELECT value FROM settings WHERE key = 'controle_lecture_coupee'").get().value, "DHL");
 });

@@ -339,6 +339,23 @@ private struct PassageCard: View {
             } else if let erreur = etat.derniereErreur {
                 bandeau("exclamationmark.triangle.fill", Theme.danger, "Dernier passage interrompu : \(erreur.message)")
             }
+            // une lecture automatique coupee (depuis le site) : on la rallume d'ici
+            ForEach((etat.lecture ?? []).filter { !$0.active }) { l in
+                HStack(spacing: 10) {
+                    bandeau("info.circle.fill", Theme.info, "Lecture automatique coupée pour \(l.nom) : ses colis ne sont pas lus par l'app du Mac.")
+                    Button {
+                        Task { await app.depots.lecture(l.code, active: true) }
+                    } label: {
+                        Text("Rallumer")
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize()
+                            .frame(height: 36)
+                            .padding(.horizontal, 10)
+                    }
+                    .boutonVerre()
+                    .accessibilityLabel("Rallumer la lecture automatique de \(l.nom)")
+                }
+            }
 
             HStack(spacing: 8) {
                 Circle()

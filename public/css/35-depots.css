@@ -379,6 +379,13 @@
 }
 .depot-methode-bascule:hover { background: rgb(var(--m) / 0.26); }
 .depot-methode-bascule:active { transform: scale(0.94); }
+/* coupee : « rallumer » ressort, en violet */
+.depot-methode-bascule.is-rallumer { --m: var(--violet-300); background: rgb(var(--accent-rgb) / 0.3); color: var(--text); box-shadow: inset 0 0 0 1px rgb(var(--violet-300) / 0.45); }
+/* l'action d'un bandeau (« Rallumer ») */
+.depots-bandeau { flex-wrap: wrap; align-items: center; }
+.depots-bandeau > span { flex: 1 1 260px; }
+.depots-bandeau-action { flex: none; }
+.depot-rallumer { margin: 4px 0 2px; }
 
 .depots-campagne {
   position: relative;

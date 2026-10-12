@@ -212,8 +212,15 @@ function rendBandeauDepots(etat) {
   } else if (etat.derniereErreur) {
     html = `${ico("alert")}<span><b>Dernier passage interrompu</b> (${escapeHtml(depotHeure(etat.derniereErreur.at))}) : ${escapeHtml(etat.derniereErreur.message)}</span>`;
   }
+  // une lecture automatique coupee : on le voit, et on la rallume d'un clic
+  const coupees = (etat.lecture || []).filter((l) => !l.active);
+  if (!html && coupees.length) {
+    html =
+      `${ico("info")}<span><b>Lecture automatique coupée pour ${escapeHtml(coupees.map((l) => l.nom).join(", "))}</b> : ces colis ne sont pas lus par l'app du Mac et restent à vérifier à la main.</span>` +
+      coupees.map((l) => `<button class="btn btn-sm btn-primary depots-bandeau-action" type="button" data-lecture="${escapeAttr(l.code)}" data-nom="${escapeAttr(l.nom)}" data-active="0">Rallumer ${escapeHtml(l.nom)}</button>`).join("");
+  }
   bandeau.hidden = !html;
-  bandeau.classList.toggle("is-info", !lp.configure);
+  bandeau.classList.toggle("is-info", !lp.configure || (!lp.pause && !etat.derniereErreur && (etat.lecture || []).some((l) => !l.active)));
   bandeau.innerHTML = html;
 }
 
@@ -240,8 +247,10 @@ function rendMethodesDepots(etat) {
         else etatPuce = ["is-auto", "bolt", "API officielle", api.nom];
       }
       const [classe, icone, texte, titre] = etatPuce;
+      // un vrai bouton, qui dit ce qu'il fait (l'ancienne pastille « auto »
+      // ressemblait a un statut et coupait la lecture d'un clic)
       const bascule = lecture
-        ? `<button class="depot-methode-bascule" type="button" data-lecture="${escapeAttr(t.code)}" data-active="${lecture.active ? "1" : "0"}" title="${lecture.active ? "Couper la lecture automatique" : "Rallumer la lecture automatique"}" aria-pressed="${lecture.active}">${lecture.active ? "auto" : "manuel"}</button>`
+        ? `<button class="depot-methode-bascule${lecture.active ? "" : " is-rallumer"}" type="button" data-lecture="${escapeAttr(t.code)}" data-nom="${escapeAttr(t.nom)}" data-active="${lecture.active ? "1" : "0"}" title="${lecture.active ? "Couper la lecture automatique sur le Mac" : "Rallumer la lecture automatique sur le Mac"}">${lecture.active ? "couper" : "rallumer"}</button>`
         : "";
       return (
         `<span class="depot-methode ${classe}" title="${escapeAttr(titre)}">` +
@@ -257,19 +266,36 @@ function rendMethodesDepots(etat) {
   box.hidden = !html;
 }
 
-$("depots-methodes").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-lecture]");
-  if (!b) return;
+// Couper (apres confirmation) ou rallumer la lecture automatique d'un
+// transporteur : depuis sa puce, le bandeau ou le detail d'un colis.
+async function basculeLecture(b) {
   const active = b.dataset.active !== "1";
-  agir(
+  const nom = b.dataset.nom || b.dataset.lecture;
+  if (!active) {
+    const ok = await confirmer({
+      titre: `Couper la lecture automatique de ${nom} ?`,
+      message: `L'app du Mac ne lira plus les pages de ${nom} : ses colis seront à vérifier à la main sur la page officielle. Tu pourras la rallumer ici.`,
+      action: "Couper",
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  return agir(
     b,
     async () => {
       await postJSON(`/api/depots/lecture/${b.dataset.lecture}`, { active });
       await loadDepots(true);
+      if (!$("depot-sheet").hidden && depotsEtat.detail) rendDetailDepot(await fetchJSON(`/api/depots/${depotsEtat.detail.colisId}`));
     },
-    { succes: active ? "Lecture automatique rallumée" : "Lecture automatique coupée : constat à la main" }
+    { succes: active ? `${nom} : lecture automatique rallumée, l'app du Mac s'en charge` : `${nom} : lecture automatique coupée, constat à la main` }
   );
-});
+}
+for (const zone of ["depots-methodes", "depots-bandeau", "depot-sheet-contenu"]) {
+  $(zone).addEventListener("click", (e) => {
+    const b = e.target.closest("[data-lecture]");
+    if (b) basculeLecture(b);
+  });
+}
 
 function rendChoixDepots(lignes) {
   const remplit = (select, valeurs, tous, actuel) => {
@@ -629,6 +655,16 @@ function constatDepot(d) {
     </section>`;
 }
 
+// le transporteur de ce colis se lit sur le Mac, mais sa lecture est coupee
+function rallumerDepot(d) {
+  const lecture = (depotsEtat.donnees?.etat.lecture || []).find((l) => l.code === d.transporteur.code);
+  if (!lecture || lecture.active) return "";
+  return `
+    <div class="depots-bandeau is-info depot-rallumer">${ico("info")}<span>La lecture automatique de <b>${escapeHtml(lecture.nom)}</b> est coupée : l'app du Mac ne lit pas sa page.</span>
+      <button class="btn btn-sm btn-primary depots-bandeau-action" type="button" data-lecture="${escapeAttr(lecture.code)}" data-nom="${escapeAttr(lecture.nom)}" data-active="0">Rallumer</button>
+    </div>`;
+}
+
 function rendDetailDepot(d) {
   depotsEtat.detail = d;
   const c = d.controle;
@@ -674,6 +710,7 @@ function rendDetailDepot(d) {
       ${suite}
       ${d.erreur ? `<div class="depot-detail-erreur"><dt>Dernière erreur</dt><dd>${escapeHtml(d.erreur.message)}</dd></div>` : ""}
     </dl>
+    ${rallumerDepot(d)}
     ${constatDepot(d)}
     <h3 class="depot-detail-titre">Chronologie</h3>
     ${

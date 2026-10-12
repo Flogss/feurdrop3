@@ -76,6 +76,17 @@ function coupeLecture(code, coupee) {
   if (coupee) liste.add(code);
   else liste.delete(code);
   setSetting("controle_lecture_coupee", [...liste].join(","));
+  // la file suit tout de suite (sans attendre le prochain passage) : rallumee,
+  // les pages de ce transporteur sont dues et le Mac les prend dans les 10 s
+  if (coupee) {
+    db.prepare("UPDATE controle_suivis SET methode = 'manuel', prochaine_le = NULL WHERE transporteur = ? AND methode = 'navigateur'").run(code);
+  } else {
+    db.prepare(
+      `UPDATE controle_suivis SET methode = 'navigateur', prochaine_le = datetime('now')
+       WHERE transporteur = ? AND methode = 'manuel' AND archive_le IS NULL AND COALESCE(statut, '') != 'confirme'`
+    ).run(code);
+    levePause(`navigateur:${code}`);
+  }
 }
 
 const infoTransporteur = (code) => infoTransporteurBrut(code, { lectureCoupee: lectureCoupee() });

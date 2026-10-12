@@ -459,6 +459,22 @@ const MIGRATIONS = [
       db.exec("CREATE INDEX IF NOT EXISTS idx_controle_suivis_archive ON controle_suivis(archive_le)");
     },
   },
+  {
+    version: 9,
+    nom: "controle des depots : lecture automatique de Mondial Relay rallumee",
+    applique(db) {
+      // L'interrupteur de lecture de Mondial Relay avait ete coupe par la
+      // pastille « auto » du site, qui ressemblait a un statut : on le
+      // rallume une fois. (Couper demande maintenant une confirmation.)
+      const ligne = db.prepare("SELECT value FROM settings WHERE key = 'controle_lecture_coupee'").get();
+      if (!ligne) return;
+      const reste = String(ligne.value || "")
+        .split(",")
+        .map((c) => c.trim())
+        .filter((c) => c && c !== "MR");
+      db.prepare("UPDATE settings SET value = ? WHERE key = 'controle_lecture_coupee'").run(reste.join(","));
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

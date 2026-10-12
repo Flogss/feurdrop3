@@ -811,6 +811,19 @@ test("lecture coupee pour un transporteur : la page se verifie a la main, le Mac
   assert.throws(() => depots.coupeLecture("UPS", false), /ne se lit pas/);
 });
 
+test("Mondial Relay coupe puis rallume : le Mac reprend ses pages tout de suite, sans « Tout vérifier » ni passage", async () => {
+  drope("4278870101", { carrier: "MR", heures: 30 });
+  drope("4278870102", { carrier: "MR", heures: 30 });
+  await depots.synchronise();
+  depots.coupeLecture("MR", true);
+  assert.deepEqual(depots.travail({ agent: "Mac de test" }).items, [], "coupee : rien pour le Mac");
+  assert.equal(depots.agent({ nom: "Mac de test" }).aLire, 0);
+  depots.coupeLecture("MR", false);
+  assert.equal(depots.agent({ nom: "Mac de test" }).aLire, 2, "rallumee : les pages sont dues aussitot");
+  assert.deepEqual(depots.travail({ agent: "Mac de test" }).items.map((it) => it.numero).sort(), ["4278870101", "4278870102"]);
+  assert.equal(depots.etat().lecture.find((l) => l.code === "MR").active, true);
+});
+
 test("DPD et Chronopost passent par l'API La Poste", async () => {
   faux.suivi("05212345678901", [ev(1, "PC1", "Colis déposé par l'expéditeur")], { product: "dpd" });
   faux.suivi("XT269045554TS", [ev(1, "PC1", "Pris en charge")], { product: "chronopost" });
