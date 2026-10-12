@@ -427,7 +427,7 @@ private struct PassageCard: View {
         let pages = mac.pagesDues ?? 0
         let texte = actif
             ? "Mac en ligne · \(mac.nom ?? "app Drop") lit \(lisibles)" + (pages > 0 ? " · \(Format.count(pages, "page à lire", "pages à lire"))" : "")
-            : "Mac hors ligne" + (mac.le.map { " depuis \(ilYa($0).replacingOccurrences(of: "il y a ", with: ""))" } ?? "")
+            : "Mac hors ligne" + (mac.le.map { " depuis \(ilYa($0).replacingOccurrences(of: "il y a ", with: ""))" } ?? "") + " (app fermée, ou à reconnecter)"
                 + (pages > 0 ? " · \(Format.count(pages, "page attend", "pages attendent")) l'app Drop du Mac" : " · \(lisibles) se lisent quand l'app Drop du Mac est ouverte")
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Circle()

@@ -73,6 +73,17 @@ enum NotificationService {
     }
 
     /// Une notification d'essai, deux secondes apres l'appui.
+    /// Mac : la session a expire -- la lecture des pages officielles
+    /// (Mondial Relay...) s'arrete tant qu'on ne s'est pas reconnecte.
+    static func sessionExpireeLecture() async {
+        await poste(
+            id: "session-expiree",
+            titre: "Drop : reconnecte-toi",
+            corps: "La session a expiré : l'app du Mac ne lit plus les pages Mondial Relay tant que tu n'as pas remis le mot de passe.",
+            fil: "controle"
+        )
+    }
+
     static func sendTest() async {
         await poste(
             id: "essai",

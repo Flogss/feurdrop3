@@ -219,7 +219,13 @@ final class AppModel {
         if error is CancellationError { return }
         // session expiree (72 h), revoquee, ou mot de passe change : la connexion
         if let api = error as? APIError, api.exigeConnexion {
-            if connecte { oublieSession(message: "Ta session a expiré : entre le mot de passe pour continuer.") }
+            if connecte {
+                oublieSession(message: "Ta session a expiré : entre le mot de passe pour continuer.")
+                #if os(macOS)
+                // la lecture de Mondial Relay s'arrete : on le dit, meme fenetre fermee
+                Task { await NotificationService.sessionExpireeLecture() }
+                #endif
+            }
             return
         }
         if let api = error as? APIError, api.isNetwork {

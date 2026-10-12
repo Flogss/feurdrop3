@@ -166,7 +166,7 @@ function rendMacDepots(etat) {
   const pages = mac.pagesDues ? pluriel(mac.pagesDues, "page à lire", "pages à lire") : "rien à lire";
   $("depots-mac-texte").innerHTML = mac.actif
     ? `<b>Mac en ligne</b> · ${escapeHtml(mac.nom || "app Drop")} lit ${escapeHtml(lisibles.join(", "))} · ${pages}`
-    : `<b>Mac hors ligne${mac.le ? ` depuis ${escapeHtml(depotIlYa(mac.le).replace("il y a ", ""))}` : ""}</b> · ${mac.pagesDues ? `${pluriel(mac.pagesDues, "page attend", "pages attendent")} l'app Drop du Mac (${escapeHtml(lisibles.join(", "))})` : `${escapeHtml(lisibles.join(", "))} se lisent quand l'app Drop du Mac est ouverte`}`;
+    : `<b>Mac hors ligne${mac.le ? ` depuis ${escapeHtml(depotIlYa(mac.le).replace("il y a ", ""))}` : ""}</b> (app Drop fermée, ou à reconnecter avec le mot de passe) · ${mac.pagesDues ? `${pluriel(mac.pagesDues, "page attend", "pages attendent")} l'app Drop du Mac (${escapeHtml(lisibles.join(", "))})` : `${escapeHtml(lisibles.join(", "))} se lisent quand l'app Drop du Mac est ouverte`}`;
   $("depots-mac-ouvrir").hidden = Boolean(mac.actif) || !mac.pagesDues;
 }
 
