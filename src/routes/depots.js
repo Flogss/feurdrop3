@@ -93,7 +93,8 @@ router.post(
   })
 );
 
-// Constat fait a la main sur la page officielle : "pris", "pas_encore",
+// Constat fait a la main sur la page officielle : "etiquette", "pas_encore",
+// "pris", "transit", "livre", "inconnu", "bloque",
 // "probleme", ou "annule" pour l'effacer.
 router.post("/:colisId/constat", (req, res) => {
   try {

@@ -647,10 +647,16 @@ function constatDepot(d) {
       <h3 class="depot-detail-titre">Constat sur la page officielle</h3>
       <p class="depot-constat-aide">${aide}Ouvre le suivi officiel, puis note ce que tu y vois :</p>
       <div class="depot-constat-choix">
+        <button class="btn btn-sm depot-constat-btn cat-non_confirme" type="button" data-constat="etiquette">${ico("clock")}Étiquette créée</button>
+        <button class="btn btn-sm depot-constat-btn cat-non_confirme" type="button" data-constat="pas_encore">${ico("clock")}En attente de dépôt</button>
         <button class="btn btn-sm depot-constat-btn cat-confirme" type="button" data-constat="pris">${ico("check")}Pris en charge</button>
-        <button class="btn btn-sm depot-constat-btn cat-non_confirme" type="button" data-constat="pas_encore">${ico("clock")}Pas encore</button>
+        <button class="btn btn-sm depot-constat-btn cat-confirme" type="button" data-constat="transit">${ico("check")}En transit</button>
+        <button class="btn btn-sm depot-constat-btn cat-confirme" type="button" data-constat="livre">${ico("check")}Livré</button>
+        <button class="btn btn-sm depot-constat-btn cat-a_verifier" type="button" data-constat="inconnu">${ico("alert")}Statut inconnu</button>
+        <button class="btn btn-sm depot-constat-btn cat-bloque" type="button" data-constat="bloque">${ico("alert")}Page bloquée</button>
         <button class="btn btn-sm depot-constat-btn cat-a_verifier" type="button" data-constat="probleme">${ico("alert")}Problème</button>
       </div>
+      <p class="depot-constat-aide">Seuls « Pris en charge », « En transit » et « Livré » confirment le dépôt.</p>
       ${c.constat ? `<button class="depot-constat-annule" type="button" data-constat="annule">Effacer le constat (${escapeHtml(depotIlYa(c.constat.le))})</button>` : ""}
     </section>`;
 }

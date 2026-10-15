@@ -519,6 +519,8 @@ test("UPS sans identifiants d'API : jamais lu automatiquement (conditions d'UPS)
   depots.lanceCampagne({ force: true });
   assert.deepEqual(depots.travail().items, []);
   assert.equal(depots.campagne().compteurs.aConstater, 2);
+  // le Mac recoit les numeros a ouvrir un par un dans le navigateur
+  assert.ok(depots.campagne().numerosAConstater.includes("1Z999AA10123456784"));
   assert.equal(depots.etat().methodes.ups.configure, false);
 
   assert.equal(depots.constate(ups, "pris").controle.categorie, "confirme");
@@ -532,6 +534,22 @@ test("UPS sans identifiants d'API : jamais lu automatiquement (conditions d'UPS)
   depots.constate(ups, "annule");
   assert.equal(ligne(ups).controle.categorie, "bloque");
   assert.equal(depots.constate(ups, "probleme").controle.categorie, "a_verifier");
+  // les etats lus sur la page officielle : seule une prise en charge vue
+  // confirme, jamais une etiquette, un statut inconnu ou une page bloquee
+  for (const [constat, categorie] of [
+    ["etiquette", "non_confirme"],
+    ["pas_encore", "non_confirme"],
+    ["inconnu", "a_verifier"],
+    ["bloque", "bloque"],
+    ["transit", "confirme"],
+    ["livre", "confirme"],
+    ["pris", "confirme"],
+  ]) {
+    depots.constate(ups, "annule");
+    assert.equal(depots.constate(ups, constat).controle.categorie, categorie, constat);
+  }
+  depots.constate(ups, "annule");
+  assert.match(depots.constate(ups, "livre").controle.raison, /Livré après prise en charge/);
   assert.equal((await echec(Promise.resolve().then(() => depots.constate(ups, "peut-etre")))).status, 400);
   assert.equal(fauxUPS.appels.length, 0);
 });

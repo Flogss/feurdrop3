@@ -408,8 +408,15 @@ public struct DepotLiens: Codable, Sendable, Equatable {
 /// Ce qu'on a vu sur la page officielle d'un transporteur sans verification
 /// automatique.
 public enum DepotConstatChoix: String, Sendable, CaseIterable, Identifiable {
-    case pris
+    /// ce que la page officielle montre ; seuls pris, transit et livre
+    /// prouvent le depot
+    case etiquette
     case pasEncore = "pas_encore"
+    case pris
+    case transit
+    case livre
+    case inconnu
+    case bloque
     case probleme
     /// efface les constats
     case annule
@@ -426,6 +433,8 @@ public struct DepotCampagneEtat: Codable, Sendable, Equatable {
     public var parTransporteur: [DepotCampagneTransporteur]?
     /// des pages attendent l'app du Mac
     public var attendMac: Bool?
+    /// a constater sur la page officielle (UPS sans API)
+    public var numerosAConstater: [String]?
     /// le dernier Mac qui a demande du travail
     public var agent: DepotAgent?
 

@@ -185,6 +185,32 @@ final class DepotsModel {
         if etat.attendMac == true { app.verificateur.demarre(visible: true) }
         #endif
         await refresh()
+        #if os(macOS)
+        // UPS (sans API, lecture automatisee interdite) : le Mac enchaine les
+        // pages officielles dans le navigateur, on note ce qu'on y voit
+        demandeSerieAConstater()
+        #endif
+    }
+
+    /// les colis de la campagne a constater sur la page officielle, dans
+    /// l'ordre de la liste ; la vue des depots ouvre la serie
+    private(set) var serieDemandee: SerieConstats?
+
+    struct SerieConstats: Equatable {
+        let ids: [Int]
+        let jeton = UUID()
+    }
+
+    var numerosAConstater: [String] { campagne?.numerosAConstater ?? [] }
+
+    func demandeSerieAConstater() {
+        let numeros = Set(numerosAConstater)
+        // un numero, une page : un meme numero sur deux colis ne s'ouvre qu'une fois
+        var vus = Set<String>()
+        let ids = (vue?.lignes ?? []).filter { numeros.contains($0.numero) && vus.insert($0.numero).inserted }.map(\.colisId)
+        let serie = ids.isEmpty ? aConstater.map(\.colisId) : ids
+        guard !serie.isEmpty else { return }
+        serieDemandee = SerieConstats(ids: serie)
     }
 
     func annuleCampagne() async {

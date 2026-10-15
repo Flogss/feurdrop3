@@ -256,7 +256,7 @@
   box-shadow: inset 0 0 0 1px rgb(var(--violet-300) / 0.22);
 }
 .depot-constat-aide { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--text-2); }
-.depot-constat-choix { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.depot-constat-choix { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .depot-constat-btn {
   justify-content: center;
   background: rgb(var(--cat) / 0.12);

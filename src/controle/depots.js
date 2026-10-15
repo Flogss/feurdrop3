@@ -766,6 +766,9 @@ function campagne(id = null) {
     campagne: { id: c.id, statut: c.statut, creeLe: c.cree_le, finLe: c.fin_le, par: c.par, force: Boolean(c.force) },
     compteurs,
     parTransporteur: Object.values(parTransporteur).sort((a, b) => b.total - a.total),
+    // a constater sur la page officielle (UPS sans API) : le Mac les ouvre
+    // un par un dans le navigateur, on note ce qu'on y voit
+    numerosAConstater: items.filter((it) => it.etat === "manuel").map((it) => it.numero).slice(0, 300),
     attendMac,
     agent: agentEtat,
   };
@@ -933,9 +936,18 @@ function recoitResultats(liste, { agent: nom = "Mac" } = {}) {
 
 // --- Constats a la main (UPS sans API, ou une page bloquee) --------------------------------
 
+// Les etats qu'on peut lire soi-meme sur la page officielle (UPS sans API :
+// ses conditions interdisent la lecture automatisee). Seuls « pris »,
+// « transit » et « livre » prouvent le depot : une prise en charge vue de ses
+// yeux. Le reste n'est jamais « Posté confirmé ».
 const CONSTATS = {
-  pris: { code: "MANUEL_PRIS", libelle: "Pris en charge (constaté sur la page officielle)", etape: "in_transit", physique: 1, incident: null },
-  pas_encore: { code: "MANUEL_PAS_ENCORE", libelle: "Pas encore pris en charge (constaté sur la page officielle)", etape: "info_received", physique: 0, incident: null },
+  etiquette: { code: "MANUEL_ETIQUETTE", libelle: "Étiquette créée, rien de plus (constaté sur la page officielle)", etape: "info_received", physique: 0, incident: null },
+  pas_encore: { code: "MANUEL_PAS_ENCORE", libelle: "En attente de dépôt (constaté sur la page officielle)", etape: "info_received", physique: 0, incident: null },
+  pris: { code: "MANUEL_PRIS", libelle: "Prise en charge physique confirmée (constatée sur la page officielle)", etape: "in_transit", physique: 1, incident: null },
+  transit: { code: "MANUEL_TRANSIT", libelle: "En transit (constaté sur la page officielle)", etape: "in_transit", physique: 1, incident: null },
+  livre: { code: "MANUEL_LIVRE", libelle: "Livré après prise en charge (constaté sur la page officielle)", etape: "delivered", physique: 1, incident: null },
+  inconnu: { code: "MANUEL_INCONNU", libelle: "Statut inconnu sur la page officielle", etape: "unknown", physique: 0, incident: null },
+  bloque: { code: "MANUEL_BLOQUE", libelle: "Vérification bloquée (page officielle inaccessible)", etape: "unknown", physique: 0, incident: null },
   probleme: { code: "MANUEL_PROBLEME", libelle: "Problème signalé sur la page officielle", etape: "exception", physique: 0, incident: "Problème signalé" },
 };
 

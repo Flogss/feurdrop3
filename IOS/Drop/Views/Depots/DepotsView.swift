@@ -50,6 +50,10 @@ struct DepotsView: View {
                 #endif
         }
         .sensoryFeedback(.success, trigger: model.celebration)
+        .onChange(of: model.serieDemandee) { _, serie in
+            guard let serie, let premier = serie.ids.first else { return }
+            ouvert = DepotOuvert(colisID: premier, serie: serie.ids, position: 0, ouvreLaPage: Platform.isMac)
+        }
     }
 
     private var sousTitre: String {
@@ -307,7 +311,7 @@ struct DepotsView: View {
             if o.serie != nil { app.toasts.show("Tous les colis à constater sont passés", style: .info) }
             return
         }
-        ouvert = DepotOuvert(colisID: serie[o.position + 1], serie: serie, position: o.position + 1)
+        ouvert = DepotOuvert(colisID: serie[o.position + 1], serie: serie, position: o.position + 1, ouvreLaPage: o.ouvreLaPage)
     }
 }
 
@@ -316,6 +320,9 @@ struct DepotOuvert: Identifiable, Hashable {
     let colisID: Int
     var serie: [Int]? = nil
     var position = 0
+    /// sur le Mac, pendant « Tout vérifier » : la page officielle de chaque
+    /// colis s'ouvre d'elle-meme dans le navigateur
+    var ouvreLaPage = false
     var id: Int { colisID }
 }
 

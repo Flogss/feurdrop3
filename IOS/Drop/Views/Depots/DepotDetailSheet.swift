@@ -10,6 +10,7 @@ struct DepotDetailSheet: View {
     let suivant: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var detail: DepotDetail?
     @State private var constatEnCours: DepotConstatChoix?
 
@@ -52,6 +53,13 @@ struct DepotDetailSheet: View {
         .task(id: ouvert.colisID) {
             detail = nil
             detail = await model.detail(ouvert.colisID)
+            // la page officielle s'ouvre dans le navigateur du Mac (un onglet
+            // de plus, le meme navigateur) : on y lit le vrai statut, rien
+            // n'est lu ni note a notre place
+            if ouvert.ouvreLaPage, let d = detail, d.manuel,
+               let lien = d.liens?.transporteur ?? d.liens?.page, let url = URL(string: lien) {
+                openURL(url)
+            }
         }
     }
 
@@ -178,11 +186,19 @@ struct DepotDetailSheet: View {
                  : "L'API La Poste ne permet pas de trancher pour ce colis : ouvre le suivi officiel, puis note ce que tu y vois :")
                 .font(.footnote)
                 .foregroundStyle(Theme.text2)
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                bouton(.etiquette, "Étiquette créée", "doc.text", .nonConfirme)
+                bouton(.pasEncore, "En attente de dépôt", "clock", .nonConfirme)
                 bouton(.pris, "Pris en charge", "checkmark", .confirme)
-                bouton(.pasEncore, "Pas encore", "clock", .nonConfirme)
+                bouton(.transit, "En transit", "shippingbox", .confirme)
+                bouton(.livre, "Livré", "checkmark.seal", .confirme)
+                bouton(.inconnu, "Statut inconnu", "questionmark", .aVerifier)
+                bouton(.bloque, "Page bloquée", "lock", .bloque)
                 bouton(.probleme, "Problème", "exclamationmark.triangle.fill", .aVerifier)
             }
+            Text("Seuls « Pris en charge », « En transit » et « Livré » confirment le dépôt.")
+                .font(.caption)
+                .foregroundStyle(Theme.text3)
             if let constat = d.controle.constat {
                 Button("Effacer le constat (\(ilYa(constat.le)))") { Task { await constate(.annule) } }
                     .font(.footnote)

@@ -119,6 +119,22 @@ struct CampagneCard: View {
             chiffre(n.erreurs, "erreurs techniques", DepotCategorie.aVerifier.couleur)
             chiffre(n.aConstater, "à constater (UPS)", DepotCategorie.bloque.couleur)
         }
+        if !app.depots.numerosAConstater.isEmpty {
+            // UPS interdit la lecture automatisee de son site et son API est
+            // payante : la page officielle s'ouvre, on note ce qu'on y voit
+            Button {
+                app.depots.demandeSerieAConstater()
+            } label: {
+                Label(Platform.isMac
+                      ? "Constater \(app.depots.numerosAConstater.count) UPS (pages officielles dans le navigateur)"
+                      : "Constater \(app.depots.numerosAConstater.count) UPS sur la page officielle",
+                      systemImage: "safari")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 42)
+            }
+            .boutonVerre()
+        }
         if let lignes = etat.parTransporteur, !lignes.isEmpty {
             VStack(spacing: 6) {
                 ForEach(lignes) { t in ligne(t, active: etat.active) }

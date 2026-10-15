@@ -158,7 +158,10 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     // disponible chez le vendeur, souci, livraison) -- pour le detail, sans alerte
     const apres = retenus.find((e) => e.ms != null && e.ms > p.ms && (e.incident || ["delivered", "available_for_pickup", "exception"].includes(e.etape)));
     const suite = apres ? { libelle: apres.libelle || ETAPES_FR[apres.etape], le: apres.survenuLe, etape: apres.etape, retour: Boolean(apres.incident) } : null;
-    if (p.source === "manuel") return resultat("confirme", `Prise en charge constatée à la main sur la page officielle le ${heureLisible(p.ms)}.`, { preuve, suite });
+    if (p.source === "manuel") {
+      const vu = { MANUEL_TRANSIT: "En transit : constaté", MANUEL_LIVRE: "Livré après prise en charge : constaté" }[p.code] || "Prise en charge constatée";
+      return resultat("confirme", `${vu} à la main sur la page officielle le ${heureLisible(p.ms)}.`, { preuve, suite });
+    }
     const seulementLivre = preuves.every((e) => e.etape === "delivered");
     const ou = p.source && p.source !== "laposte" ? ` — ${SOURCES_FR[p.source] || p.source}` : "";
     const raison = seulementLivre
@@ -168,13 +171,21 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   }
 
   // --- constats a la main sans preuve -------------------------------------------------
-  if (dernierConstat && dernierConstat.code === "MANUEL_PAS_ENCORE") {
+  if (dernierConstat && (dernierConstat.code === "MANUEL_PAS_ENCORE" || dernierConstat.code === "MANUEL_ETIQUETTE")) {
     const perime = dernierConstat.ms != null && maintenant - dernierConstat.ms > CONSTAT_PERIME;
     return resultat(
       "non_confirme",
       `Pas encore pris en charge d'après la page officielle (constaté le ${heureLisible(dernierConstat.ms)})${perime ? " : à revérifier" : ""}.`,
       { enRetard: retard || perime }
     );
+  }
+  if (dernierConstat && dernierConstat.code === "MANUEL_INCONNU") {
+    return resultat("a_verifier", `Statut inconnu sur la page officielle (constaté le ${heureLisible(dernierConstat.ms)}) : aucune prise en charge visible, à revoir.`, {
+      enRetard: retard,
+    });
+  }
+  if (dernierConstat && dernierConstat.code === "MANUEL_BLOQUE") {
+    return resultat("bloque", `La page officielle n'a pas pu être consultée (constaté le ${heureLisible(dernierConstat.ms)}) : à refaire plus tard.`);
   }
   if (dernierConstat && dernierConstat.code === "MANUEL_PROBLEME") {
     return resultat("a_verifier", `Problème signalé à la main le ${heureLisible(dernierConstat.ms)}, sans prise en charge visible : à regarder sur la page officielle.`, { enRetard: true });
