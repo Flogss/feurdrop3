@@ -70,6 +70,11 @@ struct LaunchSequence: View {
     /// juste apres le mot de passe : la sequence reprend au coeur de la meteorite
     var apresConnexion = false
     var onRevelation: () -> Void
+    /// juste avant l'onde (0,25 s) : l'interface, encore couverte par la
+    /// scene opaque, se remet a etre dessinee -- avant, elle l'etait (floue)
+    /// pendant toute la sequence, pour rien, et prenait la carte graphique a
+    /// la meteorite
+    var onPreparation: () -> Void = {}
     var onLogoPose: () -> Void = {}
     var onFin: () -> Void
 
@@ -113,6 +118,7 @@ struct LaunchSequence: View {
             #if DEBUG
             // `-DropSansIntro 1` : directement l'interface (verifications)
             if UserDefaults.standard.bool(forKey: "DropSansIntro") {
+                onPreparation()
                 onRevelation()
                 onLogoPose()
                 onFin()
@@ -157,6 +163,7 @@ struct LaunchSequence: View {
         #if DEBUG
         if let fige = Self.fige {
             logoActif = fige >= Scenario.logo - 0.05
+            if fige >= Scenario.revelation - 0.25 { onPreparation() }
             if fige >= Scenario.revelation { onRevelation() }
             return
         }
@@ -178,6 +185,8 @@ struct LaunchSequence: View {
             guard await attends(Scenario.logo + 0.08) else { return }
             Haptics.soft()
         }
+        guard await attends(Scenario.revelation - 0.25) else { return }
+        onPreparation()
         guard await attends(Scenario.revelation) else { return }
         onRevelation()
         if cible != nil {

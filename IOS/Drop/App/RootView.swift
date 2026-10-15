@@ -15,6 +15,9 @@ struct RootView: View {
     @State private var booted = false
     @State private var lancement = true
     @State private var arrivee = TabArrivalState()
+    /// l'interface sous la sequence de lancement : rien n'est dessine tant que
+    /// la scene opaque la couvre entierement (voir `onPreparation`)
+    @State private var dessinee = false
 
     /// Sans session (premiere ouverture, 72 h ecoulees, deconnexion) :
     /// l'ecran de connexion, et rien d'autre ne se charge.
@@ -38,6 +41,7 @@ struct RootView: View {
             // onglet a le sien, et celui-ci, cache dessous, se dessinait pour rien
             if !booted {
                 AmbientBackground()
+                    .environment(\.fondEnPause, lancement && !dessinee)
                     .transition(.opacity)
             }
 
@@ -58,6 +62,9 @@ struct RootView: View {
             // puis nette) pendant que ses cartes entrent
             .scaleEffect(booted ? 1 : 1.04)
             .blur(radius: booted ? 0 : 10)
+            .opacity(dessinee || !lancement ? 1 : 0)
+            // (les fonds des onglets attendent aussi l'onde)
+            .environment(\.fondEnPause, lancement && !dessinee)
         }
         .environment(\.tabArrival, arrivee)
         .sensoryFeedback(.selection, trigger: app.tab)
@@ -70,7 +77,7 @@ struct RootView: View {
         }
         .overlay {
             if lancement {
-                LaunchSequence(cible: nil, apresConnexion: app.vientDeSeConnecter, onRevelation: revele, onFin: {
+                LaunchSequence(cible: nil, apresConnexion: app.vientDeSeConnecter, onRevelation: revele, onPreparation: { dessinee = true }, onFin: {
                     lancement = false
                     app.vientDeSeConnecter = false
                 })

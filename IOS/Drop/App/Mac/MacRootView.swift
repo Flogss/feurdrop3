@@ -78,6 +78,9 @@ struct MacRootView: View {
     @State private var lancement = true
     @State private var cadreMarque: CGRect?
     @State private var marquePosee = false
+    /// l'interface sous la sequence de lancement : rien n'est dessine tant que
+    /// la scene opaque la couvre entierement (voir `onPreparation`)
+    @State private var dessinee = false
 
     /// Sans session : l'ecran de connexion, et rien d'autre ne se charge.
     var body: some View {
@@ -98,6 +101,7 @@ struct MacRootView: View {
         @Bindable var app = app
         return ZStack(alignment: .top) {
             AmbientBackground()
+                .environment(\.fondEnPause, lancement && !dessinee)
 
             ZStack {
                 page(app.pageMac)
@@ -109,12 +113,14 @@ struct MacRootView: View {
             // se pose (un peu grande et floue, puis nette)
             .blur(radius: booted ? 0 : 12)
             .scaleEffect(booted ? 1 : 1.03)
+            .opacity(dessinee || !lancement ? 1 : 0)
 
             MacTopBar(
                 selection: Binding(get: { app.pageMac }, set: { va(vers: $0) }),
                 marquePosee: marquePosee,
                 surCadreMarque: { cadreMarque = $0 }
             )
+            .opacity(dessinee || !lancement ? 1 : 0)
         }
         .ignoresSafeArea(.container, edges: .top)
         .controlSize(.large)
@@ -131,6 +137,7 @@ struct MacRootView: View {
                     cible: cadreMarque,
                     apresConnexion: app.vientDeSeConnecter,
                     onRevelation: revele,
+                    onPreparation: { dessinee = true },
                     onLogoPose: { marquePosee = true },
                     onFin: {
                         marquePosee = true
@@ -264,6 +271,14 @@ struct MacRootView: View {
     /// La page affichee se relit toutes les 5 secondes tant que la fenetre est
     /// ouverte ; changer de page relit tout de suite.
     private func boucle() async {
+        // une page qui a deja ses donnees se relit APRES son entree (le ressort
+        // de la transition dure ~0,6 s) : une mise a jour en pleine animation
+        // refaisait la mise en page de toute la page a mi-chemin. Une page
+        // encore vide se charge tout de suite.
+        if booted, pageChargee(app.pageMac) {
+            try? await Task.sleep(for: .milliseconds(650))
+            if Task.isCancelled { return }
+        }
         if app.pageMac == .stats {
             await app.stats.refresh(animated: true)
         } else if booted || app.pageMac != .dashboard {
@@ -273,6 +288,19 @@ struct MacRootView: View {
             try? await Task.sleep(for: .seconds(5))
             if Task.isCancelled { break }
             await app.refreshVisible()
+        }
+    }
+}
+
+extension MacRootView {
+    /// la page a-t-elle deja ses donnees en memoire ?
+    func pageChargee(_ page: MacPage) -> Bool {
+        switch page {
+        case .dashboard, .settings, .historique, .depots: app.dashboard.loaded
+        case .printing: app.printing.pending != nil
+        case .stats: app.stats.loaded
+        case .tracking: app.tracking.loaded
+        case .locker: app.locker.loaded
         }
     }
 }

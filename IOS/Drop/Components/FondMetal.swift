@@ -84,7 +84,12 @@ nonisolated final class MoteurFond: @unchecked Sendable {
         nonisolated(unsafe) let lien = CAMetalDisplayLink(metalLayer: couche)
         // le fond n'a pas besoin de 120 images par seconde : 60 sur Mac, 30 sur
         // iPhone (les cadences de l'ancien fond)
-        let cadence: Float = variante == .mac ? 60 : 30
+        var cadence: Float = variante == .mac ? 60 : 30
+        #if DEBUG || PERF_HOOKS
+        // mesures : `-DropFondCadence 30`
+        let forcee = UserDefaults.standard.float(forKey: "DropFondCadence")
+        if forcee > 0 { cadence = forcee }
+        #endif
         lien.preferredFrameRateRange = CAFrameRateRange(minimum: cadence / 2, maximum: cadence, preferred: cadence)
         lien.delegate = delegue
         let fil = Thread {
@@ -787,16 +792,23 @@ nonisolated enum ParallaxePartagee {
 /// Le fond Metal dans SwiftUI. Il ne s'anime que lorsqu'il est a l'ecran : un
 /// onglet cache, une fenetre recouverte ou une app en arriere-plan ne
 /// dessinent plus rien.
+extension EnvironmentValues {
+    /// le fond est entierement couvert (la sequence de lancement, opaque) :
+    /// il ne dessine rien
+    @Entry var fondEnPause = false
+}
+
 struct FondMetalVue: View {
     let variante: MoteurFond.Variante
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.fondEnPause) private var enPause
 
     var body: some View {
         // (un GeometryReader qui ignore les marges, comme la meteorite : pose
         // directement sur la vue AppKit/UIKit, `ignoresSafeArea` ne la fait
         // pas passer sous la barre de titre -- les etoiles se decalaient)
         GeometryReader { geo in
-            Hote(variante: variante, reduceMotion: reduceMotion)
+            Hote(variante: variante, reduceMotion: reduceMotion, pause: enPause)
                 .frame(width: geo.size.width, height: geo.size.height)
         }
         .ignoresSafeArea()
@@ -808,9 +820,12 @@ struct FondMetalVue: View {
     struct Hote: UIViewRepresentable {
         let variante: MoteurFond.Variante
         let reduceMotion: Bool
+        let pause: Bool
 
         final class Vue: UIView {
             let moteur: MoteurFond
+            var pause = false { didSet { if pause != oldValue { maj() } } }
+            private var avantPlan = true
             init(moteur: MoteurFond) {
                 self.moteur = moteur
                 super.init(frame: .zero)
@@ -830,27 +845,36 @@ struct FondMetalVue: View {
             }
             override func didMoveToWindow() {
                 super.didMoveToWindow()
-                moteur.visible(window != nil && UIApplication.shared.applicationState != .background)
+                avantPlan = UIApplication.shared.applicationState != .background
+                maj()
             }
-            @objc private func actif() { moteur.visible(window != nil) }
-            @objc private func inactif() { moteur.visible(false) }
+            @objc private func actif() { avantPlan = true; maj() }
+            @objc private func inactif() { avantPlan = false; maj() }
+            /// dans une fenetre, au premier plan, pas couvert : le fond s'anime
+            private func maj() { moteur.visible(window != nil && avantPlan && !pause) }
             deinit { moteur.visible(false) }
         }
 
         func makeUIView(context: Context) -> Vue {
             let v = Vue(moteur: MoteurFond(variante: variante))
             v.moteur.figeMouvement(reduceMotion)
+            v.pause = pause
             return v
         }
-        func updateUIView(_ vue: Vue, context: Context) { vue.moteur.figeMouvement(reduceMotion) }
+        func updateUIView(_ vue: Vue, context: Context) {
+            vue.moteur.figeMouvement(reduceMotion)
+            vue.pause = pause
+        }
     }
     #else
     struct Hote: NSViewRepresentable {
         let variante: MoteurFond.Variante
         let reduceMotion: Bool
+        let pause: Bool
 
         final class Vue: NSView {
             let moteur: MoteurFond
+            var pause = false { didSet { if pause != oldValue { moteur.visible(window != nil && !pause) } } }
             init(moteur: MoteurFond) {
                 self.moteur = moteur
                 super.init(frame: .zero)
@@ -874,7 +898,7 @@ struct FondMetalVue: View {
                 }
                 // dans une fenetre : la boucle tourne ; elle ne dessine que si la
                 // fenetre est visible (l'etat arrive par notification)
-                moteur.visible(window != nil)
+                moteur.visible(window != nil && !pause)
             }
             /// une fenetre recouverte, miniaturisee ou sur un autre bureau ne dessine plus
             @objc private func occlusion() {
@@ -887,9 +911,13 @@ struct FondMetalVue: View {
         func makeNSView(context: Context) -> Vue {
             let v = Vue(moteur: MoteurFond(variante: variante))
             v.moteur.figeMouvement(reduceMotion)
+            v.pause = pause
             return v
         }
-        func updateNSView(_ vue: Vue, context: Context) { vue.moteur.figeMouvement(reduceMotion) }
+        func updateNSView(_ vue: Vue, context: Context) {
+            vue.moteur.figeMouvement(reduceMotion)
+            vue.pause = pause
+        }
     }
     #endif
 }
