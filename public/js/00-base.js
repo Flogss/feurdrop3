@@ -93,9 +93,16 @@ async function fetchJSON(url, opts = {}, { delai = 12000, essais } = {}) {
     const minuteur = setTimeout(() => ctrl.abort(), delai);
     try {
       const res = await fetch(url, { ...opts, signal: ctrl.signal });
+      // le corps est lu SOUS le meme delai : une reponse qui arrive au
+      // compte-gouttes ne tient pas un chargement indefiniment
+      if (!res.ok) {
+        const message = (await res.json().catch(() => ({}))).error || res.statusText;
+        clearTimeout(minuteur);
+        throw new Error(message);
+      }
+      const corps = await res.json();
       clearTimeout(minuteur);
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
-      return res.json();
+      return corps;
     } catch (err) {
       clearTimeout(minuteur);
       const reseau = err.name === "AbortError" || err instanceof TypeError;

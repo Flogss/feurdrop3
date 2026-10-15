@@ -3,12 +3,20 @@ const { listePaires, getPaire } = require("../specials");
 const { getBot, finiCodeSeul } = require("../bot");
 const { renduPng } = require("../rasterInk");
 const { routeAsync } = require("../http");
+const { idempotence } = require("../idempotence");
 
 // Mode locker : les codes-barres du topic special, dans l'ordre des numeros
 // imprimes sur les etiquettes. Devant le locker, on lit "#3" sur le colis et
 // le telephone montre le code #3.
 
 const router = express.Router();
+// « Fait » renvoye apres une coupure : applique une seule fois
+router.use(idempotence());
+
+// une ressource externe (Telegram) qui ne repond plus ne doit jamais tenir la
+// requete -- ni le telephone devant le locker -- indefiniment
+const avecDelai = (promesse, ms, quoi) =>
+  Promise.race([promesse, new Promise((_, rejette) => setTimeout(() => rejette(new Error(`${quoi} : délai dépassé`)), ms).unref())]);
 
 router.get("/paires", (req, res) => {
   res.json({
@@ -56,8 +64,8 @@ router.get("/code/:id", routeAsync(async (req, res) => {
   if (!bot) return res.status(503).json({ error: "bot non demarre" });
 
   try {
-    const lien = await bot.getFileLink(paire.code_file_id);
-    const reponse = await fetch(lien);
+    const lien = await avecDelai(bot.getFileLink(paire.code_file_id), 10000, "Telegram");
+    const reponse = await fetch(lien, { signal: AbortSignal.timeout(20000) });
     if (!reponse.ok) throw new Error(`Telegram HTTP ${reponse.status}`);
     let bytes = Buffer.from(await reponse.arrayBuffer());
     let type = reponse.headers.get("content-type") || "image/jpeg";
@@ -78,7 +86,10 @@ router.get("/code/:id", routeAsync(async (req, res) => {
     res.setHeader("Cache-Control", "private, max-age=86400");
     res.send(bytes);
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    // dit dans le journal du serveur : un code qui ne s'affiche pas devant le
+    // locker doit pouvoir s'expliquer
+    console.warn(`[locker] code #${paire.numero} (paire ${id}) indisponible : ${err.name === "TimeoutError" ? "Telegram ne répond pas" : err.message}`);
+    res.status(502).json({ error: err.name === "TimeoutError" ? "Telegram ne répond pas : réessaie dans un instant" : err.message });
   }
 }));
 

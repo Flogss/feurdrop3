@@ -249,6 +249,26 @@ private struct CodePage: View {
                         .background(.white, in: .rect(cornerRadius: 16))
                         .rotationEffect(.degrees(tourner ? 90 : 0))
                         .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                } else if pair.code, let erreur = app.locker.imageErreurs[pair.id] {
+                    // le code n'arrive pas : on le dit (et pourquoi), on peut
+                    // reessayer ; le reste du locker continue
+                    VStack(spacing: 14) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 40))
+                            .foregroundStyle(Theme.warn)
+                        Text("Code #\(pair.numero) indisponible").font(.headline).foregroundStyle(.white)
+                        Text(erreur).font(.subheadline).foregroundStyle(.white.opacity(0.65)).multilineTextAlignment(.center)
+                        Button {
+                            Task { await app.locker.reessaieImage(pair) }
+                        } label: {
+                            Label("Réessayer", systemImage: "arrow.clockwise")
+                                .font(.headline)
+                                .padding(.horizontal, 18)
+                                .frame(height: 48)
+                        }
+                        .boutonVerre()
+                    }
+                    .padding(.horizontal, 32)
+                    .transition(.opacity)
                 } else if pair.code {
                     ProgressView().tint(.white).controlSize(.large)
                 } else {

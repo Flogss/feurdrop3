@@ -10,6 +10,7 @@ final class StatsModel {
     private(set) var days: [DayRevenue] = []
     private(set) var weeks: [WeekRevenue] = []
     private(set) var loaded = false
+    private(set) var loadError: String?
     /// chaque arrivee sur l'onglet rejoue la revelation des graphiques
     private(set) var reveal = 0
 
@@ -70,10 +71,12 @@ final class StatsModel {
             if jours != days { days = jours }
             if semaines != weeks { weeks = semaines }
             if !loaded { withAnimation(Theme.spring) { loaded = true } }
+            loadError = nil
             if animated { reveal += 1 }
             signatureChargee = signature
             chargeeLe = .now
         } catch {
+            if !loaded { loadError = app.messageEchec(error) }
             app.report(error)
         }
     }

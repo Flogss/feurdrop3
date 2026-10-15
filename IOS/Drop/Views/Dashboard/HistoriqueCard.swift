@@ -32,7 +32,9 @@ struct HistoriqueCard: View {
             if avecTitre { SectionHeader("Historique") }
             filtres($model.filtre)
 
-            if !model.loaded {
+            if !model.loaded, let erreur = model.loadError {
+                ChargementImpossible(titre: "Historique indisponible", message: erreur) { await model.refresh() }
+            } else if !model.loaded {
                 VStack(spacing: 8) {
                     SkeletonRow(height: 48)
                     SkeletonRow(height: 48)

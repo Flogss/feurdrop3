@@ -522,6 +522,8 @@ body.locker-ouvert { overflow: hidden; }
   text-align: center;
   white-space: nowrap;
 }
+/* un code qui n'a pas pu etre charge : on peut toucher pour reessayer */
+.locker-missing.is-erreur { cursor: pointer; border-color: #e08a1e; color: #e08a1e; white-space: normal; max-width: 86%; }
 .locker-info { margin-bottom: 10px; text-align: center; }
 .locker-file { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .locker-sub { margin-top: 2px; font-size: 13px; color: #5b5868; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

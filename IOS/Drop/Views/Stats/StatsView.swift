@@ -31,6 +31,9 @@ struct StatsView: View {
                             grapheSemaines
                             grapheExpediteurs
                         }
+                    } else if let erreur = model.loadError {
+                        ChargementImpossible(message: erreur) { await model.refresh(animated: true) }
+                            .surfaceCard()
                     } else {
                         SkeletonRow(height: 130)
                         SkeletonRow(height: 280)

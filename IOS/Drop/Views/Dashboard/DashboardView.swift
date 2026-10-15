@@ -60,6 +60,10 @@ struct DashboardView: View {
                             colonnePrincipale(stats)
                             colonneSecondaire(stats)
                         }
+                    } else if booted, let erreur = model.loadError {
+                        // le premier chargement a echoue : jamais un squelette sans fin
+                        ChargementImpossible(message: erreur) { await model.refresh() }
+                            .surfaceCard()
                     } else {
                         DashboardSkeleton()
                     }

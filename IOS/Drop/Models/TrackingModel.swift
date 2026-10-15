@@ -9,6 +9,7 @@ final class TrackingModel {
 
     private(set) var overview: TrackingOverview?
     private(set) var loaded = false
+    private(set) var loadError: String?
     /// la verification en cours (ou la derniere, le temps qu'elle se referme)
     private(set) var live: LiveJob?
     private(set) var liveRunning = false
@@ -43,6 +44,7 @@ final class TrackingModel {
         do {
             let o = try await app.api.trackingOverview()
             app.reachedServer()
+            loadError = nil
             if o != overview || !loaded {
                 withAnimation(Theme.spring) {
                     overview = o
@@ -50,6 +52,7 @@ final class TrackingModel {
                 }
             }
         } catch {
+            if !loaded { loadError = app.messageEchec(error) }
             app.report(error)
         }
     }

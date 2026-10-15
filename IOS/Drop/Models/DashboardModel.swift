@@ -11,6 +11,9 @@ final class DashboardModel {
     /// le stock affiche : il suit le doigt tout de suite, le serveur confirme
     private(set) var stock: Stock?
     private(set) var loaded = false
+    /// le premier chargement a echoue : l'ecran le dit (avec « Réessayer »)
+    /// au lieu d'un squelette sans fin
+    private(set) var loadError: String?
 
     /// Le depart de chaque grand compteur au premier affichage : l'ancienne
     /// valeur de CET appareil (avec bulle "+N") s'il y a du nouveau, sinon
@@ -56,6 +59,7 @@ final class DashboardModel {
             async let k = app.api.stock()
             let (nouvelles, stockServeur) = try await (s, k)
             app.reachedServer()
+            if loadError != nil { loadError = nil }
             applique(nouvelles)
             appliqueStock(stockServeur)
             // l'historique (le dernier evenement, sous son bouton) et la pastille
@@ -67,6 +71,7 @@ final class DashboardModel {
             await depots
             markSeenIfNeeded()
         } catch {
+            if !loaded { loadError = app.messageEchec(error) }
             app.report(error)
         }
     }

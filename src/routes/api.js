@@ -1,4 +1,5 @@
 const express = require("express");
+const { idempotence } = require("../idempotence");
 const {
   db,
   transaction,
@@ -76,40 +77,9 @@ function sourceDe(req) {
 }
 router.use((req, res, next) => avecSource(sourceDe(req), next));
 
-// Une meme operation recue deux fois n'est appliquee qu'une fois. Le site et
-// l'app joignent une cle unique (en-tete Idempotency-Key) a chaque operation
-// qui compte (ajout de colis, stock) : si le reseau coupe APRES que le serveur
-// l'a appliquee, ils peuvent la renvoyer sans risque -- la reponse d'origine
-// est rejouee au lieu d'ajouter un colis ou une pochette de plus.
-const operations = new Map(); // cle -> { at, status, corps }
-const OPERATION_TTL_MS = 30 * 60 * 1000;
-router.use((req, res, next) => {
-  const cle = req.get("idempotency-key");
-  if (!cle || req.method === "GET") return next();
-  const maintenant = Date.now();
-  for (const [k, op] of operations) if (maintenant - op.at > OPERATION_TTL_MS) operations.delete(k);
-  const deja = operations.get(cle);
-  if (deja) {
-    if (deja.enCours) return res.status(409).json({ error: "Opération déjà en cours" });
-    res.set("Idempotent-Replay", "true");
-    return res.status(deja.status).json(deja.corps);
-  }
-  operations.set(cle, { at: maintenant, enCours: true });
-  const envoie = res.json.bind(res);
-  res.json = (corps) => {
-    // une erreur du serveur n'a rien applique (les ecritures groupees sont
-    // dans une transaction) : la cle est liberee pour qu'un nouvel essai
-    // refasse l'operation au lieu de rejouer l'erreur
-    if (res.statusCode >= 500) operations.delete(cle);
-    else operations.set(cle, { at: Date.now(), status: res.statusCode, corps });
-    return envoie(corps);
-  };
-  // une reponse qui n'est pas du JSON (erreur imprevue) libere la cle
-  res.on("finish", () => {
-    if (operations.get(cle)?.enCours) operations.delete(cle);
-  });
-  next();
-});
+// Une meme operation recue deux fois n'est appliquee qu'une fois (voir
+// idempotence.js) : ajout de colis, stock...
+router.use(idempotence());
 
 // --- Journal ------------------------------------------------------------------
 // L'historique affiche en bas du dashboard, du plus recent au plus ancien.

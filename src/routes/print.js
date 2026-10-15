@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const express = require("express");
+const { idempotence } = require("../idempotence");
 const {
   getPrintableSummary,
   getPrintableColis,
@@ -45,6 +46,8 @@ const TRANSPORTEURS = CARRIERS.filter((c) => c.code !== "BJ").map((c) => ({ code
 // liste "a imprimer" sans etre jamais sortie -- elle etait oubliee.
 
 const router = express.Router();
+// une operation renvoyee apres une coupure (drop, impression confirmee...) n'est appliquee qu'une fois
+router.use(idempotence());
 
 const jobs = new Map(); // id -> { pdf, name, at, ids, marque }
 const JOB_TTL_MS = 15 * 60 * 1000;
@@ -283,7 +286,13 @@ router.patch("/colis/:id", (req, res) => {
 router.post("/colis/:id/drop", (req, res) => {
   const id = Number(req.params.id);
   const drope = dropColis(id);
-  if (!drope) return fail(res, new Error("colis introuvable ou deja drope"), 404);
+  if (!drope) {
+    // deja drope (un premier envoi passe, sa reponse perdue en route) : c'est
+    // le resultat voulu -- on le dit, sans rien refaire (ni stock, ni journal)
+    const colis = getColisById(id);
+    if (colis?.status === "dropped") return res.json({ ok: true, id, deja: true });
+    return fail(res, new Error("colis introuvable ou deja drope"), 404);
+  }
   consumeStock(drope);
   refreshColisButtons(id);
   refreshGroupStats();

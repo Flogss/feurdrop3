@@ -29,7 +29,10 @@ struct TrackingView: View {
                         }
                         .surfaceCard()
                     }
-                    if !model.loaded {
+                    if !model.loaded, let erreur = model.loadError {
+                        ChargementImpossible(message: erreur) { await model.refresh() }
+                            .surfaceCard()
+                    } else if !model.loaded {
                         SkeletonRow(height: 160)
                         SkeletonRow(height: 220)
                     }

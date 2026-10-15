@@ -245,6 +245,14 @@ final class AppModel {
         }
     }
 
+    /// Ce qu'un ecran dit d'un premier chargement rate (nil : une annulation,
+    /// rien a dire -- l'ecran garde son squelette, un nouvel essai suit).
+    func messageEchec(_ error: any Error) -> String? {
+        if error is CancellationError { return nil }
+        if let api = error as? APIError, api.exigeConnexion { return nil }
+        return (error as? LocalizedError)?.errorDescription ?? "Chargement impossible"
+    }
+
     /// Le geste type : l'action part ; un echec est signale (message +
     /// vibration) et rend `nil`.
     @discardableResult

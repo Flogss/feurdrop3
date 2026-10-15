@@ -192,8 +192,10 @@ public struct DropAPI: Sendable {
         try await client.send(.patch, "/api/print/colis/\(id)", body: patch)
     }
 
+    /// Une operation identifiee (Idempotency-Key) : renvoyee apres une coupure,
+    /// elle n'est appliquee qu'une fois ; un colis deja drope repond « deja fait ».
     public func dropParcel(_ id: Int) async throws {
-        _ = try await client.raw(.post, "/api/print/colis/\(id)/drop")
+        _ = try await client.raw(.post, "/api/print/colis/\(id)/drop", timeout: 12, operation: true)
     }
 
     /// retire le colis et efface son fichier sur Telegram
@@ -358,7 +360,7 @@ public struct DropAPI: Sendable {
 
     /// "Fait" sur un code seul : la paire s'en va une fois le locker ouvert
     public func completeAlonePair(_ id: Int) async throws {
-        _ = try await client.raw(.post, "/api/special/paires/\(id)/fini")
+        _ = try await client.raw(.post, "/api/special/paires/\(id)/fini", timeout: 12, operation: true)
     }
 
     // MARK: - Suivi des colis

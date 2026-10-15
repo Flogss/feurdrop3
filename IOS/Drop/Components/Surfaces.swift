@@ -227,6 +227,43 @@ struct EmptyStateView: View {
     }
 }
 
+/// Un premier chargement qui a echoue : on dit pourquoi et on propose de
+/// reessayer -- jamais un squelette ou une roue sans fin. (La relecture
+/// automatique continue en fond : l'ecran se remplit seul si le serveur
+/// revient.)
+struct ChargementImpossible: View {
+    var titre = "Chargement impossible"
+    let message: String
+    let reessaie: () async -> Void
+    @State private var enCours = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            EmptyStateView(symbol: "wifi.exclamationmark", title: titre, subtitle: message)
+            Button {
+                guard !enCours else { return }
+                Task {
+                    enCours = true
+                    defer { enCours = false }
+                    await reessaie()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if enCours { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
+                    Text("Réessayer")
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .frame(height: 40)
+            }
+            .boutonVerre()
+            .disabled(enCours)
+        }
+        .padding(.bottom, 18)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 /// Le scintillement d'un chargement.
 struct Shimmer: ViewModifier {
     @State private var phase: CGFloat = -1

@@ -35,7 +35,10 @@ struct LockerView: View {
                 .boutonVerreFort(Theme.special)
                 .disabled(model.pairs.isEmpty)
 
-                if !model.loaded {
+                if !model.loaded, let erreur = model.loadError {
+                    ChargementImpossible(message: erreur) { await model.refresh() }
+                        .surfaceCard()
+                } else if !model.loaded {
                     LazyVGrid(columns: colonnes, spacing: 12) {
                         ForEach(0..<4, id: \.self) { _ in SkeletonRow(height: 190) }
                     }
@@ -101,6 +104,20 @@ private struct PairCard: View {
                         .scaledToFit()
                         .padding(8)
                         .transition(.opacity)
+                } else if pair.code, app.locker.imageErreurs[pair.id] != nil {
+                    // le code n'a pas pu etre charge : on le dit, on peut reessayer
+                    Button {
+                        Task { await app.locker.reessaieImage(pair) }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Réessayer").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(Theme.danger)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Code #\(pair.numero) indisponible : réessayer")
                 } else if pair.code {
                     ProgressView().tint(.gray)
                 } else {

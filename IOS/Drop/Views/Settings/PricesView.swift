@@ -17,6 +17,10 @@ struct PricesView: View {
 
     var body: some View {
         List {
+            if !model.loaded, let erreur = model.loadError {
+                ChargementImpossible(message: erreur) { await model.refresh() }
+                    .listRowBackground(Color.clear)
+            }
             if model.senders.isEmpty && model.loaded {
                 EmptyStateView(symbol: "tag", title: "Aucun expéditeur", subtitle: "Ajoute le premier avec +.")
                     .listRowBackground(Color.clear)

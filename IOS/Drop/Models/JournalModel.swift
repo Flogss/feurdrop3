@@ -11,6 +11,7 @@ final class JournalModel {
     private(set) var entrees: [EntreeJournal] = []
     private(set) var suite = false
     private(set) var loaded = false
+    private(set) var loadError: String?
     private(set) var chargeSuite = false
     var filtre: FiltreJournal = .tout {
         didSet {
@@ -28,7 +29,16 @@ final class JournalModel {
 
     func refresh() async {
         let demande = filtre
-        guard let page = try? await app.api.journal(filtre: demande) else { return }
+        let page: PageJournal
+        do {
+            page = try await app.api.journal(filtre: demande)
+            loadError = nil
+        } catch {
+            // (l'historique est un confort : pas de message d'erreur global ;
+            // mais sa carte ne reste pas en squelette)
+            if !loaded { loadError = app.messageEchec(error) }
+            return
+        }
         guard demande == filtre else { return }
         // les lignes deja chargees au-dela de la premiere page restent
         let plusAnciennes = entrees.filter { e in !page.entrees.contains { $0.id == e.id } && e.id < (page.entrees.last?.id ?? 0) }

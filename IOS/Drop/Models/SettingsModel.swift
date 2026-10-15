@@ -11,6 +11,7 @@ final class SettingsModel {
     private(set) var senders: [Sender] = []
     private(set) var candidates: [MergeCandidate] = []
     private(set) var loaded = false
+    private(set) var loadError: String?
     private(set) var notificationStatus: UNAuthorizationStatus = .notDetermined
     private(set) var busy: Set<String> = []
     private(set) var celebration = 0
@@ -29,6 +30,7 @@ final class SettingsModel {
             async let c = app.api.mergeCandidates()
             let (dettes, expediteurs, candidats) = try await (d, s, c)
             app.reachedServer()
+            loadError = nil
             withAnimation(Theme.spring) {
                 if dettes != debts { debts = dettes }
                 if expediteurs != senders { senders = expediteurs }
@@ -36,6 +38,7 @@ final class SettingsModel {
                 loaded = true
             }
         } catch {
+            if !loaded { loadError = app.messageEchec(error) }
             app.report(error)
         }
         notificationStatus = await NotificationService.status()

@@ -127,7 +127,29 @@ function ajusteCode() {
   img.classList.toggle("tourne", tourner);
 }
 
-$("locker-img").addEventListener("load", ajusteCode);
+$("locker-img").addEventListener("load", () => {
+  $("locker-missing").hidden = true;
+  ajusteCode();
+});
+// le code n'arrive pas (Telegram en erreur, reseau) : on le dit, et toucher
+// reessaie -- jamais une image cassee ou un vide sans explication
+$("locker-img").addEventListener("error", () => {
+  const p = lockerPaires[lockerIndex];
+  if (!p?.code) return;
+  $("locker-img").hidden = true;
+  const msg = $("locker-missing");
+  msg.textContent = `Code #${p.numero} indisponible · touche pour réessayer`;
+  msg.classList.add("is-erreur");
+  msg.hidden = false;
+});
+$("locker-missing").addEventListener("click", () => {
+  const p = lockerPaires[lockerIndex];
+  if (!p?.code || !$("locker-missing").classList.contains("is-erreur")) return;
+  const img = $("locker-img");
+  img.hidden = false;
+  $("locker-missing").hidden = true;
+  img.src = `/api/special/code/${p.id}?essai=${Date.now()}`;
+});
 window.addEventListener("resize", () => {
   if (!$("locker").hidden) ajusteCode();
 });
@@ -142,7 +164,10 @@ function afficheLocker(sens = 0) {
 
   const img = $("locker-img");
   img.hidden = !p.code;
-  $("locker-missing").hidden = Boolean(p.code);
+  const manque = $("locker-missing");
+  manque.hidden = Boolean(p.code);
+  manque.classList.remove("is-erreur");
+  manque.textContent = "Code pas encore arrivé";
   if (p.code) {
     const src = `/api/special/code/${p.id}`;
     if (img.getAttribute("src") !== src) {

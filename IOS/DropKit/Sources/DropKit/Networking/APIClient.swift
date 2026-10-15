@@ -134,7 +134,7 @@ public final class APIClient: Sendable {
         var derniere: APIError = .offline
         for essai in 1...essais {
             do {
-                let (data, reponse) = try await session.data(for: requete)
+                let (data, reponse) = try await donnees(requete, limite: timeout + 5)
                 guard let http = reponse as? HTTPURLResponse else { throw APIError.offline }
                 guard (200..<300).contains(http.statusCode) else {
                     let message = Self.message(from: data, status: http.statusCode)
@@ -154,6 +154,24 @@ public final class APIClient: Sendable {
             }
         }
         throw derniere
+    }
+
+    /// La requete, avec une limite DURE : le delai de URLRequest ne compte que
+    /// le silence entre deux paquets -- une reponse qui arrive au compte-gouttes
+    /// pourrait tenir un chargement sans fin. Passe `limite`, on abandonne
+    /// (la requete est annulee) et l'appelant recoit `.timeout`.
+    private func donnees(_ requete: URLRequest, limite: TimeInterval) async throws -> (Data, URLResponse) {
+        let session = session
+        return try await withThrowingTaskGroup(of: (Data, URLResponse).self) { groupe in
+            groupe.addTask { try await session.data(for: requete) }
+            groupe.addTask {
+                try await Task.sleep(for: .seconds(limite))
+                throw URLError(.timedOut)
+            }
+            defer { groupe.cancelAll() }
+            guard let premier = try await groupe.next() else { throw URLError(.timedOut) }
+            return premier
+        }
     }
 
     private static func message(from data: Data, status: Int) -> String {
