@@ -146,6 +146,10 @@ final class AppModel {
     func entreApresConnexion() {
         guard api.client.jeton != nil else { return }
         vientDeSeConnecter = true
+        #if os(iOS)
+        // le mot de passe vient d'etre tape : pas de Face ID en plus
+        VerrouFaceID.shared.deverrouilleApresConnexion()
+        #endif
         connecte = true
     }
 

@@ -16,6 +16,15 @@ struct DropApp: App {
         WindowGroup {
             RootView()
                 .environment(app)
+                // Face ID : le contenu prive reste cache tant que l'appareil
+                // n'a pas reconnu son proprietaire (et dans le selecteur d'apps)
+                .overlay {
+                    let verrou = VerrouFaceID.shared
+                    if app.connecte && verrou.actif && (verrou.verrouille || verrou.masque) {
+                        EcranVerrouille(verrou: verrou, appli: app)
+                            .transition(.opacity)
+                    }
+                }
                 .onOpenURL { app.ouvre($0) }
                 #if DEBUG
                 .onAppear { PerfProbe.shared.start() }
@@ -24,6 +33,7 @@ struct DropApp: App {
                 .tint(Theme.violet)
         }
         .onChange(of: scenePhase) { _, phase in
+            VerrouFaceID.shared.phase(phase)
             switch phase {
             case .background:
                 BackgroundRefresh.schedule()

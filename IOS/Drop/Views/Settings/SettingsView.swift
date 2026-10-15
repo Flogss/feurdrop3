@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage(ParcelWatch.tourKey) private var notifTournee = true
     #if os(iOS)
     @AppStorage(BackgroundListener.enabledKey) private var ecoute = true
+    @AppStorage(VerrouFaceID.cle) private var faceID = true
     #else
     // sur Mac, la veille tourne toujours (l'app reste ouverte)
     private let ecoute = true
@@ -87,6 +88,14 @@ struct SettingsView: View {
                     Label("Tournée", systemImage: "box.truck.fill")
                 }
                 #if os(iOS)
+                Toggle(isOn: $faceID) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Face ID à l'ouverture", systemImage: "faceid")
+                        Text("Verrouille Drop en arrière-plan (code de l'iPhone en secours)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.text3)
+                    }
+                }
                 Toggle(isOn: $ecoute) {
                     VStack(alignment: .leading, spacing: 2) {
                         Label("Écoute en arrière-plan", systemImage: "antenna.radiowaves.left.and.right")
