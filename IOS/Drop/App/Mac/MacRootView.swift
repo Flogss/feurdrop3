@@ -216,6 +216,7 @@ struct MacRootView: View {
                         switch route {
                         case .prices: PricesView()
                         case .portails: PortailsView()
+                        case .impressionAuto: ImpressionAutoView()
                         case .mergeOther: MergeOtherView()
                         default: EmptyView()
                         }
@@ -376,6 +377,7 @@ struct MacSettingsView: View {
                     switch route {
                     case .prices: PricesView()
                     case .portails: PortailsView()
+                    case .impressionAuto: ImpressionAutoView()
                     case .mergeOther: MergeOtherView()
                     default: EmptyView()
                     }

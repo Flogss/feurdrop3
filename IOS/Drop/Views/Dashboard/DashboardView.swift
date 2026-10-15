@@ -7,6 +7,7 @@ enum Route: Hashable {
     case settings
     case prices
     case portails
+    case impressionAuto
     case mergeOther
     case tracking
     case trackingLabel(TrackingLabel)
@@ -142,6 +143,7 @@ struct DashboardView: View {
             case .settings: SettingsView()
             case .prices: PricesView()
             case .portails: PortailsView()
+            case .impressionAuto: ImpressionAutoView()
             case .mergeOther: MergeOtherView()
             case .tracking: TrackingView()
             case .trackingLabel(let label): TrackingDetailView(label: label)

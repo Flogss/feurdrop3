@@ -108,3 +108,16 @@ Journal complet : `~/Library/Logs/drop-print.log`.
 - les colis **LIT** (tu les fais à la main) ;
 - les colis déjà imprimés une fois ;
 - les colis sans fichier (ajoutés à la main avec le bouton +).
+
+## Taches confirmees
+
+Chaque envoi du serveur est une tache (`X-Drop-Job`). Une fois imprimee, sa
+confirmation est ecrite dans `~/.drop-print-a-confirmer.json` puis envoyee ;
+tant que le serveur ne l'a pas recue, l'agent la renvoie avant de demander
+autre chose : une coupure reseau apres l'impression ne fait jamais ressortir
+la meme etiquette. Un echec de `lp` est signale (`POST /api/print/echec`) :
+les etiquettes repartent dans la file et le telephone voit l'erreur.
+
+Les filtres (categories, transporteurs, expediteurs) se reglent depuis
+l'iPhone (Reglages > Impression auto) : le serveur les applique a la file,
+l'agent n'a rien a configurer.

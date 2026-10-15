@@ -158,6 +158,17 @@ public struct DropAPI: Sendable {
         _ = try await client.raw(.post, "/api/print/auto", body: Corps(enabled: enabled))
     }
 
+    public func impressionAuto() async throws -> ImpressionAuto {
+        try await client.send(.get, "/api/print/auto")
+    }
+
+    /// Les filtres sont gardes par le serveur ; l'agent du Mac les applique a
+    /// son prochain sondage.
+    public func regleImpressionAuto(filtres: ImpressionAuto.Filtres) async throws -> ImpressionAuto {
+        struct Corps: Encodable, Sendable { let filtres: ImpressionAuto.Filtres }
+        return try await client.send(.post, "/api/print/auto", body: Corps(filtres: filtres), operation: true)
+    }
+
     public func printSummary(scope: PrintScope) async throws -> PrintSummary {
         try await client.send(.get, "/api/print/resume", query: [URLQueryItem(name: "scope", value: scope.rawValue)])
     }

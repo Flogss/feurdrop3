@@ -15,6 +15,9 @@ final class SettingsModel {
     private(set) var notificationStatus: UNAuthorizationStatus = .notDetermined
     private(set) var busy: Set<String> = []
     private(set) var celebration = 0
+    /// l'etat detaille de l'impression auto (agent, taches, filtres)
+    private(set) var impression: ImpressionAuto?
+    private(set) var impressionErreur: String?
 
     init(app: AppModel) {
         self.app = app
@@ -74,6 +77,29 @@ final class SettingsModel {
         }
         if ok && actif { celebration += 1 }
         await app.dashboard.refresh()
+        await chargeImpression()
+    }
+
+    /// Relu regulierement tant que l'ecran est ouvert : ce que l'agent du Mac
+    /// a vraiment fait, jamais une supposition.
+    func chargeImpression() async {
+        do {
+            let etat = try await app.api.impressionAuto()
+            impressionErreur = nil
+            if etat != impression { withAnimation(Theme.spring) { impression = etat } }
+        } catch {
+            if impression == nil { impressionErreur = app.messageEchec(error) }
+        }
+    }
+
+    func regleFiltres(_ filtres: ImpressionAuto.Filtres) async {
+        guard !busy.contains("filtres") else { return }
+        busy.insert("filtres")
+        defer { busy.remove("filtres") }
+        if let etat = await app.perform({ try await app.api.regleImpressionAuto(filtres: filtres) }) {
+            withAnimation(Theme.spring) { impression = etat }
+            await app.dashboard.refresh()
+        }
     }
 
     // MARK: Dettes

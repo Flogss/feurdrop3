@@ -46,6 +46,9 @@ const {
   summarizeNewColis,
   getPendingSummary,
   isAutoPrintEnabled,
+  etatImpressionAuto,
+  setFiltresAuto,
+  compteFileAuto,
   setAutoPrintEnabled,
   countUnprintedLabels,
   countLitPrintable,
@@ -157,7 +160,7 @@ router.get("/stats", (req, res) => {
     bjPendingValue: bjPending.value,
     bySender,
     byCarrier: getCarrierSummary(),
-    autoPrint: { enabled: isAutoPrintEnabled(), pending: countUnprintedLabels() },
+    autoPrint: { enabled: isAutoPrintEnabled(), pending: isAutoPrintEnabled() ? compteFileAuto() : countUnprintedLabels() },
     // etiquettes jamais imprimees, LIT compris : la pastille de l'onglet Imprime
     aImprimer: countUnprintedLabels() + countLitPrintable({ scope: "new" }),
     tour: {
@@ -333,10 +336,23 @@ router.post("/tour/end", (req, res) => {
 // L'agent du Mac a ses propres routes, protegees par son jeton : voir
 // routes/agent.js. Ici, seulement l'interrupteur du dashboard.
 
-// Interrupteur depuis le dashboard (donc depuis le telephone).
+// Depuis le dashboard (donc depuis le telephone) : l'interrupteur, les
+// filtres, et ce que fait l'agent du Mac. Le telephone ne parle jamais a
+// l'agent : il ecrit des reglages ici, l'agent les execute a son prochain
+// sondage, et seule sa confirmation compte comme impression.
+router.get("/print/auto", (req, res) => {
+  res.json(etatImpressionAuto(isAutoPrintEnabled()));
+});
+
 router.post("/print/auto", (req, res) => {
-  const enabled = setAutoPrintEnabled(Boolean(req.body.enabled));
-  res.json({ ok: true, enabled, pending: countUnprintedLabels() });
+  if (req.body.filtres !== undefined) {
+    if (typeof req.body.filtres !== "object" || req.body.filtres === null) {
+      return res.status(400).json({ error: "Filtres invalides" });
+    }
+    setFiltresAuto(req.body.filtres);
+  }
+  const enabled = req.body.enabled === undefined ? isAutoPrintEnabled() : setAutoPrintEnabled(Boolean(req.body.enabled));
+  res.json({ ok: true, ...etatImpressionAuto(enabled) });
 });
 
 router.get("/colis", (req, res) => {

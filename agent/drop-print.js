@@ -9,6 +9,11 @@
 // Rien n'est marque comme imprime tant que `lp` n'a pas accepte le travail :
 // si le Mac s'endort ou perd le reseau au mauvais moment, l'etiquette
 // repartira au prochain tour.
+//
+// Chaque envoi du serveur est une tache (X-Drop-Job). Une fois imprimee, sa
+// confirmation est d'abord ecrite sur le disque, puis envoyee ; tant que le
+// serveur ne l'a pas recue, l'agent la renvoie avant toute autre chose --
+// jamais une seconde impression de la meme tache apres une coupure.
 
 const fs = require("fs");
 const os = require("os");
@@ -16,6 +21,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 
 const CONFIG_PATH = process.env.DROP_CONFIG || path.join(os.homedir(), ".drop-print.json");
+const A_CONFIRMER = process.env.DROP_A_CONFIRMER || path.join(os.homedir(), ".drop-print-a-confirmer.json");
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -42,8 +48,46 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
 function api(path, options = {}) {
   return fetch(`${config.server}${path}`, {
     ...options,
-    headers: { "x-print-token": config.token, ...(options.headers || {}) },
+    headers: {
+      "x-print-token": config.token,
+      ...(config.printer ? { "x-drop-imprimante": config.printer } : {}),
+      ...(options.headers || {}),
+    },
+    signal: AbortSignal.timeout(60000),
   });
+}
+
+function postJSON(chemin, corps) {
+  return api(chemin, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+}
+
+// Les confirmations imprimees mais pas encore recues par le serveur.
+function lisAConfirmer() {
+  try {
+    return JSON.parse(fs.readFileSync(A_CONFIRMER, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function ecrisAConfirmer(liste) {
+  if (liste.length) fs.writeFileSync(A_CONFIRMER, JSON.stringify(liste));
+  else fs.rmSync(A_CONFIRMER, { force: true });
+}
+
+async function envoieConfirmations() {
+  const reste = [];
+  for (const c of lisAConfirmer()) {
+    try {
+      const r = await postJSON("/api/print/done", c);
+      if (!r.ok && r.status !== 400) throw new Error(`HTTP ${r.status}`);
+    } catch (err) {
+      log("confirmation en attente :", err.message);
+      reste.push(c);
+    }
+  }
+  ecrisAConfirmer(reste);
+  return reste.length === 0;
 }
 
 // `lp` rend la main des que le travail est accepte par la file d'impression.
@@ -66,6 +110,10 @@ function printFile(file) {
 }
 
 async function tick() {
+  // d'abord ce qui est deja imprime : tant que le serveur ne le sait pas,
+  // on ne demande rien d'autre (il le renverrait)
+  if (!(await envoieConfirmations())) return;
+
   const queue = await api("/api/print/queue");
   if (queue.status === 401) throw new Error("jeton refuse par le serveur");
   if (!queue.ok) throw new Error(`file d'attente : HTTP ${queue.status}`);
@@ -82,19 +130,25 @@ async function tick() {
     .split(",")
     .map(Number)
     .filter(Boolean);
+  const job = next.headers.get("x-drop-job") || null;
   const pdf = Buffer.from(await next.arrayBuffer());
   if (pdf.length === 0 || ids.length === 0) return;
 
   const file = path.join(os.tmpdir(), `drop-${Date.now()}.pdf`);
   fs.writeFileSync(file, pdf);
   try {
-    const result = await printFile(file);
+    let result;
+    try {
+      result = await printFile(file);
+    } catch (err) {
+      // le serveur remet les etiquettes dans la file et le telephone voit
+      // pourquoi
+      if (job) await postJSON("/api/print/echec", { job, erreur: err.message }).catch(() => {});
+      throw err;
+    }
     log(`imprime : ${ids.length} etiquette(s) — ${result}`);
-    await api("/api/print/done", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
+    ecrisAConfirmer([...lisAConfirmer(), { job, ids }]);
+    await envoieConfirmations();
   } finally {
     fs.rm(file, { force: true }, () => {});
   }

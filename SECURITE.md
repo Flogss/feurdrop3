@@ -50,7 +50,7 @@ Tant que `DASHBOARD_PASSWORD_HASH` est absente ou invalide, le dashboard reste
 |---|---|---|
 | Public (rien de privé) | `GET /connexion`, `POST /api/auth/connexion`, `POST /api/auth/deconnexion`, fichiers de la page de connexion (`styles.css`, `connexion.js`, icônes, `manifest.json`, `sw.js`, `particules.js`) | — |
 | Portail expéditeur | `GET /api/portail/:jeton`, `POST`/`GET /api/portail/:jeton/actualisation` | le jeton de l'expéditeur : ses colis, rien d'autre ; « Actualiser statuts La Poste » ne relit que ses colis La Poste (une à la fois, pause de 2 min) (limite d'essais par adresse) |
-| Agent d'impression | `GET /api/print/queue`, `GET /api/print/next`, `POST /api/print/done` | son jeton, en-tête `X-Print-Token` (et rien d'autre ne l'accepte) |
+| Agent d'impression | `GET /api/print/queue`, `GET /api/print/next`, `POST /api/print/done`, `POST /api/print/echec` | son jeton, en-tête `X-Print-Token` (et rien d'autre ne l'accepte) |
 | Bot Telegram | aucune route | il interroge Telegram lui-même (polling) |
 | **Dashboard** | **tout le reste** : la page, `app.js`, et les 78 routes de l'API ci-dessous | session valable (cookie du site ou jeton de l'app) ; écritures du site : jeton anti-CSRF + même origine |
 

@@ -38,6 +38,7 @@ struct SettingsView: View {
         .toggleStyle(.switch)
         .navigationTitle("Réglages")
         .task { await model.refresh() }
+        .task { await model.chargeImpression() }
         .task { await app.chargeSession() }
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: model.celebration)
@@ -170,6 +171,16 @@ struct SettingsView: View {
             }
             .tint(Theme.violet)
             .disabled(model.isBusy("auto"))
+            NavigationLink(value: Route.impressionAuto) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Mac, filtres et tâches")
+                    if let etat = model.impression {
+                        Text(etat.agent.enLigne ? "Agent connecté" : "Agent hors ligne")
+                            .font(.caption)
+                            .foregroundStyle(etat.agent.enLigne ? Theme.violetLight : Theme.text3)
+                    }
+                }
+            }
         } footer: {
             if model.autoPrint.enabled {
                 Text("\(Format.count(model.autoPrint.pending, "étiquette", "étiquettes")) en attente · les LIT restent à la main")
