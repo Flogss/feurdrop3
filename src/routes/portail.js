@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const express = require("express");
-const { portailPour, portailExiste } = require("../portail");
+const { portailPour, portailExiste, actualisePortail, etatActualisationPortail } = require("../portail");
 const { pageHtml, ENTETES, ENTETES_PAGE, limiteur } = require("../portailCommun");
 
 // Les colis d'un espace expediteur, sans connexion : le jeton est la cle.
@@ -32,6 +32,27 @@ router.get("/:jeton", (req, res) => {
   res.set("ETag", etag);
   if (req.get("if-none-match") === etag) return res.status(304).end();
   res.type("application/json").send(corps);
+});
+
+// « Actualiser statuts La Poste » : lance la relecture (en fond) des colis La
+// Poste de cet expediteur, puis sa progression. Le jeton designe l'expediteur ;
+// rien d'autre n'est lu ni renvoye.
+router.post("/:jeton/actualisation", (req, res) => {
+  res.set(ENTETES);
+  if (essais.bloque(req.ip)) return res.status(429).json({ error: "Trop d'essais. Réessaie dans un quart d'heure." });
+  const etat = actualisePortail(req.params.jeton);
+  if (!etat) {
+    essais.echec(req.ip);
+    return res.status(404).json({ error: "Ce lien n'est pas valide, ou n'est plus actif." });
+  }
+  res.status(etat.refuse ? 429 : 202).json(etat);
+});
+
+router.get("/:jeton/actualisation", (req, res) => {
+  res.set(ENTETES);
+  const etat = etatActualisationPortail(req.params.jeton);
+  if (!etat) return res.status(404).json({ error: "Ce lien n'est pas valide, ou n'est plus actif." });
+  res.json(etat);
 });
 
 // Tout le reste sous /api/portail n'existe pas.

@@ -145,3 +145,42 @@ test("un colis livre, un numero retire, un colis pas encore drope", async () => 
   assert.ok(!r.texte.includes("inconnu de La Poste"));
   assert.ok(retire);
 });
+
+test("« Actualiser statuts La Poste » : une vraie relecture des colis de CET expediteur, une seule a la fois, puis une pause", async () => {
+  process.env.CONTROLE_ACTUALISATION_PAUSE_S = "120";
+  const dr1 = ev(20, "DR1");
+  faux.suivi("6A50000000030", [dr1]);
+  faux.suivi("6A50000000031", [dr1]);
+  drope("Alice", "6A50000000030");
+  drope("Alice", "6A50000000031");
+  drope("Bob", "6A50000000032");
+  const jeton = jetonDe("Alice");
+  await depots.synchronise();
+  faux.appels.length = 0;
+  // La Poste a du nouveau pour un colis d'Alice
+  faux.suivi("6A50000000030", [ev(0.5, "PC1", "Votre colis a été déposé dans un point postal."), dr1]);
+  let r = await app.appel(`/api/portail/${jeton}/actualisation`, { methode: "POST", corps: {}, anonyme: true });
+  assert.equal(r.status, 202);
+  assert.equal(r.json.etat, "en_cours");
+  assert.equal(r.json.total, 2);
+  // un deuxieme appui pendant ce temps : la meme actualisation, pas une deuxieme
+  const encore = await app.appel(`/api/portail/${jeton}/actualisation`, { methode: "POST", corps: {}, anonyme: true });
+  assert.equal(encore.json.etat, "en_cours");
+  for (let i = 0; i < 100 && r.json.etat !== "terminee"; i++) {
+    await new Promise((res) => setTimeout(res, 50));
+    r = await app.appel(`/api/portail/${jeton}/actualisation`, { anonyme: true });
+  }
+  assert.equal(r.json.etat, "terminee");
+  assert.equal(r.json.traites, 2);
+  assert.equal(r.json.misAJour, 1);
+  // une vraie consultation La Poste, pour les colis d'Alice seulement
+  assert.deepEqual(faux.appels.map((a) => a.numero).sort(), ["6A50000000030", "6A50000000031"]);
+  const d = parNumero(await app.appel(`/api/portail/${jeton}`, { anonyme: true }));
+  assert.equal(d["6A50000000030"].etat, "pris");
+  // juste apres : refuse (quotas), sans appel
+  const trop = await app.appel(`/api/portail/${jeton}/actualisation`, { methode: "POST", corps: {}, anonyme: true });
+  assert.equal(trop.status, 429);
+  assert.match(trop.json.refuse, /moins de 2 min/);
+  // un faux lien : rien
+  assert.equal((await app.appel("/api/portail/abcdefghijklmnopqrstuvwx/actualisation", { methode: "POST", corps: {}, anonyme: true })).status, 404);
+});

@@ -26,6 +26,7 @@
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11.5" height="11.5" rx="2.5"/><path d="M15 9V5.5A2 2 0 0 0 13 3.5H5.5a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6.5 9.5 17 4 11.5"/></symbol>
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3.5h6.5V10M20.5 3.5 11.5 12.5"/><path d="M18.5 14v4.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2H10"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 1 0-2.3 5.6"/><path d="M20 4.5v7h-7"/></symbol>
   <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></symbol>
@@ -63,6 +64,13 @@
         <span class="eyebrow">Espace expéditeur</span>
         <h1 class="p-nom is-loading" id="nom">Chargement</h1>
         <p class="p-resume" id="resume"></p>
+        <!-- une vraie relecture La Poste / Colissimo de MES colis -->
+        <div class="p-actualiser" id="actualiser" hidden>
+          <button class="btn btn-sm btn-secondary" id="actualiser-btn" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span>Actualiser statuts La Poste</span>
+          </button>
+          <span class="p-actualiser-etat" id="actualiser-etat" aria-live="polite"></span>
+        </div>
       </section>
 
       <div class="p-search" id="zone-recherche">

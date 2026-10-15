@@ -1254,6 +1254,87 @@ function lisALaVisite(cle, aLire) {
   else lance();
 }
 
+// --- « Actualiser statuts La Poste » (espace expediteur) -----------------------------------
+
+// Une vraie nouvelle lecture par l'API officielle La Poste, pour les colis
+// dropes de CET expediteur seulement (ceux qui ne sont pas encore livres),
+// au rythme de la file. Une seule actualisation a la fois par expediteur, et
+// pas plus d'une toutes les 2 minutes (les quotas de La Poste).
+const actualisations = new Map(); // cle de l'espace -> { etat, total, traites, misAJour, indisponibles, erreurs, debut, fin, message }
+const ACTUALISATION_PAUSE_MS = () => Number(process.env.CONTROLE_ACTUALISATION_PAUSE_S || 120) * 1000;
+
+function etatActualisation(cle) {
+  const a = actualisations.get(cle);
+  if (!a) return { etat: "aucune" };
+  const { promesse: _promesse, ...vue } = a;
+  return vue;
+}
+
+function lanceActualisation(cle, colisListe) {
+  const deja = actualisations.get(cle);
+  if (deja?.etat === "en_cours") return etatActualisation(cle);
+  if (deja?.fin && Date.now() - deja.fin < ACTUALISATION_PAUSE_MS()) {
+    return { ...etatActualisation(cle), refuse: `Déjà actualisé il y a moins de ${Math.round(ACTUALISATION_PAUSE_MS() / 60000)} min` };
+  }
+  if (!laposte.estConfigure()) return { etat: "erreur", message: "Le suivi La Poste n'est pas disponible pour le moment" };
+  const pause = pauseDe("laposte");
+  if (pause) return { etat: "erreur", message: "La Poste demande une pause : réessaie un peu plus tard" };
+  const coupees = lectureCoupee();
+  const fenetre = Date.now() - reglages().affichageJours * 24 * HEURE;
+  const aLire = [];
+  const vus = new Set();
+  for (const colis of colisListe) {
+    if (colis.status !== "dropped" || sqlVersMs(colis.dropped_at) < fenetre) continue;
+    const suivi = suiviDuColis(colis);
+    if (!suivi || vus.has(suivi.numero)) continue;
+    const transporteur = infoTransporteurBrut(suivi.transporteur, { lectureCoupee: coupees });
+    if (transporteur.methode !== "laposte") continue;
+    const s = db.prepare("SELECT final FROM controle_suivis WHERE numero = ?").get(suivi.numero);
+    if (s?.final) continue;
+    vus.add(suivi.numero);
+    aLire.push({ colis, suivi, transporteur });
+  }
+  const a = { etat: "en_cours", total: aLire.length, traites: 0, misAJour: 0, indisponibles: 0, erreurs: 0, debut: Date.now(), fin: null, message: null };
+  actualisations.set(cle, a);
+  if (actualisations.size > 5000) actualisations.delete(actualisations.keys().next().value);
+  a.promesse = (async () => {
+    for (const x of aLire) {
+      if (a.traites > 0) await attends(reglages().intervalleMs);
+      if (pauseDe("laposte")) {
+        a.message = "La Poste a demandé une pause : le reste sera relu automatiquement";
+        break;
+      }
+      suiviDe(x.suivi.numero, x);
+      const avant = db.prepare("SELECT statut FROM controle_suivis WHERE numero = ?").get(x.suivi.numero)?.statut || null;
+      try {
+        const lecture = await laposte.verifie(x.suivi.numero);
+        const nouveaux = enregistreLecture(x.suivi.numero, lecture, { methodeLecture: "laposte" });
+        const apres = apresLecture(x.suivi.numero, x);
+        noteReussite("laposte");
+        if (!lecture.trouve) a.indisponibles += 1;
+        else if (nouveaux > 0 || apres !== avant) a.misAJour += 1;
+      } catch (err) {
+        a.erreurs += 1;
+        if (err.type === "limite" || err.type === "bloque") {
+          metEnPause("laposte", err);
+          a.message = "La Poste a demandé une pause : le reste sera relu automatiquement";
+          a.traites += 1;
+          break;
+        }
+        noteErreurNumero(x.suivi.numero, err, { methodeLecture: "laposte" });
+      }
+      a.traites += 1;
+    }
+    a.etat = "terminee";
+    a.fin = Date.now();
+  })().catch((err) => {
+    a.etat = "terminee";
+    a.fin = Date.now();
+    a.message = err.message;
+  });
+  return etatActualisation(cle);
+}
+
 // --- Minuterie ---------------------------------------------------------------------------
 
 let minuteur = null;
@@ -1292,4 +1373,6 @@ module.exports = {
   recoitResultats,
   coupeLecture,
   depotsPourPortail,
+  lanceActualisation,
+  etatActualisation,
 };

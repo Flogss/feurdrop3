@@ -277,8 +277,73 @@
       d.total === 0
         ? "Aucun colis pour l'instant."
         : `${pluriel(d.total, "colis", "colis")} · ${enCours ? `${nf.format(enCours)} en cours` : "aucun en cours"}${pris ? ` · ${pluriel(pris, "pris en charge", "pris en charge")}` : ""}`;
+    $("actualiser").hidden = !laPosteChez(d);
     rend({ anime: Boolean(avant), signale: Boolean(avant) });
   }
+
+  // --- « Actualiser statuts La Poste » ------------------------------------------------
+  // Une vraie relecture par La Poste de MES colis (pas le dernier resultat
+  // garde) ; la progression, puis le resultat ; la liste se met a jour seule.
+  const laPosteChez = (d) => d.colis.some((c) => c.etape === "drope" && ["LP", "CHRONO", "DPD"].includes(codeDe(c)));
+  let suiviActualisation = null;
+  function afficheActualisation(a) {
+    const etat = $("actualiser-etat");
+    const btn = $("actualiser-btn");
+    if (a.etat === "en_cours") {
+      btn.disabled = true;
+      etat.textContent = a.total ? `Vérification auprès de La Poste… ${nf.format(a.traites)} / ${nf.format(a.total)}` : "Vérification auprès de La Poste…";
+      return false;
+    }
+    btn.disabled = false;
+    if (a.refuse) {
+      etat.textContent = a.refuse;
+      return true;
+    }
+    if (a.etat === "erreur") {
+      etat.textContent = a.message || "Actualisation impossible pour le moment";
+      return true;
+    }
+    if (a.etat === "terminee") {
+      const morceaux = [pluriel(a.traites, "suivi vérifié", "suivis vérifiés")];
+      if (a.misAJour) morceaux.push(pluriel(a.misAJour, "statut mis à jour", "statuts mis à jour"));
+      else morceaux.push("aucun changement");
+      if (a.indisponibles) morceaux.push(pluriel(a.indisponibles, "suivi pas encore connu de La Poste", "suivis pas encore connus de La Poste"));
+      if (a.erreurs) morceaux.push(pluriel(a.erreurs, "erreur", "erreurs"));
+      etat.textContent = (a.total === 0 ? "Aucun colis La Poste à vérifier" : morceaux.join(" · ")) + (a.message ? ` — ${a.message}` : "");
+      return true;
+    }
+    return true;
+  }
+  async function suisActualisation() {
+    clearTimeout(suiviActualisation);
+    try {
+      const res = await fetch(`/api/portail/${encodeURIComponent(jeton)}/actualisation`, { cache: "no-store", credentials: "omit" });
+      const a = await res.json();
+      if (afficheActualisation(a)) {
+        etat.etag = null;
+        charge();
+        return;
+      }
+    } catch (e) {
+      // le prochain essai
+    }
+    suiviActualisation = setTimeout(suisActualisation, 1500);
+  }
+  $("actualiser-btn").addEventListener("click", async () => {
+    const btn = $("actualiser-btn");
+    btn.disabled = true;
+    $("actualiser-etat").textContent = "Vérification auprès de La Poste…";
+    try {
+      const res = await fetch(`/api/portail/${encodeURIComponent(jeton)}/actualisation`, { method: "POST", cache: "no-store", credentials: "omit", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const a = await res.json().catch(() => ({ etat: "erreur", message: "Actualisation impossible pour le moment" }));
+      if (!res.ok && !a.refuse && a.error) a.etat = "erreur", a.message = a.error;
+      if (afficheActualisation(a)) return;
+      suiviActualisation = setTimeout(suisActualisation, 1200);
+    } catch (e) {
+      btn.disabled = false;
+      $("actualiser-etat").textContent = "Connexion impossible : réessaie dans un instant";
+    }
+  });
 
   // --- Recherche --------------------------------------------------------------------
   // Le numero tel qu'on le compare : majuscules, sans espaces ni tirets

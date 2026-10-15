@@ -349,3 +349,12 @@
   .p-entre, .p-colis.vient-de-changer, .p-etape.pulse { animation: none; }
   .p-colis[data-etape="en_drop"] .p-seg i.actuel::before { animation: none; display: none; }
 }
+
+/* « Actualiser statuts La Poste » */
+.p-actualiser { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; }
+.p-actualiser .btn { --h: 36px; gap: 6px; }
+.p-actualiser .btn .icon { width: 15px; height: 15px; }
+.p-actualiser .btn:disabled .icon { animation: p-tourne 1s linear infinite; }
+@keyframes p-tourne { to { transform: rotate(360deg); } }
+.p-actualiser-etat { font-size: 12.5px; color: var(--text-3); }
+@media (prefers-reduced-motion: reduce) { .p-actualiser .btn:disabled .icon { animation: none; } }

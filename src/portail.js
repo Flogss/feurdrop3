@@ -3,7 +3,7 @@ const { db, getSetting, setSetting, tourScope, journalise } = require("./db");
 const { suiviDuColis, transporteurDuColis } = require("./suiviColis");
 const { carrierLabel } = require("./carrier");
 const { FORME_JETON } = require("./portailCommun");
-const { depotsPourPortail } = require("./controle/depots");
+const { depotsPourPortail, lanceActualisation, etatActualisation } = require("./controle/depots");
 
 // L'espace prive d'un expediteur : une adresse a lui ou il voit ses colis et
 // ou ils en sont, rien d'autre. En ligne, elle est sur le domaine du portail
@@ -181,4 +181,27 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
   return { expediteur: sender.name, compte, colis, total, suite: lignes.length < total };
 }
 
-module.exports = { portailPour, portailExiste, creePortail, retirePortail, infoPortail, DOMAINE_PORTAIL, PAR_PAGE };
+// « Actualiser statuts La Poste » : les colis de l'expediteur designe par le
+// jeton (et seulement eux) sont relus par l'API officielle, en tache de fond.
+function actualisePortail(jeton) {
+  if (typeof jeton !== "string" || !FORME_JETON.test(jeton)) return null;
+  const sender = db.prepare("SELECT id, name FROM senders WHERE portail_jeton = ?").get(jeton);
+  if (!sender || SANS_PORTAIL.has(sender.name)) return null;
+  const lignes = db
+    .prepare(
+      `SELECT c.id, c.type, c.carrier, c.status, c.file_id, c.file_name, c.caption, c.created_at, c.printed_at, c.dropped_at
+       FROM colis c JOIN senders s ON s.name = c.sender_name
+       WHERE s.portail_jeton = ? AND c.status = 'dropped'`
+    )
+    .all(jeton);
+  return lanceActualisation(`portail:${sender.id}`, lignes);
+}
+
+function etatActualisationPortail(jeton) {
+  if (typeof jeton !== "string" || !FORME_JETON.test(jeton)) return null;
+  const sender = db.prepare("SELECT id, name FROM senders WHERE portail_jeton = ?").get(jeton);
+  if (!sender || SANS_PORTAIL.has(sender.name)) return null;
+  return etatActualisation(`portail:${sender.id}`);
+}
+
+module.exports = { actualisePortail, etatActualisationPortail, portailPour, portailExiste, creePortail, retirePortail, infoPortail, DOMAINE_PORTAIL, PAR_PAGE };

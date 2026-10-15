@@ -66,6 +66,33 @@ app.get("/api/portail/:jeton", async (req, res) => {
   }
 });
 
+// « Actualiser statuts La Poste » : la demande et sa progression passent
+// telles quelles au dashboard (qui ne relit que les colis de ce jeton).
+app.use(express.json({ limit: "1kb" }));
+for (const methode of ["get", "post"]) {
+  app[methode]("/api/portail/:jeton/actualisation", async (req, res) => {
+    res.set(ENTETES);
+    const jeton = req.params.jeton;
+    if (essais.bloque(req.ip)) return res.status(429).json({ error: "Trop d'essais. Réessaie dans un quart d'heure." });
+    if (!FORME_JETON.test(jeton)) {
+      essais.echec(req.ip);
+      return res.status(404).json({ error: "Ce lien n'est pas valide, ou n'est plus actif." });
+    }
+    try {
+      const reponse = await fetch(`${DASHBOARD}/api/portail/${encodeURIComponent(jeton)}/actualisation`, {
+        method: methode.toUpperCase(),
+        headers: { "x-forwarded-for": req.ip, "content-type": "application/json" },
+        body: methode === "post" ? "{}" : undefined,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (reponse.status === 404) essais.echec(req.ip);
+      res.status(reponse.status).type("application/json").send(await reponse.text());
+    } catch (err) {
+      res.status(502).json({ error: "Service momentanément indisponible" });
+    }
+  });
+}
+
 app.use("/api", (req, res) => res.status(404).json({ error: "Introuvable" }));
 
 // La page : la meme pour tous les jetons (elle ne contient aucune donnee) ;
