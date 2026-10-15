@@ -160,22 +160,16 @@ struct RevenueCurveChart: View {
 
     /// le dernier point bat doucement : c'est aujourd'hui
     private struct DernierPoint: View {
-        @State private var bat = false
 
         var body: some View {
             ZStack {
-                Circle().stroke(Theme.violetLight, lineWidth: 2)
-                    .frame(width: 14, height: 14)
-                    .scaleEffect(bat ? 2.6 : 1)
-                    .opacity(bat ? 0 : 0.9)
+                // l'onde autour de la tete de la courbe, sans fin (Core Animation)
+                AnneauPulse(couleur: Theme.violetLight, diametre: 14, epaisseur: 2, echelle: 2.6, opacite: 0.9, duree: 1.6)
                 Circle().fill(.white)
                     .frame(width: 9, height: 9)
                     .shadow(color: Theme.violet, radius: 8)
             }
             .allowsHitTesting(false)
-            .onAppear {
-                withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { bat = true }
-            }
         }
     }
 }

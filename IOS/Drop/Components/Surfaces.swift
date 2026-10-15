@@ -168,7 +168,6 @@ struct ShareBar: View {
 /// "En direct" : dit si le dernier rafraichissement a joint le serveur.
 struct LivePill: View {
     let online: Bool
-    @State private var pulse = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -177,10 +176,8 @@ struct LivePill: View {
                 .frame(width: 7, height: 7)
                 .shadow(color: online ? Theme.violet : Theme.danger, radius: 4)
                 .overlay {
-                    Circle()
-                        .stroke(online ? Theme.violetLight : Theme.danger, lineWidth: 1.5)
-                        .scaleEffect(pulse ? 2.8 : 1)
-                        .opacity(pulse ? 0 : 0.7)
+                    // l'anneau qui s'ouvre, sans fin : anime par Core Animation
+                    AnneauPulse(couleur: online ? Theme.violetLight : Theme.danger, diametre: 7, epaisseur: 1.5, echelle: 2.8, opacite: 0.7, duree: 2.2)
                 }
             Text(online ? "En direct" : "Hors ligne")
                 .font(.footnote.weight(.medium))
@@ -191,9 +188,6 @@ struct LivePill: View {
         .padding(.vertical, 8)
         .glassEffect(.regular.tint(online ? .clear : Theme.danger.opacity(0.2)), in: .capsule)
         .animation(Theme.spring, value: online)
-        .onAppear {
-            withAnimation(.easeOut(duration: 2.2).repeatForever(autoreverses: false)) { pulse = true }
-        }
     }
 }
 
@@ -206,12 +200,10 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(positive ? Theme.violetLight : Theme.text3)
+            // l'icone respire, sans fin : animee par Core Animation
+            SymboleAnime(nom: symbol, taille: 26, poids: .medium, couleur: positive ? Theme.violetLight : Theme.text3, effet: .respire)
                 .frame(width: 56, height: 56)
                 .glassEffect(positive ? .regular.tint(Theme.violet.opacity(0.35)) : .regular, in: .rect(cornerRadius: 18))
-                .symbolEffect(.breathe, options: .repeat(.continuous))
                 .padding(.bottom, 4)
             Text(title)
                 .font(.headline)

@@ -10,19 +10,39 @@ import CoreMotion
 ///
 /// Sur Mac (de la puissance a revendre), le fond est plus riche : voir
 /// `FondMac`. Sur iPhone, il reste tel quel, pour la batterie.
+///
+/// Les deux sont dessines par la carte graphique, sur leur propre fil
+/// (`FondMetalVue`) : le meme dessin, sans rien demander au fil principal.
+/// Les versions SwiftUI ci-dessous restent la reference (et le secours sans
+/// Metal) ; `-DropFondAncien 1` les affiche pour comparer.
 struct AmbientBackground: View {
     private let motion = MotionParallax.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    #if DEBUG || PERF_HOOKS
+    private static let ancien = UserDefaults.standard.bool(forKey: "DropFondAncien")
+    #else
+    private static let ancien = false
+    #endif
+
     var body: some View {
-        #if os(macOS) && DEBUG
-        // comparaison en developpement : `-DropFondSimple 1` remet le fond du telephone
-        if UserDefaults.standard.bool(forKey: "DropFondSimple") { fondTelephone } else { FondMac() }
-        #elseif os(macOS)
-        FondMac()
-        #else
-        fondTelephone
-        #endif
+        if MoteurFond.device != nil, !Self.ancien {
+            #if os(macOS)
+            FondMetalVue(variante: .mac)
+            #else
+            FondMetalVue(variante: .telephone)
+                .onAppear { motion.start() }
+            #endif
+        } else {
+            #if os(macOS) && DEBUG
+            // comparaison en developpement : `-DropFondSimple 1` remet le fond du telephone
+            if UserDefaults.standard.bool(forKey: "DropFondSimple") { fondTelephone } else { FondMac() }
+            #elseif os(macOS)
+            FondMac()
+            #else
+            fondTelephone
+            #endif
+        }
     }
 
     private var fondTelephone: some View {
@@ -108,6 +128,8 @@ final class MotionParallax {
     func suit(_ fraction: CGPoint) {
         cibleX = max(-1, min(1, (fraction.x - 0.5) * 2))
         cibleY = max(-1, min(1, (fraction.y - 0.5) * 2))
+        // le fond Metal le lit sur son fil (il lisse lui-meme, comme avant)
+        ParallaxePartagee.ecris(cibleX, cibleY)
     }
 
     func stop() {}
@@ -122,6 +144,7 @@ final class MotionParallax {
             // lissage : on ne garde qu'une part de chaque nouvelle mesure
             self.x = self.x * 0.88 + max(-1, min(1, gravite.x)) * 0.12
             self.y = self.y * 0.88 + max(-1, min(1, gravite.y + 0.6)) * 0.12
+            ParallaxePartagee.ecris(self.x, self.y)
         }
     }
 

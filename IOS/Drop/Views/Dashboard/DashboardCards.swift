@@ -175,10 +175,8 @@ struct StockCard: View {
                     .foregroundStyle(Theme.text2)
                 Spacer()
                 if bas {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(Theme.warn)
-                        .symbolEffect(.pulse, options: .repeat(.continuous))
+                    // l'alerte bat, sans fin : animee par Core Animation
+                    SymboleAnime(nom: "exclamationmark.triangle.fill", taille: 12, couleur: Theme.warn, effet: .pulse)
                         .transition(.scale.combined(with: .opacity))
                 }
             }

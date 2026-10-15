@@ -212,35 +212,15 @@ struct HeroCard: View {
 }
 
 /// La lumiere qui respire derriere le chiffre : deux halos qui derivent
-/// lentement (meme trajectoire qu'avant). Leur mouvement est une animation
-/// de position : la vue n'est plus recalculee 20 fois par seconde, seul le
-/// deplacement est anime.
+/// lentement (meme trajectoire qu'avant : demi-periodes de sin(t * 0.4) et
+/// cos(t * 0.3)). La derive est confiee a Core Animation : plus aucun calcul
+/// de l'interface a chaque image (voir `BouclesCA`).
 private struct HeroAura: View {
-    @State private var derive = false
-    @State private var houle = false
-
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            ZStack {
-                halo(Theme.violet.opacity(0.55), rayon: 220)
-                    .position(x: w * 0.25, y: h * 0.25)
-                    .offset(x: (derive ? 0.08 : -0.08) * w)
-                halo(Theme.violetDeep.opacity(0.35), rayon: 200)
-                    .position(x: w * 0.9, y: h * 0.95)
-                    .offset(y: (houle ? 0.05 : -0.05) * h)
-            }
-        }
-        .onAppear {
-            // demi-periodes de sin(t * 0.4) et cos(t * 0.3)
-            withAnimation(.easeInOut(duration: .pi / 0.4).repeatForever(autoreverses: true)) { derive = true }
-            withAnimation(.easeInOut(duration: .pi / 0.3).repeatForever(autoreverses: true)) { houle = true }
-        }
-    }
-
-    private func halo(_ couleur: Color, rayon: CGFloat) -> some View {
-        RadialGradient(colors: [couleur, .clear], center: .center, startRadius: 0, endRadius: rayon)
-            .frame(width: rayon * 2, height: rayon * 2)
+        HalosDerivants(halos: [
+            HaloDerive(couleur: Theme.violet.opacity(0.55), rayon: 220, x: 0.25, y: 0.25, dx: 0.08, dy: 0, duree: .pi / 0.4),
+            HaloDerive(couleur: Theme.violetDeep.opacity(0.35), rayon: 200, x: 0.9, y: 0.95, dx: 0, dy: 0.05, duree: .pi / 0.3),
+        ])
     }
 }
 
@@ -248,15 +228,11 @@ private struct HeroAura: View {
 private struct TourPill: View {
     let start: Date
     let offset: TimeInterval
-    @State private var pulse = false
 
     var body: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(Theme.warn)
-                .frame(width: 7, height: 7)
-                .shadow(color: Theme.warn, radius: pulse ? 6 : 2)
-                .scaleEffect(pulse ? 1.25 : 0.9)
+            // le point qui bat, sans fin : anime par Core Animation
+            PointBattant(couleur: Theme.warn, diametre: 7)
             Text("En tournée")
                 .font(.footnote.weight(.semibold))
             TimelineView(.periodic(from: .now, by: 1)) { contexte in
@@ -271,9 +247,6 @@ private struct TourPill: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .glassEffect(.regular.tint(Theme.warn.opacity(0.18)), in: .capsule)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever()) { pulse = true }
-        }
     }
 }
 

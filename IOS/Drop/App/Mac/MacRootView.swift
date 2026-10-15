@@ -147,6 +147,9 @@ struct MacRootView: View {
         }
         .sensoryFeedback(.selection, trigger: app.pageMac)
         .task { await demarre() }
+        #if DEBUG || PERF_HOOKS
+        .task { await parcoursDeMesure() }
+        #endif
         .task(id: app.pageMac) { await boucle() }
         // « Tout vérifier » lance ailleurs : ce Mac lit les pages officielles
         .onReceive(NotificationCenter.default.publisher(for: .dropAllerA)) { note in
@@ -224,6 +227,24 @@ struct MacRootView: View {
             .frame(maxWidth: largeur)
             .frame(maxWidth: .infinity)
     }
+
+    #if DEBUG || PERF_HOOKS
+    /// Mesures (`-DropTestPages 1.4`) : apres la sequence de lancement, toutes
+    /// les pages a la suite, deux fois, au meme rythme -- le meme parcours
+    /// avant et apres une optimisation (Instruments, « Animation Hitches »).
+    private func parcoursDeMesure() async {
+        let attente = UserDefaults.standard.double(forKey: "DropTestPages")
+        guard attente > 0 else { return }
+        try? await Task.sleep(for: .seconds(8))
+        for _ in 0..<2 {
+            for page in MacPage.allCases.dropFirst() + [MacPage.dashboard] {
+                va(vers: page)
+                try? await Task.sleep(for: .seconds(attente))
+            }
+        }
+        print("PERF parcours fini")
+    }
+    #endif
 
     /// Les premiers chiffres se chargent pendant la sequence de lancement ;
     /// c'est son onde qui ouvre l'interface (`revele`).

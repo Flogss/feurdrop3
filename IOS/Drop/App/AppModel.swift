@@ -103,7 +103,7 @@ final class AppModel {
         let adresse = enregistre ?? Self.defaultServer
         serverURL = adresse
         api = DropAPI(baseURL: adresse)
-        #if DEBUG
+        #if DEBUG || PERF_HOOKS
         // verification contre un serveur LOCAL de test :
         // `-drop.serveur http://localhost:3001 -DropJetonTest <jeton>` pose, en
         // memoire seulement, une session que ce serveur a deja delivree (rien

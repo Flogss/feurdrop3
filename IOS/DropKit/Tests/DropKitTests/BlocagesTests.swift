@@ -7,7 +7,7 @@ import Testing
 // retentee un nombre FIXE de fois avant de rendre la main a l'ecran.
 
 /// Un serveur qui repond au compte-gouttes, sans jamais finir : un octet
-/// toutes les 300 ms. Le delai de URLRequest (silence entre deux paquets) ne
+/// toutes les 100 ms. Le delai de URLRequest (silence entre deux paquets) ne
 /// se declenche jamais -- seule la limite dure de l'APIClient peut l'arreter.
 final class ServeurGoutte: URLProtocol, @unchecked Sendable {
     private var minuteur: DispatchSourceTimer?
@@ -17,7 +17,7 @@ final class ServeurGoutte: URLProtocol, @unchecked Sendable {
         let reponse = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: reponse, cacheStoragePolicy: .notAllowed)
         let t = DispatchSource.makeTimerSource(queue: .global())
-        t.schedule(deadline: .now() + 0.3, repeating: 0.3)
+        t.schedule(deadline: .now() + 0.1, repeating: 0.1)
         t.setEventHandler { [weak self] in
             guard let self else { return }
             self.client?.urlProtocol(self, didLoad: Data(" ".utf8))
@@ -40,13 +40,13 @@ final class ServeurGoutte: URLProtocol, @unchecked Sendable {
     let client = APIClient(baseURL: URL(string: "https://exemple.test")!, session: URLSession(configuration: config), jeton: .some(nil))
     let debut = ContinuousClock.now
     await #expect(throws: APIError.timeout) {
-        // limite : 1 s + 5 s ; une seule tentative pour une ecriture non identifiee
-        _ = try await client.raw(.post, "/api/print/colis/1/drop", timeout: 1)
+        // limite : 2 s + 5 s ; une seule tentative pour une ecriture non identifiee
+        _ = try await client.raw(.post, "/api/print/colis/1/drop", timeout: 2)
     }
     let duree = ContinuousClock.now - debut
-    // arrete par la limite dure (1 s + 5 s), pas avant, et pas sans fin
-    #expect(duree >= .seconds(5.5), "arrete trop tot (\(duree)) : ce n'est pas la limite dure")
-    #expect(duree < .seconds(10), "termine en \(duree)")
+    // arrete par la limite dure (2 s + 5 s), pas avant, et pas sans fin
+    #expect(duree >= .seconds(6.5), "arrete trop tot (\(duree)) : ce n'est pas la limite dure")
+    #expect(duree < .seconds(12), "termine en \(duree)")
 }
 
 @Test func lesReessaisSontBornesEtSArretentSurUneErreurDefinitive() async throws {

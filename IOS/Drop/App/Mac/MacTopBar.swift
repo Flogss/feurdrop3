@@ -87,18 +87,13 @@ struct MacTopBar: View {
 private struct Marque: View {
     var posee = true
     var surCadre: (CGRect) -> Void = { _ in }
-    @State private var reflet = false
 
     var body: some View {
         HStack(spacing: 10) {
             MarqueDrop(cote: 34)
                 .overlay {
-                    // un reflet passe sur le logo, de temps en temps
-                    LinearGradient(colors: [.clear, .white.opacity(0.5), .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: 18)
-                        .rotationEffect(.degrees(20))
-                        .offset(x: reflet ? 34 : -34)
-                        .clipShape(.rect(cornerRadius: 10))
+                    // un reflet passe sur le logo, de temps en temps (Core Animation)
+                    RefletPassant(largeur: 18, course: 34, arrondi: 10)
                 }
                 .clipShape(.rect(cornerRadius: 34 * ContourMarque.arrondi, style: .continuous))
                 .shadow(color: Theme.violet.opacity(0.75), radius: 10, y: 4)
@@ -114,9 +109,6 @@ private struct Marque: View {
                 }
                 .opacity(posee ? 1 : 0)
             Text("\(Text("DROP").font(.system(size: 17, weight: .heavy, design: .rounded)).foregroundStyle(.white))\(Text(".ctrl").font(.system(size: 15, weight: .medium, design: .monospaced)).foregroundStyle(Theme.text3))")
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.4).delay(1.6).repeatForever(autoreverses: false)) { reflet = true }
         }
     }
 }
