@@ -2,7 +2,8 @@
 import SwiftUI
 import LocalAuthentication
 
-/// Face ID a l'ouverture (protection locale, EN PLUS de la session serveur de
+/// Face ID a l'ouverture -- COUPE par defaut, interrupteur dans les Reglages
+/// (protection locale, EN PLUS de la session serveur de
 /// 72 h, qui reste la seule autorisation) : tant que l'appareil n'a pas
 /// reconnu son proprietaire, l'ecran prive est cache.
 ///
@@ -30,9 +31,11 @@ final class VerrouFaceID {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "DropSansFaceID") { return false }
         #endif
-        return UserDefaults.standard.object(forKey: Self.cle) as? Bool ?? true
+        return UserDefaults.standard.object(forKey: Self.cle) as? Bool ?? false
     }
-    static let cle = "drop.faceid"
+    /// coupe par defaut (a la demande) : a rallumer dans les Reglages. Nouvelle
+    /// cle, pour qu'un ancien choix enregistre ne le rallume pas.
+    static let cle = "drop.faceid.actif"
 
     /// la methode disponible, dite a l'ecran
     var nomMethode: String {

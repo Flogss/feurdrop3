@@ -16,7 +16,7 @@ struct SettingsView: View {
     @AppStorage(ParcelWatch.tourKey) private var notifTournee = true
     #if os(iOS)
     @AppStorage(BackgroundListener.enabledKey) private var ecoute = true
-    @AppStorage(VerrouFaceID.cle) private var faceID = true
+    @AppStorage(VerrouFaceID.cle) private var faceID = false
     #else
     // sur Mac, la veille tourne toujours (l'app reste ouverte)
     private let ecoute = true
