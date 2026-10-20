@@ -98,16 +98,23 @@ function creeFauxTelegram({ membres = {} } = {}) {
       case "sendMessage":
       case "sendDocument":
       case "sendPhoto":
-      case "copyMessage":
+      case "copyMessage": {
+        const id = prochainId++;
+        // un document envoye : Telegram rend son file_id, et le fichier se
+        // telecharge ensuite comme les autres
+        const envoye = methode === "sendDocument" ? params._fichiers?.document : null;
+        if (envoye) fichiers.set(`DOC${id}`, envoye.octets);
         return envoie(200, {
           ok: true,
           result: {
-            message_id: prochainId++,
+            message_id: id,
             chat: { id: Number(params.chat_id), type: Number(params.chat_id) < 0 ? "supergroup" : "private" },
             date: Math.floor(Date.now() / 1000),
             text: params.text,
+            ...(envoye ? { document: { file_id: `DOC${id}`, file_unique_id: `uDOC${id}`, file_name: envoye.nom, mime_type: envoye.type } } : {}),
           },
         });
+      }
       default:
         return envoie(200, { ok: true, result: true });
     }

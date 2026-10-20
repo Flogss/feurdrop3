@@ -2,6 +2,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const TelegramBot = require("node-telegram-bot-api");
+const { PDFDocument } = require("pdf-lib");
 const {
   addColis,
   createBatch,
@@ -28,6 +29,7 @@ const {
   deleteColis,
   setBatchPrice,
   setColisNote,
+  colisAvecNumero,
   setBatchNote,
   getPendingSummary,
   getStatsMessageId,
@@ -106,6 +108,16 @@ const {
 } = require("./bot/impression");
 const { handleFusion, ajouteAFusion, handleStopFusion } = require("./bot/fusion");
 const { handleSave } = require("./bot/sauvegarde");
+const {
+  lisListeDrops,
+  lisAnnoncePdf,
+  notePoids,
+  listeEnAttente,
+  retiensListe,
+  ajoutePoids,
+  oublieListe,
+  pdfDeLaListe,
+} = require("./bot/listeDrops");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
 
@@ -251,6 +263,15 @@ function startBot() {
   };
 
   bot.on("message", handleIncoming);
+  // La liste du jour (« 📋 Mes drops du jour ») et l'annonce du PDF
+  // (« 📄 Nouveau PDF ! ») arrivent en texte, transferees au bot en prive :
+  // elles disent comment decouper le PDF qui suit (voir bot/listeDrops.js).
+  bot.on("message", (msg) => {
+    if (msg.chat.type !== "private" || colisAttachment(msg)) return;
+    const texte = msg.text || "";
+    if (texte.startsWith("/") || !/Mes drops du jour|Nouveau PDF/i.test(texte)) return;
+    selonAcces(bot, msg, () => recoitTexteDrops(bot, msg, texte));
+  });
   // Si "4349429422" est un Channel Telegram (pas un supergroupe), les posts
   // arrivent comme channel_post et non comme message classique.
   bot.on("channel_post", handleIncoming);
@@ -887,6 +908,13 @@ async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
     return republieCode(bot, msg, attachment, arrivee);
   }
 
+  // un PDF annonce par la liste du jour : une etiquette par page, chacune
+  // sous son numero (voir decoupeSelonListe)
+  if (!direct && !arrivee?.colis_id) {
+    const decoupe = await decoupeSelonListe(bot, msg, attachment, batches);
+    if (decoupe) return decoupe;
+  }
+
   const topic = TOPIC_BY_TYPE[type];
   const senderName = extractSenderName(msg);
   const legende = legendeDe(msg);
@@ -950,6 +978,175 @@ async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
     });
   }
   return issue;
+}
+
+// --- Liste du jour et PDF a decouper ---------------------------------------------
+
+function transporteurDuNumero(numero) {
+  return detectCarrier(`${numero}.pdf`, null, getCarrierRules());
+}
+
+function resumeTransporteurs(numeros) {
+  const compte = new Map();
+  for (const n of numeros) {
+    const nom = carrierLabel(transporteurDuNumero(n) || "?").replace(/^\?$/, "inconnu");
+    compte.set(nom, (compte.get(nom) || 0) + 1);
+  }
+  return [...compte].map(([nom, n]) => `${nom} ×${n}`).join(", ");
+}
+
+// Les poids : une note « 1kg » sur l'etiquette deja recue, sinon retenus avec
+// la liste pour le PDF a venir. Une note posee a la main n'est pas ecrasee.
+function appliquePoids(bot, poids, chatId) {
+  const notes = [];
+  const enAttente = {};
+  for (const [numero, grammes] of Object.entries(poids || {})) {
+    const colis = colisAvecNumero(numero);
+    if (!colis) {
+      enAttente[numero] = grammes;
+      continue;
+    }
+    if (colis.note) continue;
+    const maj = setColisNote(colis.id, notePoids(grammes));
+    if (maj) {
+      refreshFileButtons(bot, maj);
+      notes.push(`${numero} → ${notePoids(grammes)}`);
+    }
+  }
+  if (Object.keys(enAttente).length) ajoutePoids(chatId, enAttente);
+  return notes;
+}
+
+function recoitTexteDrops(bot, msg, texte) {
+  const liste = lisListeDrops(texte);
+  if (liste) {
+    const l = retiensListe(msg.chat.id, liste);
+    const prets = l.entrees.filter((e) => e.pret).map((e) => e.numero);
+    const pasPrets = l.entrees.length - prets.length;
+    queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
+    replyEphemeral(
+      bot,
+      msg,
+      `📋 Liste${l.nom ? ` ${l.nom}` : ""} notée : ${prets.length} étiquette${prets.length > 1 ? "s" : ""} à déposer` +
+        (prets.length ? ` (${resumeTransporteurs(prets)})` : "") +
+        (pasPrets ? ` · ${pasPrets} bordereau${pasPrets > 1 ? "x" : ""} pas encore prêt${pasPrets > 1 ? "s" : ""}` : "") +
+        `.\nEnvoie-moi le PDF : je le découpe page par page, dans cet ordre.`,
+      {},
+      30000
+    );
+    return;
+  }
+  const annonce = lisAnnoncePdf(texte);
+  if (!annonce) return;
+  const notes = appliquePoids(bot, annonce.poids, msg.chat.id);
+  queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
+  if (notes.length) replyEphemeral(bot, msg, `⚖️ Note posée : ${notes.join(", ")}`, {}, 15000);
+}
+
+async function telechargeFichier(bot, fileId) {
+  const lien = await bot.getFileLink(fileId);
+  const r = await fetch(lien, { signal: AbortSignal.timeout(30000) });
+  if (!r.ok) throw new Error(`telechargement du PDF : HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+// Le PDF de la liste du jour : une page par etiquette « 📄 », dans l'ordre de
+// la liste. Chaque page devient un colis a part, nomme d'apres son numero
+// (« 8R50345899012.pdf ») -- d'ou son transporteur --, avec la note du poids.
+// Un numero deja recu n'est jamais recompte : un PDF renvoye, ou repris apres
+// une coupure, ne double rien.
+// Renvoie null quand ce PDF n'est pas celui de la liste (chemin habituel).
+async function decoupeSelonListe(bot, msg, attachment, batches) {
+  if (attachment.kind !== "pdf") return null;
+  const liste = listeEnAttente(msg.chat.id);
+  if (!liste) return null;
+
+  const octets = await telechargeFichier(bot, attachment.fileId);
+  let source;
+  try {
+    source = await PDFDocument.load(octets, { ignoreEncryption: true });
+  } catch {
+    return null; // illisible : le chemin habituel le garde tel quel
+  }
+  const pages = source.getPageCount();
+  const { concerne, complet, prets } = pdfDeLaListe(liste, { fileName: attachment.fileName, pages });
+  if (!concerne) return null;
+  if (!complet) {
+    // l'ordre ne colle plus : decouper au hasard donnerait de faux numeros
+    replyEphemeral(
+      bot,
+      msg,
+      `⚠️ ${attachment.fileName || "Ce PDF"} a ${pages} page${pages > 1 ? "s" : ""}, mais la liste${liste.nom ? ` ${liste.nom}` : ""} annonce ` +
+        `${prets.length} étiquette${prets.length > 1 ? "s" : ""} à déposer : je ne le découpe pas. Renvoie la liste à jour, puis le PDF.`,
+      {},
+      60000
+    );
+    return {};
+  }
+
+  // les poids de l'annonce, quand elle est la legende du PDF
+  const poids = { ...(liste.poids || {}), ...(lisAnnoncePdf(msg.caption)?.poids || {}) };
+  const senderName = extractSenderName(msg);
+  const crees = [];
+  const doublons = [];
+  const notes = [];
+  for (let i = 0; i < pages; i += 1) {
+    const { numero } = prets[i];
+    if (colisAvecNumero(numero)) {
+      doublons.push(numero);
+      continue;
+    }
+    const fileName = `${numero}.pdf`;
+    const type = classifyFile({ fileName, caption: null });
+    const doc = await PDFDocument.create();
+    const [page] = await doc.copyPages(source, [i]);
+    doc.addPage(page);
+    const bytes = Buffer.from(await doc.save());
+    const topic = TOPIC_BY_TYPE[type];
+    const envoi = await ecritureGroupe(
+      () =>
+        bot.sendDocument(
+          AUTO_GROUP_CHAT_ID,
+          bytes,
+          topic ? { message_thread_id: topic } : {},
+          { filename: fileName, contentType: "application/pdf" }
+        ),
+      { envoi: true }
+    );
+    const fileId = envoi?.document?.file_id;
+    if (!fileId) throw new Error(`${fileName} : Telegram n'a pas rendu le fichier`);
+
+    const { batch, key } = lotCourant(batches, AUTO_GROUP_CHAT_ID, type);
+    let colis = addColis(senderName, {
+      chatId: AUTO_GROUP_CHAT_ID,
+      messageId: envoi.message_id,
+      batchId: batch.batchId,
+      type,
+      carrier: transporteurDuNumero(numero),
+      fileName,
+      caption: null,
+      fileId,
+      fileKind: "pdf",
+    });
+    if (poids[numero]) {
+      colis = setColisNote(colis.id, notePoids(poids[numero])) || colis;
+      notes.push(`${numero} → ${notePoids(poids[numero])}`);
+    }
+    if (aDesBoutons(colis)) refreshFileButtons(bot, colis);
+    ajouteAuLot(batches, key, batch, colis, senderName);
+    crees.push({ colis, numero });
+  }
+
+  oublieListe(msg.chat.id);
+  queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
+  const lignes = [
+    `✂️ ${attachment.fileName || "PDF"} découpé : ${crees.length} étiquette${crees.length > 1 ? "s" : ""}` +
+      (crees.length ? ` (${resumeTransporteurs(crees.map((c) => c.numero))})` : ""),
+  ];
+  if (notes.length) lignes.push(`⚖️ Note : ${notes.join(", ")}`);
+  if (doublons.length) lignes.push(`↩️ Déjà reçu${doublons.length > 1 ? "s" : ""}, pas recompté${doublons.length > 1 ? "s" : ""} : ${doublons.join(", ")}`);
+  replyEphemeral(bot, msg, lignes.join("\n"), {}, 30000);
+  return { colis: crees[0]?.colis || null };
 }
 
 // Republie le fichier d'un colis dans son topic, avec ses boutons. Si la copie

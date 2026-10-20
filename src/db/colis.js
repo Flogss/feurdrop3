@@ -226,6 +226,19 @@ function setBatchPrice(batchId, prix) {
 // /note pose un mot sur un colis. Contrairement au prix, une note s'applique
 // aussi a un colis deja drope ou deja imprime : "le client rappelle" reste
 // vrai apres coup. Une note vide efface la note.
+// Le colis qui porte deja ce numero de suivi (nom de fichier ou legende), le
+// plus recent. Un numero = une etiquette : sert a ne jamais le compter deux
+// fois.
+function colisAvecNumero(numero) {
+  const n = String(numero || "").toUpperCase();
+  if (!/^[A-Z0-9]{8,30}$/.test(n)) return null;
+  const candidats = db
+    .prepare("SELECT * FROM colis WHERE instr(upper(COALESCE(file_name, '')), ?) > 0 OR instr(upper(COALESCE(caption, '')), ?) > 0 ORDER BY id DESC LIMIT 20")
+    .all(n, n);
+  // le numero entier, pas un morceau d'un numero plus long
+  return candidats.find((c) => `${c.file_name || ""} ${c.caption || ""}`.toUpperCase().split(/[^A-Z0-9]+/).includes(n)) || null;
+}
+
 function setColisNote(id, note) {
   const propre = (note || "").trim() || null;
   const info = db.prepare("UPDATE colis SET note = ? WHERE id = ?").run(propre, id);
@@ -325,6 +338,7 @@ function setBatchType(batchId, type) {
 }
 
 module.exports = {
+  colisAvecNumero,
   getPendingSummary,
   createBatch,
   addColis,
