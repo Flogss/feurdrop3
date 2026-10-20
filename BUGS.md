@@ -104,3 +104,12 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 - Opérations groupées ajoutées aux tests (aucun test ne les couvrait) : drop par transporteur, par expéditeur, sauf LIT, boîtes jaunes (stock BJ), drop en tournée limité au sac, modification et retrait d'un colis.
 
 - **B03 (site)** : dans le navigateur, une lecture du stock ralentie de 1,2 s, « + » pendant ce temps : le serveur confirme −129, l'ancienne réponse (−130) arrive ensuite et est ignorée, l'écran reste à −129.
+
+### Mesure des transitions de page (Mac, build optimisé)
+
+- Parcours automatique des 8 pages, 2 fois, 27 s filmées : 51 images/s en moyenne, aucun gel au-delà de 55 ms (7 écarts entre 50 et 55 ms). Certaines pages tournent à 30 images/s une fois posées (le fond animé est volontairement à 30 images/s au repos). À regarder de plus près si une transition précise te paraît lente.
+
+### Reste à tester sur tes appareils
+
+- iPhone 15 Pro / 16 réels : les confirmations en alerte centrée (B17), les mises en page iPhone (B12, B13, B15, B20, B21). Testé seulement sur le simulateur.
+- Mac : installer la nouvelle version (pas encore faite) pour B10, B11, B14 et les confirmations.

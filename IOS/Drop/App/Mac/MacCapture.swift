@@ -75,13 +75,19 @@ enum MacCapture {
         config.minimumFrameInterval = CMTime(value: 1, timescale: 120)
         config.queueDepth = 8
         config.showsCursor = false
+        // `-DropFilmDebut 8 -DropFilmDuree 25` : filmer plus tard, plus longtemps
+        // (les transitions de page du parcours `-DropTestPages`)
+        let reglages = UserDefaults.standard
+        let debut = reglages.double(forKey: "DropFilmDebut")
+        let duree = reglages.double(forKey: "DropFilmDuree")
+        if debut > 0 { try? await Task.sleep(for: .seconds(debut)) }
         let film = Film(dossier: dossier)
         let flux = SCStream(filter: SCContentFilter(desktopIndependentWindow: fenetre), configuration: config, delegate: nil)
         do {
             try flux.addStreamOutput(film, type: .screen, sampleHandlerQueue: film.file)
             try await flux.startCapture()
             trace("capture en cours")
-            try? await Task.sleep(for: .seconds(6))
+            try? await Task.sleep(for: .seconds(duree > 0 ? duree : 6))
             try await flux.stopCapture()
         } catch {
             try? "erreur: \(error)".write(toFile: dossier + "/film-erreur.txt", atomically: true, encoding: .utf8)
