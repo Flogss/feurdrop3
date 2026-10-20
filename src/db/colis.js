@@ -239,6 +239,18 @@ function colisAvecNumero(numero) {
   return candidats.find((c) => `${c.file_name || ""} ${c.caption || ""}`.toUpperCase().split(/[^A-Z0-9]+/).includes(n)) || null;
 }
 
+// Les etiquettes nees du decoupage d'un PDF (voir bot.js, decoupeSelonListe)
+// ces derniers jours : nommees d'apres leur numero, sans legende ni original.
+function colisDecoupesRecents(chatId) {
+  return db
+    .prepare(
+      `SELECT * FROM colis WHERE chat_id = ? AND message_id IS NOT NULL AND caption IS NULL AND source_chat_id IS NULL
+         AND status = 'pending' AND created_at >= datetime('now', '-3 days') ORDER BY id`
+    )
+    .all(chatId)
+    .filter((c) => /^[A-Z0-9]{8,30}\.pdf$/.test(c.file_name || ""));
+}
+
 function setColisNote(id, note) {
   const propre = (note || "").trim() || null;
   const info = db.prepare("UPDATE colis SET note = ? WHERE id = ?").run(propre, id);
@@ -339,6 +351,7 @@ function setBatchType(batchId, type) {
 
 module.exports = {
   colisAvecNumero,
+  colisDecoupesRecents,
   getPendingSummary,
   createBatch,
   addColis,

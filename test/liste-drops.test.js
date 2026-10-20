@@ -93,12 +93,20 @@ before(async () => {
   process.env.TELEGRAM_ALLOWED_USERS = String(ADMIN);
   process.env.FILE_REPRISES_MS = "";
   process.env.REPLY_TTL_MS = "20";
+  process.env.REPLY_LECTURE_MS = "20";
+  process.env.BATCH_DEBOUNCE_MS = "50";
   process.env.GROUP_WRITE_INTERVAL_MS = "5";
   db = require("../src/db");
   bot = require("../src/bot").startBot();
 });
 
 after(async () => {
+  // le bot finit ses envois (boutons, recapitulatif) avant qu'on coupe : sinon
+  // il les reessaie longtemps contre un serveur ferme
+  for (let n = -1; n !== faux.appels.length; ) {
+    n = faux.appels.length;
+    await new Promise((r) => setTimeout(r, 600));
+  }
   await bot.stopPolling({ cancel: true }).catch(() => {});
   await faux.ferme();
 });
@@ -146,6 +154,11 @@ test("la liste puis le PDF de 4 pages : 4 etiquettes, chacune sous son numero, s
   assert.deepEqual(colis.map((c) => c.carrier), ["LP", "LP", "LP", "MR"]);
   assert.deepEqual(colis.map((c) => c.note), ["1kg", null, null, null]);
   assert.ok(colis.every((c) => c.type === "normal" && c.file_id && c.chat_id === GROUPE));
+  // les boutons (Imprimé, Clean, Del) sous CHAQUE etiquette, pas seulement
+  // sous celle qui porte la note
+  const boutonsSous = (c) =>
+    faux.appelsDe("editMessageReplyMarkup").some((a) => Number(a.params.message_id) === c.message_id && Number(a.params.chat_id) === GROUPE);
+  assert.ok(await faux.attends(() => colis.every(boutonsSous)), `boutons sous ${colis.filter((c) => !boutonsSous(c)).map((c) => c.file_name)}`);
   assert.equal(colis[0].sender_name, "@feurman_bot");
 
   // une page par envoi, dans l'ordre de la liste

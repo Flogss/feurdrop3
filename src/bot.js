@@ -30,6 +30,7 @@ const {
   setBatchPrice,
   setColisNote,
   colisAvecNumero,
+  colisDecoupesRecents,
   setBatchNote,
   getPendingSummary,
   getStatsMessageId,
@@ -392,6 +393,7 @@ function startBot() {
   );
 
   registerCommands(bot);
+  reposeBoutonsDecoupes(bot);
 
   // ce qui restait a traiter au dernier arret (mise a jour en plein envoi) :
   // repris dans l'ordre d'arrivee
@@ -982,6 +984,9 @@ async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
 
 // --- Liste du jour et PDF a decouper ---------------------------------------------
 
+// ces reponses-la se lisent : elles restent 30 s (60 s pour un refus)
+const LECTURE_MS = Number(process.env.REPLY_LECTURE_MS || 30000);
+
 function transporteurDuNumero(numero) {
   return detectCarrier(`${numero}.pdf`, null, getCarrierRules());
 }
@@ -1032,7 +1037,7 @@ function recoitTexteDrops(bot, msg, texte) {
         (pasPrets ? ` · ${pasPrets} bordereau${pasPrets > 1 ? "x" : ""} pas encore prêt${pasPrets > 1 ? "s" : ""}` : "") +
         `.\nEnvoie-moi le PDF : je le découpe page par page, dans cet ordre.`,
       {},
-      30000
+      LECTURE_MS
     );
     return;
   }
@@ -1040,7 +1045,7 @@ function recoitTexteDrops(bot, msg, texte) {
   if (!annonce) return;
   const notes = appliquePoids(bot, annonce.poids, msg.chat.id);
   queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
-  if (notes.length) replyEphemeral(bot, msg, `⚖️ Note posée : ${notes.join(", ")}`, {}, 15000);
+  if (notes.length) replyEphemeral(bot, msg, `⚖️ Note posée : ${notes.join(", ")}`, {}, LECTURE_MS / 2);
 }
 
 async function telechargeFichier(bot, fileId) {
@@ -1079,7 +1084,7 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
       `⚠️ ${attachment.fileName || "Ce PDF"} a ${pages} page${pages > 1 ? "s" : ""}, mais la liste${liste.nom ? ` ${liste.nom}` : ""} annonce ` +
         `${prets.length} étiquette${prets.length > 1 ? "s" : ""} à déposer : je ne le découpe pas. Renvoie la liste à jour, puis le PDF.`,
       {},
-      60000
+      2 * LECTURE_MS
     );
     return {};
   }
@@ -1132,6 +1137,9 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
       colis = setColisNote(colis.id, notePoids(poids[numero])) || colis;
       notes.push(`${numero} → ${notePoids(poids[numero])}`);
     }
+    // relu en base : ce que rend addColis n'a pas le message, et sans lui
+    // les boutons ne se posaient pas (seule l'etiquette annotee les avait)
+    colis = getColisById(colis.id);
     if (aDesBoutons(colis)) refreshFileButtons(bot, colis);
     ajouteAuLot(batches, key, batch, colis, senderName);
     crees.push({ colis, numero });
@@ -1145,8 +1153,18 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
   ];
   if (notes.length) lignes.push(`⚖️ Note : ${notes.join(", ")}`);
   if (doublons.length) lignes.push(`↩️ Déjà reçu${doublons.length > 1 ? "s" : ""}, pas recompté${doublons.length > 1 ? "s" : ""} : ${doublons.join(", ")}`);
-  replyEphemeral(bot, msg, lignes.join("\n"), {}, 30000);
+  replyEphemeral(bot, msg, lignes.join("\n"), {}, LECTURE_MS);
   return { colis: crees[0]?.colis || null };
+}
+
+// Rattrapage : les etiquettes decoupees avant le correctif n'avaient pas leurs
+// boutons (seule la premiere, annotee, les avait). Au demarrage, on les repose
+// sur celles des derniers jours -- une edition chacune, « deja ce clavier »
+// pour les autres.
+function reposeBoutonsDecoupes(bot) {
+  const lignes = colisDecoupesRecents(AUTO_GROUP_CHAT_ID).filter(aDesBoutons);
+  for (const c of lignes) refreshFileButtons(bot, c, { priorite: "basse" });
+  if (lignes.length) console.log(`[bot] boutons reposes sur ${lignes.length} etiquette(s) decoupee(s)`);
 }
 
 // Republie le fichier d'un colis dans son topic, avec ses boutons. Si la copie
