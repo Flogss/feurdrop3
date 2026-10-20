@@ -26,6 +26,8 @@ function creeServeur(traite) {
   };
 }
 
+const BASE = Math.floor(Date.now() / 1000) * 1000;
+
 // UPS : activity[] du plus recent au plus ancien, { type, description, h (il y a h heures) }
 function creeFauxUPS({ id = "client-ups-test", secret = "secret-ups-test" } = {}) {
   const suivis = new Map();
@@ -48,7 +50,10 @@ function creeFauxUPS({ id = "client-ups-test", secret = "secret-ups-test" } = {}
     if (c === "invalide") return envoie(400, { response: { errors: [{ code: "TV0001", message: "Invalid tracking number" }] } });
     const suivi = suivis.get(numero);
     if (!suivi) return envoie(404, { response: { errors: [{ code: "TW0001", message: "Tracking Information Not Found" }] } });
-    const date = (h) => new Date(Date.now() - h * 3600e3);
+    // « il y a h heures » depuis le demarrage du faux serveur : une relecture
+    // donne exactement les memes dates (sinon une seconde qui passe entre deux
+    // lectures fabriquait de faux nouveaux evenements)
+    const date = (h) => new Date(BASE - h * 3600e3);
     const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
     const hms = (d) => d.toISOString().slice(11, 19).replace(/:/g, "");
     return envoie(200, {
@@ -103,7 +108,7 @@ function creeFauxDHL({ cle = "cle-dhl-test" } = {}) {
     const suivi = suivis.get(numero);
     if (!suivi) return envoie(404, { status: 404, title: "No result found", detail: "No shipment with given tracking number found." });
     const evts = suivi.map((e) => ({
-      timestamp: new Date(Date.now() - e.h * 3600e3).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      timestamp: new Date(BASE - e.h * 3600e3).toISOString().replace(/\.\d{3}Z$/, "Z"),
       location: { address: { addressLocality: e.ville || "Paris" } },
       statusCode: e.statusCode,
       status: e.status || e.description,

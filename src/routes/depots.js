@@ -104,4 +104,15 @@ router.post("/:colisId/constat", (req, res) => {
   }
 });
 
+// « Redrop » : le colis a ete oublie (marque dropé, jamais parti). Il revient
+// dans « À poster » a 0 € ; son suivi et son historique restent. Rejoue, il
+// rend le redrop deja en attente (jamais deux).
+router.post("/:colisId/redrop", (req, res) => {
+  try {
+    res.json(depots.redrop(Number(req.params.colisId), { par: qui(req) }));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 module.exports = { router };

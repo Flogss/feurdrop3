@@ -1,4 +1,4 @@
-const { db, transaction, getSetting, setSetting } = require("../db");
+const { db, transaction, getSetting, setSetting, redropColis } = require("../db");
 const { suiviDuColis } = require("../suiviColis");
 const { transporteur: infoTransporteurBrut, METHODES_AUTOMATIQUES, NON_CONTROLES, LISIBLES } = require("./transporteurs");
 const { analyseDepot, versMs } = require("./analyse");
@@ -14,8 +14,10 @@ const dhl = require("./dhl");
 // La file active ne garde que ce qui reste a trancher : un depot prouve en
 // sort tout seul (sa date de confirmation et sa preuve restent dans
 // l'historique), un numero que le transporteur dit inconnu a plusieurs
-// reprises en est retire (avec la raison, gardee en base et dans le journal
-// du serveur). Le colis et son etiquette ne sont jamais touches.
+// reprises en est retire, comme un colis HORS DELAI sans aucune nouvelle
+// (regle « hors délai » : reglages ci-dessous) -- avec la raison, gardee en
+// base et dans le journal du serveur. Le colis, son etiquette et ses preuves
+// ne sont jamais touches ; « Vérifier » le remet dans la liste.
 //
 // Qui lit :
 //   - le serveur, par les API officielles (La Poste/Colissimo/Chronopost/DPD,
@@ -49,6 +51,14 @@ const reglages = () => ({
   inconnuAgeHeures: Number(process.env.CONTROLE_INCONNU_AGE_HEURES || 72),
   // le Mac est « en ligne » s'il s'est signale il y a moins de 45 s
   agentSecondes: Number(process.env.CONTROLE_AGENT_SECONDES || 45),
+  // « hors délai » : un colis drope il y a plus de 7 jours, toujours sans
+  // prise en charge, sans aucune nouvelle du transporteur depuis 2 jours, sort
+  // de la liste active. Jamais une verification simplement bloquee (site
+  // protege, pause, constat a faire), une lecture en attente ou en echec, un
+  // redrop en cours, ni un colis remis dans la liste a la main il y a moins de
+  // 7 jours.
+  archiveJours: Number(process.env.CONTROLE_ARCHIVE_JOURS || 7),
+  archiveCalmeJours: Number(process.env.CONTROLE_ARCHIVE_CALME_JOURS || 2),
 });
 
 const MINUTE = 60 * 1000;
@@ -93,17 +103,31 @@ const infoTransporteur = (code) => infoTransporteurBrut(code, { lectureCoupee: l
 
 // --- Les colis a controler ------------------------------------------------------------
 
-const COLONNES_COLIS = "id, sender_name, type, carrier, status, file_name, caption, created_at, dropped_at, printed_at, paid";
+// (un redrop porte la date de reception de l'etiquette d'origine : recu_le)
+const COLONNES_COLIS =
+  "c.id, c.sender_name, c.type, c.carrier, c.status, c.file_name, c.caption, c.created_at, c.dropped_at, c.printed_at, c.paid, c.redrop_de, (SELECT o.created_at FROM colis o WHERE o.id = c.redrop_de) AS recu_le";
+
+// Les redrops en attente, par colis d'origine.
+function redropsEnAttente() {
+  return new Map(db.prepare("SELECT redrop_de, MAX(id) AS id FROM colis WHERE redrop_de IS NOT NULL AND status = 'pending' GROUP BY redrop_de").all().map((r) => [r.redrop_de, r.id]));
+}
 
 function colisDropes() {
   const lignes = db
-    .prepare(`SELECT ${COLONNES_COLIS} FROM colis WHERE status = 'dropped' AND dropped_at >= datetime('now', ?) ORDER BY dropped_at DESC, id DESC`)
+    .prepare(`SELECT ${COLONNES_COLIS} FROM colis c WHERE c.status = 'dropped' AND c.dropped_at >= datetime('now', ?) ORDER BY c.dropped_at DESC, c.id DESC`)
     .all(`-${reglages().affichageJours} days`);
   const avec = [];
   let sansNumero = 0;
   const horsControle = {};
   const coupees = lectureCoupee();
+  const enAttente = redropsEnAttente();
+  // un colis et ses redrops : une seule ligne, le dernier drop (pas de doublon)
+  const racines = new Set();
   for (const colis of lignes) {
+    const racine = colis.redrop_de || colis.id;
+    if (racines.has(racine)) continue;
+    racines.add(racine);
+    colis.redrop_attente = enAttente.get(racine) || null;
     const suivi = suiviDuColis(colis);
     if (!suivi) sansNumero += 1;
     else if (NON_CONTROLES[suivi.transporteur]) horsControle[suivi.transporteur] = (horsControle[suivi.transporteur] || 0) + 1;
@@ -293,17 +317,23 @@ function archive(numero, motif, detail = {}) {
   console.log(`[controle] suivi ${numero} retiré de la file : ${motif}`);
 }
 
+// Remis dans la liste (« Vérifier », un constat, un redrop) : la regle « hors
+// délai » le laisse ensuite tranquille quelques jours (garde_le).
 function desarchive(numero) {
-  db.prepare("UPDATE controle_suivis SET archive_le = NULL, archive_motif = NULL, archive_detail = NULL, inconnu_lectures = 0, inconnu_premier_le = NULL WHERE numero = ?").run(numero);
+  db.prepare(
+    `UPDATE controle_suivis SET garde_le = CASE WHEN archive_le IS NOT NULL THEN datetime('now') ELSE garde_le END,
+       archive_le = NULL, archive_motif = NULL, archive_detail = NULL, inconnu_lectures = 0, inconnu_premier_le = NULL WHERE numero = ?`
+  ).run(numero);
 }
 
 /**
  * Un numero inconnu du transporteur est-il a retirer ? Seulement a coup sur :
- *   - refuse comme invalide par l'API (format faux) : tout de suite ;
- *   - « inconnu » lu au moins 2 fois, a 12 h d'ecart, 72 h apres le drop, et
- *     jamais aucun evenement connu pour ce numero.
- * Jamais sur une erreur reseau, un delai, une page bloquee ou incomplete :
- * ce ne sont pas des lectures « inconnu ».
+ * « inconnu » lu au moins 2 fois, a 12 h d'ecart, 72 h apres le drop, et
+ * jamais aucun evenement connu pour ce numero (« Numéro incorrect »).
+ * Un numero REFUSE (format invalide) reste dans la liste, en « Numéro
+ * incorrect » : il faut le voir pour le corriger ; la regle « hors délai »
+ * le retire ensuite. Jamais sur une erreur reseau, un delai, une page bloquee
+ * ou incomplete : ce ne sont pas des lectures « inconnu ».
  */
 function verifieInconnu(numero, x) {
   const s = db.prepare("SELECT * FROM controle_suivis WHERE numero = ?").get(numero);
@@ -311,15 +341,12 @@ function verifieInconnu(numero, x) {
   const connus = db.prepare("SELECT COUNT(*) AS n FROM controle_evenements WHERE numero = ? AND source != 'manuel'").get(numero).n;
   if (connus > 0) return false;
   const t = x?.transporteur || infoTransporteur(s.transporteur);
-  if (s.code_erreur === "invalide") {
-    archive(numero, `numéro refusé par ${t.nom} (${s.erreur || "format invalide"})`, { regle: "invalide", erreur: s.erreur, colisId: x?.colis.id ?? null });
-    return true;
-  }
+  if (x?.colis.redrop_attente) return false;
   const r = reglages();
   const age = x ? Date.now() - sqlVersMs(x.colis.dropped_at) : 0;
   const ecart = s.inconnu_premier_le ? Date.now() - sqlVersMs(s.inconnu_premier_le) : 0;
   if (s.trouve === 0 && s.inconnu_lectures >= r.inconnuLectures && ecart >= r.inconnuEcartHeures * HEURE && age >= r.inconnuAgeHeures * HEURE) {
-    archive(numero, `inconnu de ${t.nom} : ${s.inconnu_lectures} lectures sur ${Math.round(ecart / HEURE)} h, drop il y a ${Math.round(age / HEURE)} h`, {
+    archive(numero, `Numéro incorrect : inconnu de ${t.nom} à ${s.inconnu_lectures} lectures sur ${Math.round(ecart / HEURE)} h, drop il y a ${Math.round(age / HEURE)} h`, {
       regle: "inconnu",
       lectures: s.inconnu_lectures,
       premiere: s.inconnu_premier_le,
@@ -330,6 +357,53 @@ function verifieInconnu(numero, x) {
     return true;
   }
   return false;
+}
+
+/**
+ * La regle « hors délai » (reglages : archiveJours, archiveCalmeJours) : un
+ * colis drope depuis longtemps, toujours sans prise en charge, dont le
+ * transporteur ne dit plus rien, sort de la liste active -- retire avec sa
+ * raison, jamais supprime (le colis, son etiquette, ses evenements restent).
+ * Jamais : un depot prouve, une verification bloquee ou a constater, une
+ * lecture en attente ou en echec, une API non configuree, un redrop en cours,
+ * un numero lu dans la campagne en cours, une nouvelle recente, ni un colis
+ * remis dans la liste a la main recemment.
+ */
+function archiveHorsDelai(affiches) {
+  const r = reglages();
+  if (!(r.archiveJours > 0)) return 0;
+  const limite = Date.now() - r.archiveJours * 24 * HEURE;
+  const calme = Date.now() - r.archiveCalmeJours * 24 * HEURE;
+  const candidats = [...affiches.values()].map((p) => p[0]).filter((x) => sqlVersMs(x.colis.dropped_at) < limite && !x.colis.redrop_attente);
+  if (!candidats.length) return 0;
+  const { suivis, evenements } = lignesSuivis(new Set(candidats.map((x) => x.suivi.numero)));
+  const ctx = contexte();
+  const camp = campagneActive();
+  const enCampagne = camp ? db.prepare("SELECT 1 FROM controle_campagne_items WHERE campagne_id = ? AND numero = ? AND etat IN ('attente', 'en_cours')") : null;
+  let retires = 0;
+  for (const x of candidats) {
+    const numero = x.suivi.numero;
+    const s = suivis.get(numero);
+    if (!s || s.archive_le) continue;
+    if (s.garde_le && sqlVersMs(s.garde_le) > limite) continue;
+    if (s.code_erreur && s.code_erreur !== "invalide") continue;
+    // inconnu du transporteur : sa propre regle (deux lectures espacees), pas celle-ci
+    if (s.trouve === 0) continue;
+    const c = ligneDe(x, s, evenements.get(numero), ctx).controle;
+    if (!["non_confirme", "a_verifier", "incorrect"].includes(c.categorie) || c.nonConfigure || c.erreurTechnique) continue;
+    const dates = (evenements.get(numero) || []).map((e) => versMs(e.survenuLe)).filter(Number.isFinite);
+    const derniere = dates.length ? Math.max(...dates) : null;
+    if (derniere != null && derniere > calme) continue;
+    if (enCampagne?.get(camp.id, numero)) continue;
+    const jours = Math.round((Date.now() - sqlVersMs(x.colis.dropped_at)) / (24 * HEURE));
+    const motif =
+      c.categorie === "incorrect"
+        ? `Numéro incorrect, hors délai : dropé il y a ${jours} j`
+        : `Hors délai : dropé il y a ${jours} j, aucune prise en charge${derniere ? `, dernière nouvelle du transporteur il y a ${Math.round((Date.now() - derniere) / (24 * HEURE))} j` : ""}`;
+    archive(numero, motif, { regle: "hors_delai", categorie: c.categorie, colisId: x.colis.id, derniere: derniere ? new Date(derniere).toISOString() : null });
+    retires += 1;
+  }
+  return retires;
 }
 
 // La prochaine lecture, d'apres ce que l'on sait : jamais plus une fois le
@@ -483,6 +557,7 @@ async function passe({ declencheur, force }) {
     // fenetre (ou ont ete "undropes") n'y sont plus relus
     for (const [numero, porteurs] of affiches) suiviDe(numero, porteurs[0]);
     recaleFile(affiches);
+    bilan.retires += archiveHorsDelai(affiches);
     if (force) {
       db.prepare(
         `UPDATE controle_suivis SET prochaine_le = datetime('now') WHERE methode != 'manuel' AND prochaine_le IS NOT NULL AND archive_le IS NULL
@@ -521,7 +596,8 @@ async function passe({ declencheur, force }) {
 }
 
 function colisAvecSuivi(colisId) {
-  const colis = db.prepare(`SELECT ${COLONNES_COLIS} FROM colis WHERE id = ?`).get(colisId);
+  const colis = db.prepare(`SELECT ${COLONNES_COLIS} FROM colis c WHERE c.id = ?`).get(colisId);
+  if (colis) colis.redrop_attente = redropsEnAttente().get(colis.redrop_de || colis.id) || null;
   if (!colis) throw Object.assign(new Error("Colis introuvable"), { status: 404 });
   if (colis.status !== "dropped") throw Object.assign(new Error("Ce colis n'est pas dropé : rien à contrôler"), { status: 409 });
   const suivi = suiviDuColis(colis);
@@ -733,7 +809,7 @@ function campagne(id = null) {
     c = db.prepare("SELECT * FROM controle_campagnes WHERE id = ?").get(c.id);
   }
   const items = db.prepare("SELECT * FROM controle_campagne_items WHERE campagne_id = ?").all(c.id);
-  const compteurs = { total: items.length, verifies: 0, restants: 0, confirmes: 0, nonConfirmes: 0, aVerifier: 0, bloques: 0, erreurs: 0, aConstater: 0, annules: 0, retires: 0 };
+  const compteurs = { total: items.length, verifies: 0, restants: 0, confirmes: 0, nonConfirmes: 0, aVerifier: 0, incorrects: 0, bloques: 0, erreurs: 0, aConstater: 0, annules: 0, retires: 0 };
   const parTransporteur = {};
   for (const it of items) {
     const t = (parTransporteur[it.transporteur] ||= { code: it.transporteur, nom: infoTransporteur(it.transporteur).nom, methode: it.methode, total: 0, faits: 0, restants: 0, bloques: 0, erreurs: 0, aConstater: 0, message: null });
@@ -744,6 +820,7 @@ function campagne(id = null) {
       if (it.resultat === "confirme") compteurs.confirmes += 1;
       else if (it.resultat === "non_confirme") compteurs.nonConfirmes += 1;
       else if (it.resultat === "retire") compteurs.retires += 1;
+      else if (it.resultat === "incorrect") compteurs.incorrects += 1;
       else compteurs.aVerifier += 1;
     } else if (it.etat === "attente" || it.etat === "en_cours") {
       compteurs.restants += 1;
@@ -982,10 +1059,40 @@ function constate(colisId, resultat, { par = null } = {}) {
   return detail(colisId);
 }
 
+// --- Redrop : un colis oublie remis « à poster » ------------------------------------------
+
+/**
+ * Le colis a ete marque dropé mais n'est jamais parti (oublie) : il revient
+ * dans « À poster » sous la forme d'un redrop a 0 € (voir db/drops.js). Son
+ * suivi, ses evenements et son historique restent ; la ligne du controle
+ * l'indique, et une fois le redrop dropé, c'est lui qu'elle suit -- jamais
+ * deux lignes pour un colis. Refuse si le transporteur a deja pris le colis
+ * en charge (il n'est pas oublie).
+ */
+function redrop(colisId, { par = null } = {}) {
+  const x = colisAvecSuivi(colisId);
+  const numero = x.suivi.numero;
+  suiviDe(numero, x);
+  const { suivis, evenements } = lignesSuivis([numero]);
+  const l = ligneDe(x, suivis.get(numero), evenements.get(numero), contexte());
+  if (l.controle.categorie === "confirme" && !x.colis.redrop_attente) {
+    throw Object.assign(new Error(`${x.transporteur.nom} a déjà pris ce colis en charge (${l.controle.preuve?.statut || "preuve lue"}) : il n'est pas oublié, rien à redropper`), { status: 409 });
+  }
+  const r = redropColis(x.colis.id);
+  if (!r || r.pasDrope) throw Object.assign(new Error("Ce colis n'est pas dropé : rien à redropper"), { status: 409 });
+  // de retour dans la liste (s'il en etait sorti), et relu apres le nouveau drop
+  desarchive(numero);
+  if (!r.deja) console.log(`[controle] redrop du colis ${x.colis.id} (${numero}) par ${par || "?"} : colis ${r.colis.id} à poster, 0 €`);
+  // (le detail de la ligne, qui montre le redrop en attente, et le nouveau colis)
+  return { ...detail(colisId), deja: r.deja, nouveau: { id: r.colis.id, status: r.colis.status, price: r.colis.price } };
+}
+
 // --- Ce que la page affiche ------------------------------------------------------------
 
 function demandeAttention(controle, x) {
   if (controle.categorie === "confirme" || controle.categorie === "en_attente") return false;
+  // deja remis « à poster » (Redrop) : rien de plus a faire
+  if (x.colis.redrop_attente) return false;
   if (controle.manuel) {
     // un colis a verifier a la main l'est une fois les scans remontes (24 h)
     return Date.now() - sqlVersMs(x.colis.dropped_at) > 24 * HEURE;
@@ -1022,9 +1129,20 @@ function ligneDe(x, s, evenements, { pauses, configure }) {
     // la memoire de la derniere lecture
     lecture: s ? { methode: s.methode_lecture || null, statutBrut: s.statut_brut || null, page: s.page_url || null, par: s.lu_par || null } : null,
     confirmeLe: controle.categorie === "confirme" ? s?.confirme_le || null : null,
-    retire: s?.archive_le ? { le: s.archive_le, motif: s.archive_motif } : null,
+    retire: s?.archive_le ? retraitDe(s) : null,
+    // un colis oublie, remis « à poster » (Redrop) : en attente, ou deja
+    // redropé (cette ligne est alors celle du redrop)
+    redrop: { enAttente: x.colis.redrop_attente || null, de: x.colis.redrop_de || null },
     lien: t.lien(x.suivi.numero),
   };
+}
+
+// Le retrait d'un numero de la liste : quand, pourquoi, et si le numero est
+// incorrect (inconnu ou refuse par le transporteur).
+function retraitDe(s) {
+  const d = safeJson(s.archive_detail) || {};
+  const incorrect = d.regle === "inconnu" || d.regle === "invalide" || d.categorie === "incorrect";
+  return { le: s.archive_le, motif: s.archive_motif, regle: d.regle || null, incorrect };
 }
 
 function contexte() {
@@ -1048,6 +1166,11 @@ const resume = (l) => ({
   suite: l.controle.suite,
   livre: l.controle.livre,
   retire: l.retire,
+  // ce que la liste savait au moment du retrait (pour la recherche et les filtres)
+  categorie: l.controle.categorie,
+  dernierEvenement: l.controle.dernierEvenement ? { le: l.controle.dernierEvenement.le, statut: l.controle.dernierEvenement.statut } : null,
+  verifieLe: l.verifieLe,
+  redrop: l.redrop,
   lien: l.lien,
 });
 
@@ -1083,6 +1206,13 @@ function vue() {
     // parmi les « bloques » seulement : c'est ce que dit la carte
     // « Verification bloquee » (aConstater compte aussi des non confirmes)
     aConstaterBloques: 0,
+    // « Numéro incorrect » (absent d'un serveur plus ancien)
+    incorrect: 0,
+    // « Pas encore scanné » : le transporteur ne connait que l'etiquette, ou
+    // pas encore le numero (= non confirmes)
+    pasEncoreScanne: 0,
+    // un redrop attend d'etre poste
+    redropsEnAttente: 0,
     attention: 0,
     actifs: lignes.length,
     retires: retires.length,
@@ -1092,6 +1222,8 @@ function vue() {
   compteurs.horsControle = Object.entries(horsControle).map(([code, colis]) => ({ code, nom: infoTransporteur(code).nom, colis }));
   for (const l of lignes) {
     compteurs[l.controle.categorie] += 1;
+    if (l.controle.categorie === "non_confirme") compteurs.pasEncoreScanne += 1;
+    if (l.redrop.enAttente) compteurs.redropsEnAttente += 1;
     if (l.controle.categorie === "non_confirme" && l.controle.enRetard) compteurs.nonConfirmeHorsDelai += 1;
     if (l.aConstater) compteurs.aConstater += 1;
     if (l.aConstater && l.controle.categorie === "bloque") compteurs.aConstaterBloques += 1;
@@ -1214,7 +1346,9 @@ function depotsPourPortail(colisListe, { cle = null } = {}) {
     const c = ligneDe(x, s, evenements.get(x.suivi.numero), ctx).controle;
     const api = estServeur(x.transporteur.methode) && ctx.configure[x.transporteur.methode] && !ctx.pauses[x.transporteur.methode];
     let etat = null;
-    if (s?.archive_le) etat = null;
+    // retire « hors délai » : ce que l'on savait reste vrai (pas encore scanne) ;
+    // retire pour un numero incorrect : rien a dire
+    if (s?.archive_le) etat = c.categorie === "non_confirme" && retraitDe(s).regle === "hors_delai" ? "pas_encore" : null;
     else if (c.categorie === "confirme") etat = c.livre ? "livre" : "pris";
     else if (c.categorie === "non_confirme") etat = "pas_encore";
     else if (c.categorie === "en_attente" && api) etat = "verification";
@@ -1369,6 +1503,8 @@ function demarreControleAuto() {
 }
 
 module.exports = {
+  redrop,
+  archiveHorsDelai,
   vue,
   detail,
   synchronise,

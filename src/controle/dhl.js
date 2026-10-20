@@ -25,7 +25,9 @@ function versEvenement(e, i) {
   // phrase ne dit pas le contraire
   const phrase = litLibelle(texte, "DHL");
   let lu;
-  if (code === "pre-transit") lu = { etape: "info_received", physique: false };
+  // une enquete, une reclamation : la suite, jamais une preuve (quel que soit le code)
+  if (phrase.etape === "exception" && !phrase.physique && phrase.suite) lu = phrase;
+  else if (code === "pre-transit") lu = { etape: "info_received", physique: false };
   else if (code === "delivered") lu = phrase.etape === "info_received" ? phrase : { etape: "delivered", physique: true };
   else if (code === "transit") lu = phrase.etape === "info_received" ? phrase : { etape: phrase.physique ? phrase.etape : "in_transit", physique: true };
   else lu = phrase.physique && !phrase.suite ? phrase : { etape: phrase.etape === "info_received" ? "info_received" : code === "failure" ? "exception" : "unknown", physique: false };
@@ -39,7 +41,7 @@ function versEvenement(e, i) {
     lieu: e.location?.address?.addressLocality || null,
     etape: lu.etape,
     physique: lu.physique,
-    incident: code === "failure" ? texte.slice(0, 120) || "Incident DHL" : null,
+    incident: code === "failure" || lu.suite ? texte.slice(0, 120) || "Incident DHL" : null,
     resolu: false,
     ordre: 1000 - i,
     source: "dhl",

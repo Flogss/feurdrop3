@@ -76,6 +76,11 @@ const INFO = {
   GLS: [/parcel data (was|has been) (entered|transmitted)/i, /donn[ée]es du colis (ont [ée]t[ée] )?(saisies|transmises)/i, /information (was|has been) (received|transmitted)/i],
 };
 
+// Un evenement secondaire : il raconte la suite (une enquete, une
+// reclamation), il ne prouve rien a lui seul -- et n'efface jamais une preuve
+// deja lue (« Une enquête est en cours » apres « Colis livré »).
+const SECONDAIRES = /enqu[eê]te|r[ée]clamation|investigation|claim/i;
+
 // la prise en charge et la suite (pour chaque transporteur), du plus precis
 // au plus general ; « suite » = apres la prise en charge (retour, souci)
 const ETAPES = {
@@ -85,11 +90,12 @@ const ETAPES = {
     { etape: "delivered", re: /colis (livr[ée]|remis) (au|à au|a au) destinataire|colis r[ée]cup[ée]r[ée] par le destinataire|colis livr[ée](?![a-zà-ÿ])/i },
     { etape: "available_for_pickup", re: /colis (est )?disponible (au|en|dans)|colis (est )?(mis|d[ée]pos[ée])e? [àa] (la )?disposition/i },
     { etape: "out_for_delivery", re: /en cours de livraison/i },
-    { etape: "in_transit", re: /colis pris en charge|colis d[ée]pos[ée] (en|au|dans)|colis remis [àa] mondial relay|colis (en cours d.acheminement|en cours de traitement|achemin[ée])|colis arriv[ée] (sur|au|à|a l|dans)|colis (exp[ée]di[ée]|collect[ée])/i },
+    // « Colis expédié depuis site logistique », « Colis pris en charge au PR »
+    { etape: "in_transit", re: /colis pris en charge|^pris en charge (en|au|par|dans)|colis d[ée]pos[ée] (en|au|dans)|colis remis [àa] mondial relay|colis (en cours d.acheminement|en cours de traitement|achemin[ée])|colis arriv[ée] (sur|au|à|a l|en|dans)|colis (exp[ée]di[ée]|collect[ée]|tri[ée])|colis en cours de tri/i },
     { etape: "exception", re: /retour|renvoy[ée]|non (livr[ée]|distribu)|refus[ée]|incident|probl[eè]me/i, suite: true },
   ],
   DHL: [
-    { etape: "delivered", re: /(successfully )?delivered|(a|ont) [ée]t[ée] (distribu|livr)[ée]e?s?|envoi (a [ée]t[ée] )?livr[ée]|distribu[ée] au destinataire/i },
+    { etape: "delivered", re: /(successfully )?delivered|(a|ont) [ée]t[ée] (distribu|livr)[ée]e?s?|envoi (a [ée]t[ée] )?livr[ée]|distribu[ée] au destinataire|^(envoi |colis )?livr[ée]e?s?(?![a-zà-ÿ])/i },
     { etape: "out_for_delivery", re: /loaded onto the delivery vehicle|with delivery courier|out for delivery|en cours de livraison|charg[ée] dans le v[ée]hicule de livraison/i },
     { etape: "available_for_pickup", re: /ready for (pickup|collection)|disponible (au|en|dans) (point|relais|bureau|packstation)|available for pickup/i },
     { etape: "in_transit", re: /picked up|has been posted|posted by the sender|d[ée]pos[ée] par l.exp[ée]diteur|enlev[ée]|processed (in|at)|trait[ée] (au|dans|à)|arrived (at|in)|arriv[ée] (au|dans|à)|departed|parti (du|de)|in transit|en transit|(sorting|parcel|distribution) cent(er|re)|centre de (tri|distribution)|customs clearance|d[ée]douan/i },
@@ -104,12 +110,33 @@ const ETAPES = {
   ],
 };
 
+// Les libelles de l'API La Poste (La Poste, Colissimo, Chronopost, DPD),
+// lus seulement quand leur CODE est inconnu (laposte.js) : une formule
+// explicite, jamais un mot isole.
+INFO.LP = [
+  /va bient[oô]t nous [eê]tre confi|pr[ée]paration chez|[ée]tiquette|annonc[ée]|d[ée]claratif/i,
+  // « Vous avez fait une demande d'affranchissement » : un achat d'etiquette
+  /affranchissement/i,
+  /informations? (de votre (envoi|colis) )?(ont [ée]t[ée] )?re[cç]ues?|donn[ée]es (de l.envoi )?re[cç]ues/i,
+];
+ETAPES.LP = [
+  { etape: "exception", re: /retourn[ée] [àa] l.exp[ée]diteur|retour (vers|[àa]) l.exp[ée]diteur|non distribuable|refus[ée] par le destinataire/i, suite: true },
+  { etape: "delivered", re: /colis (a [ée]t[ée] |est )?(livr[ée]|distribu[ée])|(a [ée]t[ée]|est) (livr[ée]|distribu[ée])|distribu[ée] (au|[àa]|dans|en)|remis au destinataire|^(colis )?livr[ée]e?s?(?![a-zà-ÿ])/i },
+  // Colissimo : « Votre colis vous attend en point relais »
+  { etape: "available_for_pickup", re: /vous attend (en|au|dans|[àa])|disponible (en|au|dans|[àa]) (point|bureau|relais|consigne|agence|locker)|en attente d.[eê]tre retir|peut [eê]tre retir/i },
+  { etape: "out_for_delivery", re: /en cours de livraison|en cours de distribution|mis en distribution|en tourn[ée]e de livraison/i },
+  // DPD : « Tri effectué en agence »
+  { etape: "in_transit", re: /pris en charge|d[ée]pos[ée] (en|au|dans|par)|tri effectu|tri[ée] (en|au|dans|par)|en cours d.acheminement|achemin[ée]|arriv[ée] (sur|au|[àa]|dans|en)|centre de tri|plate-?forme|en transit|exp[ée]di[ée] (depuis|par|de|du)|collect[ée]|en cours de traitement|d[ée]douan|quitt[ée] (le|la|notre)/i },
+];
+
 /** une ligne d'un transporteur -> { etape, physique, suite } */
 function litLibelle(libelle, code = "MR") {
   const l = String(libelle || "");
   if ((INFO[code] || []).some((re) => re.test(l))) return { etape: "info_received", physique: false };
   // au futur ou a la negation : ce n'est pas arrive
   if (PAS_ENCORE.test(l)) return { etape: "unknown", physique: false };
+  // une enquete, une reclamation : la suite, jamais une preuve
+  if (SECONDAIRES.test(l)) return { etape: "exception", physique: false, suite: true };
   for (const { etape, re, suite } of ETAPES[code] || []) {
     if (re.test(l)) return { etape, physique: true, suite: suite || undefined };
   }
@@ -226,6 +253,12 @@ function evenementsMR(section) {
     const liste = j.paires.length ? j.paires : j.titre ? [{ heure: null, libelle: j.titre }] : [];
     for (const p of liste) evenements.push(evenement("MR", { jour: j.date, heure: p.heure, libelle: p.libelle, ordre: ordre--, ligne: p.libelle }));
   }
+  // une mise en page differente (date, heure et libelle sur une meme ligne) :
+  // la lecture ligne a ligne, qui ne garde que les formules connues
+  if (!evenements.length || !evenements.some((e) => e.etape !== "unknown")) {
+    const lignes = evenementsLignes("MR", section);
+    if (lignes.length) return lignes;
+  }
   return sansDoublons(evenements);
 }
 
@@ -242,6 +275,9 @@ function evenementsLignes(code, section) {
     const h = litHeure(l);
     if (h) heure = h;
     if (estDate(l) || estHeure(l)) continue;
+    // avant toute date : un resume en tete de page (« Livré »), pas un
+    // evenement -- un evenement reel est date
+    if (!jour) continue;
     // une ligne trop longue est un paragraphe d'aide, pas un evenement
     if (l.length > 160) continue;
     const libelle = l.replace(/\b\d{1,2}[/.]\d{1,2}[/.]\d{4}\b/, "").replace(/\b([01]?\d|2[0-3])[:h][0-5]\d\s*([ap]\.?m\.?)?/i, "").replace(/\s+/g, " ").trim() || l;
@@ -268,13 +304,23 @@ const chiffres = (t) => String(t || "").replace(/\D/g, "");
 const LECTEURS = {
   MR: {
     introuvable: /aucun colis portant ce num[ée]ro|n.avons identifi[ée] aucun colis/i,
-    // la page affiche les 8 derniers chiffres du numero
-    numeroAffiche: (lignes) => {
-      const i = lignes.findIndex((l) => /^num[ée]ro de colis$/i.test(l));
-      return i >= 0 ? chiffres(lignes[i + 1]) : null;
+    // la page affiche le numero (souvent ses 8 derniers chiffres) sous
+    // « NUMÉRO DE COLIS », ou sur la meme ligne ; a defaut, une ligne faite du
+    // numero seul. Jamais le numero du formulaire de recherche (« composé de
+    // 8 chiffres ») : il faut 8 chiffres au moins.
+    numeroAffiche: (lignes, numero) => {
+      for (let i = 0; i < lignes.length; i++) {
+        if (!/num[ée]ro (de |d.)?(colis|suivi|exp[ée]dition)|n° (de )?colis/i.test(lignes[i])) continue;
+        const ici = chiffres(lignes[i]);
+        const d = ici.length >= 8 ? ici : chiffres(lignes[i + 1] || "");
+        if (d.length >= 8 && d.length <= 16) return d;
+      }
+      const n = chiffres(numero);
+      const seul = n && lignes.find((l) => /^[\d\s]{8,16}$/.test(l) && (n.endsWith(chiffres(l)) || chiffres(l).endsWith(n)));
+      return seul ? chiffres(seul) : null;
     },
     concerne: (affiche, numero) => Boolean(affiche) && (chiffres(numero).includes(affiche) || affiche.includes(chiffres(numero))),
-    section: (lignes) => entre(lignes, /^suivi d[ée]taill[ée] de mon colis$/i, /^je m.informe$|app.solument|^pour nous suivre$/i),
+    section: (lignes) => entre(lignes, /^suivi d[ée]taill[ée] de (mon|votre) colis$/i, /^je m.informe$|app.solument|^pour nous suivre$/i),
     evenements: evenementsMR,
   },
   DHL: {
@@ -333,4 +379,4 @@ function lisPage(code, { titre = "", texte = "", url = "" } = {}, numero = null)
   return { etat: "trouve", evenements, statutBrut: premier.libelle, motif: null };
 }
 
-module.exports = { lisPage, litLibelle, litDate, litHeure, estBloque, LECTEURS };
+module.exports = { lisPage, litLibelle, litDate, litHeure, estBloque, LECTEURS, SECONDAIRES };

@@ -33,6 +33,8 @@ const CARRIER_LABELS = {
   GLS: "GLS",
   DHL: "DHL",
   BJ: "BJ (boîtes jaunes)",
+  // la categorie des speciaux (leur ligne a part dans « À poster »)
+  SPECIAL: "Spéciaux",
   Inconnu: "Non reconnu",
 };
 

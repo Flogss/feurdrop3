@@ -23,6 +23,10 @@
 //   bloque        « Vérification bloquée » : le site refuse la consultation
 //                 automatique (protection, pause) ou impose une verification
 //                 a la main (UPS). Ce n'est JAMAIS « non deposé ».
+//   incorrect     « Numéro incorrect » : le transporteur l'a dit lui-meme --
+//                 numero refuse (format invalide), ou inconnu a plusieurs
+//                 lectures bien apres le drop. Jamais sur un delai depasse,
+//                 une panne, une page incomplete ou une protection anti-robot.
 //
 // Regles : jamais « confirme » sans un evenement physique date ; un code ou
 // un libelle inconnu ne prouve rien ; une erreur reseau ou un CAPTCHA ne
@@ -39,10 +43,11 @@ const { jourParis, ajouteJours, jourDeLaSemaine } = require("../dates");
 
 const LIBELLES = {
   confirme: "Posté confirmé",
-  non_confirme: "Non confirmé",
+  non_confirme: "Pas encore scanné",
   a_verifier: "À vérifier",
   bloque: "Vérification bloquée",
   en_attente: "En attente de lecture",
+  incorrect: "Numéro incorrect",
 };
 const ETAPES_PHYSIQUES = new Set(["in_transit", "out_for_delivery", "available_for_pickup", "delivered", "exception"]);
 
@@ -119,7 +124,9 @@ function decrit(e) {
  * configure    la methode automatique a-t-elle ce qu'il lui faut ?
  */
 function analyseDepot({ colis, suivi = null, evenements = [], transporteur, pause = null, configure = true, maintenant = Date.now(), delaiHeures = 48 }) {
-  const recuMs = sqlVersMs(colis.created_at);
+  // (un redrop porte la date de reception de l'etiquette d'origine : c'est la
+  // meme etiquette, le meme parcours)
+  const recuMs = sqlVersMs(colis.recu_le || colis.created_at);
   const dropeMs = sqlVersMs(colis.dropped_at);
   const seuilAncien = recuMs != null ? recuMs - MARGE_ANCIEN : null;
 
@@ -229,9 +236,13 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   }
   if (!configure) {
     const api = transporteur.methode === "laposte" ? "L'API La Poste n'est pas configurée (OKAPI_KEY)" : `L'API officielle de ${transporteur.nom} n'est pas configurée`;
-    return resultat("a_verifier", `${api} : aucune vérification automatique possible.`, { enRetard: true });
+    return resultat("a_verifier", `${api} : aucune vérification automatique possible.`, { enRetard: true, nonConfigure: true });
   }
-  if (suivi?.code_erreur === "invalide") return resultat("a_verifier", `Numéro refusé par ${transporteur.nom} : ${suivi.erreur || "format invalide"}.`, { enRetard: true });
+  if (suivi?.code_erreur === "invalide") {
+    return resultat("incorrect", `Numéro refusé par ${transporteur.nom} (${suivi.erreur || "format invalide"}) : le numéro de suivi est incorrect, ce n'est ni un délai ni une panne.`, {
+      enRetard: true,
+    });
+  }
   if (suivi?.code_erreur === "ambigu") return resultat("a_verifier", `${suivi.erreur || "Plusieurs envois pour ce numéro"} : à choisir sur la page officielle.`, { enRetard: true });
   // une panne, un delai, une page incomplete : une erreur technique, pas un
   // verdict -- la lecture est refaite d'elle-meme ; au 4e echec de suite, a regarder
@@ -255,9 +266,18 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   // prise en charge) ; au-dela du delai, a regarder -- et retire de la file
   // s'il le reste (relu 12 h plus tard pour en etre sur)
   if (!retard) return resultat("non_confirme", `Pas encore connu de ${transporteur.nom} (délai normal après un drop) : pas de prise en charge.`, { enRetard: false });
+  // inconnu a plusieurs lectures, bien apres le drop : le transporteur le dit
+  // lui-meme, le numero est incorrect (une seule lecture : on relit d'abord)
+  if ((suivi.inconnu_lectures || 0) >= 2) {
+    return resultat(
+      "incorrect",
+      `Inconnu de ${transporteur.nom} à ${suivi.inconnu_lectures} lectures, ${depuis} h après le drop : le numéro de suivi (ou le transporteur) est incorrect.`,
+      { enRetard: true, inconnu: true }
+    );
+  }
   return resultat(
     "a_verifier",
-    `Toujours inconnu de ${transporteur.nom} ${depuis} h après le drop : numéro ou transporteur à vérifier. S'il le reste à la prochaine lecture, il sort de la file.`,
+    `Toujours inconnu de ${transporteur.nom} ${depuis} h après le drop : numéro ou transporteur à vérifier. Relu dans quelques heures pour en être sûr.`,
     { enRetard: true, inconnu: true }
   );
 }

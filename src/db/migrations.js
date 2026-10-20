@@ -508,6 +508,34 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 12,
+    nom: "redrop d'un colis oublie ; suivi garde dans la liste active",
+    applique(db) {
+      // deux colonnes ajoutees, rien n'est modifie :
+      // - colis.redrop_de : un colis oublie remis « à poster » est une
+      //   nouvelle ligne (0 €) qui pointe vers le colis d'origine ; l'origine
+      //   garde son prix, son paiement, sa date de drop et son suivi ;
+      // - controle_suivis.garde_le : remis dans la liste a la main (« Vérifier »
+      //   depuis l'historique) : la regle « hors délai » ne le retire pas
+      //   aussitot.
+      const colis = db.prepare("PRAGMA table_info(colis)").all().map((c) => c.name);
+      if (!colis.includes("redrop_de")) db.exec("ALTER TABLE colis ADD COLUMN redrop_de INTEGER");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_colis_redrop ON colis(redrop_de)");
+      const suivis = db.prepare("PRAGMA table_info(controle_suivis)").all().map((c) => c.name);
+      if (!suivis.includes("garde_le")) db.exec("ALTER TABLE controle_suivis ADD COLUMN garde_le TEXT");
+      // Mondial Relay relu de nouveau (demande d'octobre 2026) : l'interrupteur
+      // se rallume une fois, comme en v9 ; il reste coupable ensuite
+      const ligne = db.prepare("SELECT value FROM settings WHERE key = 'controle_lecture_coupee'").get();
+      if (ligne) {
+        const reste = String(ligne.value || "")
+          .split(",")
+          .map((c) => c.trim())
+          .filter((c) => c && c !== "MR");
+        db.prepare("UPDATE settings SET value = ? WHERE key = 'controle_lecture_coupee'").run(reste.join(","));
+      }
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

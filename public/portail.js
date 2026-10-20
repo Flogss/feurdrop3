@@ -57,6 +57,8 @@
     q: "",
     etape: null,
     transporteur: null,
+    // « Pas encore scannés » : les colis drop que le transporteur n'a pas encore scannes
+    depot: null,
     tri: memoire.lis("drop.portail.tri", "recent"),
     // les groupes replies (gardes d'une visite a l'autre), et ceux deplies
     // au-dela de l'apercu
@@ -367,8 +369,9 @@
   }
 
   // --- Filtres et tri -----------------------------------------------------------------
-  const filtre = (liste, { etape = etat.etape, transporteur = etat.transporteur } = {}) =>
-    liste.filter((c) => (!etape || c.etape === etape) && (!transporteur || codeDe(c) === transporteur));
+  const pasEncoreScanne = (c) => c.etape === "drope" && c.depot?.etat === "pas_encore";
+  const filtre = (liste, { etape = etat.etape, transporteur = etat.transporteur, depot = etat.depot } = {}) =>
+    liste.filter((c) => (!etape || c.etape === etape) && (!transporteur || codeDe(c) === transporteur) && (!depot || pasEncoreScanne(c)));
 
   function trie(liste) {
     const parDate = (a, b) => (b.recuLe || "").localeCompare(a.recuLe || "");
@@ -393,7 +396,13 @@
     if (!d) return;
 
     // les compteurs de statut suivent le transporteur choisi, et inversement
-    const pourEtapes = filtre(d.colis, { etape: null });
+    const pourEtapes = filtre(d.colis, { etape: null, depot: null });
+    // « Pas encore scannés » : visible des qu'il y en a (ou qu'il est choisi)
+    const scan = $("filtre-scan");
+    const nScan = filtre(d.colis, { etape: null, depot: null }).filter(pasEncoreScanne).length;
+    scan.hidden = !nScan && !etat.depot;
+    scan.setAttribute("aria-pressed", String(Boolean(etat.depot)));
+    $("filtre-scan-n").textContent = nf.format(nScan);
     for (const e of ETAPES) {
       const n = pourEtapes.filter((c) => c.etape === e).length;
       const cible = document.querySelector(`[data-compte="${e}"]`);
@@ -465,6 +474,7 @@
       puce(c ? nomDe(c) : etat.transporteur, "transporteur", etat.transporteur);
     }
     if (etat.etape) puce(NOMS[etat.etape], "etape");
+    if (etat.depot) puce("Pas encore scannés", "depot");
   }
 
   function rendGroupes(anime) {
@@ -920,6 +930,12 @@
     if (!b) return;
     etat[b.dataset.retire] = null;
     rend();
+  });
+
+  $("filtre-scan").addEventListener("click", () => {
+    etat.depot = etat.depot ? null : "pas_encore";
+    rend();
+    if (etat.depot && innerWidth < 960) $("liste").scrollIntoView({ behavior: reduit ? "auto" : "smooth", block: "start" });
   });
 
   const boutonsTri = document.querySelectorAll(".p-tri button");

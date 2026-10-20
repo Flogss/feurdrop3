@@ -187,6 +187,19 @@
 }
 .p-tri button[aria-pressed="true"] { background: rgb(var(--violet-500) / 0.24); color: var(--text); box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.4); }
 .en-recherche .p-tri { visibility: hidden; }
+/* « Pas encore scannés » : un interrupteur de filtre, ambre comme le statut */
+.p-scan {
+  --d: 255 176 72;
+  display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px 0 11px; margin-left: auto;
+  border: 1px solid rgb(var(--d) / 0.3); border-radius: var(--r-pill); background: rgb(var(--d) / 0.08);
+  color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background-color var(--t-3) var(--ease-out), color var(--t-2), box-shadow var(--t-3) var(--ease-out), transform var(--t-2) var(--ease-out);
+}
+.p-scan b { color: rgb(var(--d)); font-variant-numeric: tabular-nums; }
+.p-scan-point { width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--d)); box-shadow: 0 0 8px rgb(var(--d) / 0.7); }
+.p-scan[aria-pressed="true"] { background: rgb(var(--d) / 0.2); color: var(--text); box-shadow: 0 6px 20px -10px rgb(var(--d) / 0.8); }
+.p-scan:active { transform: scale(0.96); }
+.en-recherche .p-scan { visibility: hidden; }
 
 /* sur telephone, une recherche en cours remonte ses resultats juste sous le champ */
 @media (max-width: 959px) {

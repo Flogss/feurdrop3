@@ -23,6 +23,8 @@ const {
   mergeSenderInto,
   getCarrierSummary,
   dropByCarrier,
+  dropSpecials,
+  getSpecialSummary,
   dropAll,
   dropAllExceptLit,
   dropBySender,
@@ -402,6 +404,17 @@ router.post("/colis/drop-sender/:name", (req, res) => {
 
 router.post("/colis/drop-carrier/:carrier", (req, res) => {
   const dropped = dropByCarrier(req.params.carrier);
+  res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
+});
+
+// Les speciaux des seuls transporteurs choisis : { carriers: ["LP", "MR"] }.
+router.get("/colis/specials", (req, res) => {
+  res.json({ specials: getSpecialSummary() });
+});
+
+router.post("/colis/drop-specials", (req, res) => {
+  const dropped = dropSpecials(req.body?.carriers);
+  if (!dropped) return res.status(400).json({ error: "Choisis au moins un transporteur de spéciaux à dropper" });
   res.json({ ok: true, count: dropped.count, value: dropped.value, restants: dropped.restants, stocks: consumeStock(dropped) });
 });
 

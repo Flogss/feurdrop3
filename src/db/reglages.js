@@ -37,7 +37,10 @@ function adjustStock(delta, kind = "normal") {
 
 // Retire du stock ce qui vient d'etre drope, chaque type sur son propre
 // compteur.
-function consumeStock({ count = 0, bj = 0 } = {}) {
+// (un redrop est deja dans sa pochette, comptee au premier drop)
+function consumeStock({ count = 0, bj = 0, redrops = null } = {}) {
+  count -= redrops?.count || 0;
+  bj -= redrops?.bj || 0;
   const normal = count - bj;
   if (normal > 0) adjustStock(-normal, "normal");
   if (bj > 0) adjustStock(-bj, "bj");

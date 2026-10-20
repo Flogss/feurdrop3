@@ -26,6 +26,7 @@ const depotsEtat = {
   transporteur: "",
   expediteur: "",
   recherche: "",
+  tri: "pas_encore",
   charge: 0,
   suiviPassage: null,
   detail: null,
@@ -35,8 +36,11 @@ const depotsEtat = {
   campagneMasquee: 0,
 };
 
-const DEPOTS_COURTS = { confirme: "Posté confirmé", non_confirme: "Non confirmé", a_verifier: "À vérifier", bloque: "Vérif. bloquée", en_attente: "En attente" };
-const DEPOTS_ICONES = { confirme: "check", non_confirme: "clock", a_verifier: "search", bloque: "lock", en_attente: "refresh" };
+const DEPOTS_COURTS = { confirme: "Posté confirmé", non_confirme: "Pas encore scanné", a_verifier: "À vérifier", bloque: "Vérif. bloquée", en_attente: "En attente", incorrect: "Numéro incorrect" };
+const DEPOTS_ICONES = { confirme: "check", non_confirme: "clock", a_verifier: "search", bloque: "lock", en_attente: "refresh", incorrect: "x" };
+// « Pas encore scannés d'abord » : ce qui attend encore son premier scan, puis
+// ce qui demande un regard, puis ce qui n'est pas tranche
+const DEPOTS_RANG = { non_confirme: 0, incorrect: 1, a_verifier: 2, bloque: 3, en_attente: 4, confirme: 5 };
 const DEPOTS_LECTURES = { laposte: "API La Poste (officielle)", ups: "API UPS (officielle)", dhl: "API DHL (officielle)", navigateur: "page officielle lue sur le Mac", manuel: "constat à la main" };
 const DEPOTS_API = ["laposte", "ups", "dhl"];
 // l'historique : les depots prouves, les numeros retires de la file
@@ -140,8 +144,9 @@ function rendDepots() {
   if (!d) return;
   const { compteurs: c, etat } = d;
 
-  for (const cat of ["confirme", "non_confirme", "a_verifier", "bloque"]) compte($(`depots-n-${cat}`), c[cat]);
-  $("depots-n-a-verifier-sous").textContent = c.en_attente ? `+ ${pluriel(c.en_attente, "en attente de lecture", "en attente de lecture")}` : "inconnu, illisible ou en échec répété";
+  for (const cat of ["confirme", "non_confirme", "a_verifier", "bloque", "incorrect"]) compte($(`depots-n-${cat}`), c[cat] || 0);
+  $("depots-n-a-verifier-sous").textContent = c.en_attente ? `+ ${pluriel(c.en_attente, "en attente de lecture", "en attente de lecture")}` : "statut illisible ou en échec répété";
+  $("depots-n-incorrect-sous").textContent = c.incorrect ? "refusés ou inconnus du transporteur" : "aucun numéro refusé";
   $("depots-n-confirme-sous").textContent = c.retires ? `sortis de la liste · ${pluriel(c.retires, "numéro retiré", "numéros retirés")}` : "sortis de la liste, gardés dans l'historique";
   $("depots-n-hors-delai").textContent = c.nonConfirmeHorsDelai
     ? `dont ${pluriel(c.nonConfirmeHorsDelai, "hors délai", "hors délai")}`
@@ -328,26 +333,50 @@ function rendChoixDepots(lignes) {
 }
 
 const depotsHistorique = () => DEPOTS_HISTORIQUE[depotsEtat.filtre] || null;
+const depotsRecherche = () => depotsEtat.recherche.replace(/\s+/g, "").toUpperCase();
 
+// Les lignes affichees, chacune avec sa sorte : « actif » (la liste a
+// trancher), « confirmes » ou « retires » (l'historique). Une recherche sur
+// « Tous » fouille aussi l'historique : un numero se retrouve ou qu'il soit.
 function depotsFiltrees() {
+  const d = depotsEtat.donnees;
   const historique = depotsHistorique();
-  const lignes = historique ? depotsEtat.donnees.historique[historique] : depotsEtat.donnees.lignes;
-  const q = depotsEtat.recherche.replace(/\s+/g, "").toUpperCase();
-  return lignes.filter((l) => {
-    if (depotsEtat.filtre === "attention" && !l.attention) return false;
-    if (!historique && !["tous", "attention"].includes(depotsEtat.filtre) && l.controle.categorie !== depotsEtat.filtre) return false;
-    if (depotsEtat.transporteur && l.transporteur.code !== depotsEtat.transporteur) return false;
-    if (depotsEtat.expediteur && l.expediteur !== depotsEtat.expediteur) return false;
-    if (q && !l.numero.includes(q)) return false;
-    return true;
-  });
+  const q = depotsRecherche();
+  const garde = (l) =>
+    (!depotsEtat.transporteur || l.transporteur.code === depotsEtat.transporteur) &&
+    (!depotsEtat.expediteur || l.expediteur === depotsEtat.expediteur) &&
+    (!q || l.numero.includes(q));
+  if (historique) return trieDepots(d.historique[historique].filter(garde).map((l) => ({ sorte: historique, l })));
+  const actifs = d.lignes
+    .filter((l) => {
+      if (depotsEtat.filtre === "attention" && !l.attention) return false;
+      if (!["tous", "attention"].includes(depotsEtat.filtre) && l.controle.categorie !== depotsEtat.filtre) return false;
+      return garde(l);
+    })
+    .map((l) => ({ sorte: "actif", l }));
+  if (!q || depotsEtat.filtre !== "tous") return trieDepots(actifs);
+  const anciens = ["confirmes", "retires"].flatMap((h) => d.historique[h].filter(garde).map((l) => ({ sorte: h, l })));
+  return [...trieDepots(actifs), ...trieDepots(anciens)];
+}
+
+const dropeDe = (x) => String(x.l.dropeLe || x.l.statutInterne?.dropeLe || "");
+function trieDepots(liste) {
+  const tri = depotsEtat.tri;
+  if (tri === "recents") return liste.sort((a, b) => dropeDe(b).localeCompare(dropeDe(a)));
+  if (tri === "anciens") return liste.sort((a, b) => dropeDe(a).localeCompare(dropeDe(b)));
+  if (tri === "verification") return liste.sort((a, b) => String(a.l.verifieLe || "").localeCompare(String(b.l.verifieLe || "")) || dropeDe(a).localeCompare(dropeDe(b)));
+  // pas encore scannes d'abord : par statut, le plus ancien drop en tete (le plus en retard)
+  const rang = (x) => (x.sorte === "actif" ? DEPOTS_RANG[x.l.controle.categorie] ?? 9 : 9);
+  return liste.sort((a, b) => rang(a) - rang(b) || dropeDe(a).localeCompare(dropeDe(b)));
 }
 
 function ligneDepot(l) {
   const c = l.controle;
   const dernier = c.dernierEvenement;
   const manuel = depotManuel(l);
-  const verdict = c.categorie === "non_confirme" && c.enRetard ? "Non confirmé · hors délai" : DEPOTS_COURTS[c.categorie];
+  const verdict = DEPOTS_COURTS[c.categorie] || c.libelle;
+  // « hors délai » : dans la ligne du dessous (le badge reste court)
+  const horsDelai = c.categorie === "non_confirme" && c.enRetard;
   const quand = manuel ? (c.constat ? `constaté ${depotIlYa(c.constat.le)}` : "à constater") : depotIlYa(l.verifieLe || l.essaiLe);
   const numero = escapeAttr(l.numero);
   return `
@@ -361,8 +390,9 @@ function ligneDepot(l) {
         <span class="depot-sous">${escapeHtml(depotHeure(l.statutInterne.dropeLe))}</span>
       </div>
       <div class="depot-cell depot-verdict">
-        <span class="depot-badge cat-${escapeAttr(c.categorie)}">${ico(DEPOTS_ICONES[c.categorie])}${escapeHtml(verdict)}</span>
-        <span class="depot-sous">${escapeHtml(depotStatutTransporteur(l))}${c.suite ? ` · ${escapeHtml(c.suite.retour ? "retour" : c.suite.etape === "delivered" ? "livré" : "suite")}` : c.livre ? " · livré" : ""}</span>
+        <span class="depot-badge cat-${escapeAttr(c.categorie)}">${ico(DEPOTS_ICONES[c.categorie] || "info")}${escapeHtml(verdict)}</span>
+        ${redropPuce(l)}
+        <span class="depot-sous">${horsDelai ? `<span class="depot-hors-delai">hors délai</span> · ` : ""}${escapeHtml(depotStatutTransporteur(l))}${c.suite ? ` · ${escapeHtml(c.suite.retour ? "retour" : c.suite.etape === "delivered" ? "livré" : "suite")}` : c.livre ? " · livré" : ""}</span>
       </div>
       <div class="depot-cell depot-evenement">
         <span class="depot-evenement-texte">${dernier ? escapeHtml(dernier.statut) : manuel && !c.constat ? "À constater sur la page officielle" : "—"}</span>
@@ -378,12 +408,21 @@ function ligneDepot(l) {
     </div>`;
 }
 
+// Un redrop : en attente (le colis oublie est de retour « à poster »), ou
+// cette ligne suit deja le redrop
+function redropPuce(l) {
+  if (l.redrop?.enAttente) return `<span class="depot-redrop is-attente" title="Le colis est de retour dans « À poster », à 0 €">${ico("package")}Redrop à poster</span>`;
+  if (l.redrop?.de) return `<span class="depot-redrop" title="Ce colis a été redropé (le drop d'origine était oublié)">${ico("package")}Redrop</span>`;
+  return "";
+}
+
 // Une ligne de l'historique : un depot prouve (sa date de confirmation et sa
 // preuve), ou un numero retire de la file (sa raison, discretement).
 function ligneHistorique(h) {
   const numero = escapeAttr(h.numero);
   const retire = Boolean(h.retire);
-  const cat = retire ? "retire" : "confirme";
+  const incorrect = retire && h.retire.incorrect;
+  const cat = incorrect ? "incorrect" : retire ? "retire" : "confirme";
   const suite = h.suite ? (h.suite.retour ? "puis retour à l'expéditeur" : h.suite.etape === "delivered" ? "puis livré" : "puis suite") : h.livre ? "puis livré" : "";
   return `
     <div class="depot-ligne is-histo cat-${cat}" data-key="h${h.colisId}" data-depot="${h.colisId}">
@@ -396,7 +435,7 @@ function ligneHistorique(h) {
         <span class="depot-sous">${escapeHtml(depotHeure(h.dropeLe))}</span>
       </div>
       <div class="depot-cell depot-verdict">
-        <span class="depot-badge cat-${cat}">${ico(retire ? "inbox" : "check")}${retire ? "Retiré" : "Posté confirmé"}</span>
+        <span class="depot-badge cat-${cat}">${ico(incorrect ? "x" : retire ? "inbox" : "check")}${incorrect ? "Numéro incorrect" : retire ? "Retiré" : "Posté confirmé"}</span>
         <span class="depot-sous">${retire ? `retiré ${escapeHtml(depotIlYa(h.retire.le))}` : `confirmé ${escapeHtml(depotIlYa(h.confirmeLe))}`}</span>
       </div>
       <div class="depot-cell depot-evenement">
@@ -416,6 +455,7 @@ function rendLignesDepots() {
   const d = depotsEtat.donnees;
   const historique = depotsHistorique();
   const filtreActif = (depotsEtat.filtre !== "tous" && !historique) || depotsEtat.transporteur || depotsEtat.expediteur || depotsEtat.recherche;
+  const dansHistorique = !historique && lignes.filter((x) => x.sorte !== "actif").length;
   const entete = $("depots-entete");
   const titres = historique === "retires" ? ["Colis", "FeurDrop", "Contrôle", "Raison du retrait", "", ""] : historique ? ["Colis", "FeurDrop", "Contrôle", "Preuve de dépôt", "", ""] : ["Colis", "FeurDrop", "Contrôle", "Dernier statut transporteur", "Vérifié", ""];
   const enteteHtml = titres.map((t) => `<span>${t}</span>`).join("");
@@ -424,8 +464,8 @@ function rendLignesDepots() {
     entete._html = enteteHtml;
   }
   rendListe($("depots-lignes"), lignes, {
-    cle: (l) => `${historique || "actif"}-${l.colisId}`,
-    html: historique ? ligneHistorique : ligneDepot,
+    cle: (x) => `${x.sorte}-${x.l.colisId}`,
+    html: (x) => (x.sorte === "actif" ? ligneDepot(x.l) : ligneHistorique(x.l)),
     videHtml: filtreActif
       ? vide("search", "Aucun colis ne correspond", "Change de filtre ou de recherche.")
       : historique === "retires"
@@ -435,7 +475,8 @@ function rendLignesDepots() {
           : vide("check", "Rien à contrôler", d.compteurs.confirme ? "Tous les dépôts sont confirmés : ils sont dans l'historique." : "Les colis dropés avec un numéro de suivi apparaîtront ici."),
   });
   const pied = [];
-  if (filtreActif) pied.push(`${pluriel(lignes.length, "colis affiché", "colis affichés")} sur ${entier((historique ? d.historique[historique] : d.lignes).length)}`);
+  if (filtreActif) pied.push(`${pluriel(lignes.length - dansHistorique, "colis affiché", "colis affichés")} sur ${entier((historique ? d.historique[historique] : d.lignes).length)}`);
+  if (dansHistorique) pied.push(`${pluriel(dansHistorique, "trouvé dans l'historique", "trouvés dans l'historique")}`);
   for (const h of d.compteurs.horsControle || []) pied.push(pluriel(h.colis, `colis ${h.nom} non contrôlé`, `colis ${h.nom} non contrôlés`));
   if (d.compteurs.sansNumero) pied.push(`${pluriel(d.compteurs.sansNumero, "colis dropé sans numéro de suivi lisible", "colis dropés sans numéro de suivi lisible")} (non contrôlables)`);
   $("depots-pied").textContent = pied.join(" · ");
@@ -488,9 +529,9 @@ function rendCampagne(etat) {
   panneau.classList.toggle("is-active", active);
   $("depots-tout").disabled = active;
   $("depots-tout").querySelector("span").textContent = active ? "Vérification en cours…" : "Tout vérifier";
-  for (const k of ["total", "verifies", "restants", "confirmes", "nonConfirmes", "bloques", "erreurs", "aConstater"]) {
+  for (const k of ["total", "verifies", "restants", "confirmes", "nonConfirmes", "incorrects", "bloques", "erreurs", "aConstater"]) {
     const el = $(`campagne-n-${k}`);
-    if (el._valeur !== n[k]) compte(el, n[k]);
+    if (el._valeur !== (n[k] || 0)) compte(el, n[k] || 0);
     el.parentElement.classList.toggle("is-zero", !n[k] && !["total", "verifies", "restants"].includes(k));
   }
   const faits = n.total - n.restants;
@@ -545,7 +586,10 @@ function suisCampagne() {
         clearInterval(depotsEtat.suiviCampagne);
         depotsEtat.suiviCampagne = null;
         const n = etat.compteurs;
-        toast(`Vérification terminée : ${pluriel(n.confirmes, "posté confirmé", "postés confirmés")}, ${pluriel(n.nonConfirmes, "non confirmé", "non confirmés")}${n.bloques ? `, ${pluriel(n.bloques, "bloqué", "bloqués")}` : ""}`, "success");
+        toast(
+          `Vérification terminée : ${pluriel(n.confirmes, "posté confirmé", "postés confirmés")}, ${pluriel(n.nonConfirmes, "pas encore scanné", "pas encore scannés")}${n.incorrects ? `, ${pluriel(n.incorrects, "numéro incorrect", "numéros incorrects")}` : ""}${n.bloques ? `, ${pluriel(n.bloques, "bloqué", "bloqués")}` : ""}`,
+          "success"
+        );
       }
     } catch {
       /* la prochaine fois */
@@ -610,6 +654,10 @@ $("depots-transporteur").addEventListener("change", (e) => {
 });
 $("depots-expediteur").addEventListener("change", (e) => {
   depotsEtat.expediteur = e.target.value;
+  rendLignesDepots();
+});
+$("depots-tri").addEventListener("change", (e) => {
+  depotsEtat.tri = e.target.value;
   rendLignesDepots();
 });
 let depotsRechercheMinuteur = null;
@@ -709,10 +757,13 @@ function rendDetailDepot(d) {
     : "";
   // retire de la liste (numero inconnu) : on le dit d'abord, le verdict suit
   const tete = d.retire
-    ? `<span class="depot-badge cat-retire">${ico("inbox")}Retiré de la liste</span>
+    ? `<span class="depot-badge cat-${d.retire.incorrect ? "incorrect" : "retire"}">${ico(d.retire.incorrect ? "x" : "inbox")}${d.retire.incorrect ? "Numéro incorrect · retiré de la liste" : "Retiré de la liste"}</span>
       <p class="depot-detail-raison">${escapeHtml(d.retire.motif || "Retiré de la file de contrôle")}. Le colis et son étiquette sont gardés ; « Vérifier maintenant » le remet en contrôle.</p>`
-    : `<span class="depot-badge cat-${escapeAttr(c.categorie)}">${ico(DEPOTS_ICONES[c.categorie])}${escapeHtml(c.libelle)}</span>
+    : `<span class="depot-badge cat-${escapeAttr(c.categorie)}">${ico(DEPOTS_ICONES[c.categorie] || "info")}${escapeHtml(c.libelle)}</span>${redropPuce(d)}
       <p class="depot-detail-raison">${escapeHtml(c.raison)}</p>`;
+  const redrop = d.redrop?.enAttente
+    ? `<div class="depots-bandeau is-info depot-redrop-bandeau">${ico("package")}<span><b>Redrop à poster</b> : le colis est de retour dans « À poster », à 0 €. Son suivi reprendra après son nouveau drop.</span></div>`
+    : "";
   $("depot-sheet-contenu").innerHTML = `
     <div class="depot-detail-tete">
       ${tete}
@@ -729,6 +780,7 @@ function rendDetailDepot(d) {
       ${suite}
       ${d.erreur ? `<div class="depot-detail-erreur"><dt>Dernière erreur</dt><dd>${escapeHtml(d.erreur.message)}</dd></div>` : ""}
     </dl>
+    ${redrop}
     ${rallumerDepot(d)}
     ${constatDepot(d)}
     <h3 class="depot-detail-titre">Chronologie</h3>
@@ -746,6 +798,8 @@ function rendDetailDepot(d) {
           )
     }`;
   $("depot-verifier-un").hidden = manuel;
+  // Redrop : un colis dropé jamais pris en charge (oublie) ; pas un depot prouve
+  $("depot-redrop").hidden = c.categorie === "confirme" || Boolean(d.redrop?.enAttente);
   const api = depotsEtat.donnees?.etat.methodes[d.transporteur.methode];
   $("depot-verifier-un").disabled = DEPOTS_API.includes(d.transporteur.methode) && (!api?.configure || Boolean(api?.pause));
   $("depot-suivant").hidden = !serie;
@@ -809,6 +863,34 @@ document.addEventListener("keydown", (e) => {
 $("depot-verifier-un").addEventListener("click", (e) => {
   const id = depotsEtat.detail?.colisId;
   if (id) verifieDepot(id, e.currentTarget);
+});
+
+// « Redrop » : le colis a ete oublie. Il revient dans « À poster » a 0 € ;
+// son suivi et son historique restent, rien d'autre ne bouge. Rejoue, le
+// serveur rend le meme redrop (jamais deux).
+$("depot-redrop").addEventListener("click", async (e) => {
+  const d = depotsEtat.detail;
+  if (!d) return;
+  const bouton = e.currentTarget;
+  const ok = await confirmer({
+    titre: "Redrop ce colis ?",
+    message: `${d.numero} (${d.expediteur}) revient dans « À poster », à 0 € pour cette opération. Son suivi et son historique sont gardés.`,
+    action: "Redrop",
+  });
+  if (!ok) return;
+  agir(
+    bouton,
+    async () => {
+      const r = await postJSON(`/api/depots/${d.colisId}/redrop`, {});
+      rendDetailDepot(r);
+      loadDepots(true);
+      // le dashboard (« À poster ») suit
+      renderCache.clear();
+      refreshAll().catch(() => {});
+      return r;
+    },
+    { succes: (r) => (r.deja ? `${r.numero} : déjà de retour dans « À poster »` : `${r.numero} : de retour dans « À poster » (0 €)`), eclats: { nombre: 8, force: 0.6 } }
+  );
 });
 
 // --- Constats a la main, un colis apres l'autre ------------------------------------------

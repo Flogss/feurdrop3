@@ -522,6 +522,9 @@
               </button>
             </div>
             <p class="hint" id="autoprint-hint" hidden></p>
+            <!-- les transporteurs qui s'impriment tout seuls (choix garde par le
+                 serveur, le meme que sur l'app) -->
+            <div class="autoprint-choix" id="autoprint-transporteurs" hidden></div>
           </article>
 
           <article class="card">
@@ -795,7 +798,8 @@
           <div><b id="campagne-n-verifies">0</b><span>vérifiés</span></div>
           <div><b id="campagne-n-restants">0</b><span>restants</span></div>
           <div class="cat-confirme"><b id="campagne-n-confirmes">0</b><span>postés confirmés</span></div>
-          <div class="cat-non_confirme"><b id="campagne-n-nonConfirmes">0</b><span>non confirmés</span></div>
+          <div class="cat-non_confirme"><b id="campagne-n-nonConfirmes">0</b><span>pas encore scannés</span></div>
+          <div class="cat-incorrect"><b id="campagne-n-incorrects">0</b><span>numéros incorrects</span></div>
           <div class="cat-bloque"><b id="campagne-n-bloques">0</b><span>bloqués</span></div>
           <div class="cat-a_verifier"><b id="campagne-n-erreurs">0</b><span>erreurs techniques</span></div>
           <div class="cat-bloque"><b id="campagne-n-aConstater">0</b><span>à constater (UPS)</span></div>
@@ -810,17 +814,22 @@
           <span class="metric-sub" id="depots-n-confirme-sous">sortis de la liste, gardés dans l'historique</span>
         </button>
         <button class="card metric depot-metric cat-non_confirme" data-depots-filtre="non_confirme" type="button">
-          <span class="eyebrow">Non confirmés</span>
+          <span class="eyebrow">Pas encore scannés</span>
           <span class="metric-value" id="depots-n-non_confirme">0</span>
           <span class="metric-sub" id="depots-n-hors-delai">étiquette seule, pas de prise en charge</span>
         </button>
         <button class="card metric depot-metric cat-a_verifier" data-depots-filtre="a_verifier" type="button">
           <span class="eyebrow">À vérifier</span>
           <span class="metric-value" id="depots-n-a_verifier">0</span>
-          <span class="metric-sub" id="depots-n-a-verifier-sous">inconnu, illisible ou en échec répété</span>
+          <span class="metric-sub" id="depots-n-a-verifier-sous">statut illisible ou en échec répété</span>
+        </button>
+        <button class="card metric depot-metric cat-incorrect" data-depots-filtre="incorrect" type="button">
+          <span class="eyebrow">Numéros incorrects</span>
+          <span class="metric-value" id="depots-n-incorrect">0</span>
+          <span class="metric-sub" id="depots-n-incorrect-sous">refusés ou inconnus du transporteur</span>
         </button>
         <button class="card metric depot-metric cat-bloque" data-depots-filtre="bloque" type="button">
-          <span class="eyebrow">Vérification bloquée</span>
+          <span class="eyebrow">Vérif. bloquées</span>
           <span class="metric-value" id="depots-n-bloque">0</span>
           <span class="metric-sub" id="depots-n-a-constater">site protégé, en pause ou à la main</span>
         </button>
@@ -853,8 +862,9 @@
           <div class="journal-filtres" role="tablist" aria-label="Filtrer les colis" id="depots-filtres">
             <button class="journal-filtre active" data-filtre="tous" type="button" role="tab" aria-selected="true">Tous</button>
             <button class="journal-filtre" data-filtre="attention" type="button" role="tab" aria-selected="false">À regarder</button>
-            <button class="journal-filtre" data-filtre="non_confirme" type="button" role="tab" aria-selected="false">Non confirmés</button>
+            <button class="journal-filtre" data-filtre="non_confirme" type="button" role="tab" aria-selected="false">Pas encore scannés</button>
             <button class="journal-filtre" data-filtre="a_verifier" type="button" role="tab" aria-selected="false">À vérifier</button>
+            <button class="journal-filtre" data-filtre="incorrect" type="button" role="tab" aria-selected="false">Numéros incorrects</button>
             <button class="journal-filtre" data-filtre="en_attente" type="button" role="tab" aria-selected="false">En attente</button>
             <button class="journal-filtre" data-filtre="bloque" type="button" role="tab" aria-selected="false">Bloquées</button>
             <span class="journal-filtres-sep" aria-hidden="true"></span>
@@ -862,9 +872,15 @@
             <button class="journal-filtre" data-filtre="retires" type="button" role="tab" aria-selected="false">Retirés</button>
           </div>
           <div class="depots-champs">
-            <input class="field field-sm" type="search" id="depots-recherche" placeholder="Numéro de suivi…" autocomplete="off" spellcheck="false" aria-label="Rechercher un numéro de suivi" />
+            <input class="field field-sm" type="search" id="depots-recherche" placeholder="Numéro de suivi…" autocomplete="off" spellcheck="false" inputmode="search" aria-label="Rechercher un numéro de suivi (liste et historique)" />
             <select class="field field-sm" id="depots-transporteur" aria-label="Transporteur"><option value="">Tous les transporteurs</option></select>
             <select class="field field-sm" id="depots-expediteur" aria-label="Expéditeur"><option value="">Tous les expéditeurs</option></select>
+            <select class="field field-sm" id="depots-tri" aria-label="Trier">
+              <option value="pas_encore">Pas encore scannés d'abord</option>
+              <option value="recents">Drops les plus récents</option>
+              <option value="anciens">Drops les plus anciens</option>
+              <option value="verification">Vérifiés il y a le plus longtemps</option>
+            </select>
           </div>
         </div>
         <div class="depots-entete" id="depots-entete" aria-hidden="true">
@@ -922,6 +938,27 @@
 </div>
 
 <!-- Controle des depots : la chronologie d'un colis -->
+<!-- Dropper des speciaux : on choisit leurs transporteurs (« Dropper » sur La
+     Poste n'emporte plus les speciaux La Poste) -->
+<div class="sheet-layer" id="speciaux-sheet" hidden>
+  <div class="sheet-backdrop" data-speciaux-fermer></div>
+  <div class="sheet tour-sheet" role="dialog" aria-modal="true" aria-labelledby="speciaux-sheet-title">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <div class="tour-sheet-head">
+      <h2 class="sheet-title" id="speciaux-sheet-title">Quels spéciaux dropper ?</h2>
+      <button class="btn btn-sm btn-ghost" id="speciaux-tout" type="button">Tout</button>
+    </div>
+    <div class="tour-groupes"><section class="tour-groupe"><div class="tour-choix" id="speciaux-choix"></div></section></div>
+    <p class="tour-resume" id="speciaux-resume" aria-live="polite"></p>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-lg" type="button" data-speciaux-fermer>Annuler</button>
+      <button class="btn btn-primary btn-lg" type="button" id="speciaux-dropper">
+        <svg class="icon"><use href="#i-check"/></svg><span>Dropper</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="sheet-layer" id="depot-sheet" hidden>
   <div class="sheet-backdrop" data-depot-fermer></div>
   <div class="sheet depot-sheet" role="dialog" aria-modal="true" aria-labelledby="depot-sheet-titre">
@@ -932,6 +969,10 @@
       <a class="btn btn-secondary btn-lg" id="depot-lien" href="#" target="_blank" rel="noopener noreferrer">
         <svg class="icon"><use href="#i-external"/></svg><span>Suivi officiel</span>
       </a>
+      <!-- colis oublie : de retour dans « À poster », a 0 € -->
+      <button class="btn btn-secondary btn-lg" id="depot-redrop" type="button" hidden>
+        <svg class="icon"><use href="#i-package"/></svg><span>Redrop</span>
+      </button>
       <button class="btn btn-primary btn-lg" id="depot-verifier-un" type="button">
         <svg class="icon"><use href="#i-refresh"/></svg><span>Vérifier maintenant</span>
       </button>

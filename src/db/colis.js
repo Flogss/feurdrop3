@@ -144,14 +144,16 @@ function setColisType(id, type) {
   const colis = db.prepare(`SELECT * FROM colis WHERE id = ? AND ${VIVANT_SQL}`).get(id);
   if (!colis) return null;
 
-  const price = prixColis(getOrCreateSender(colis.sender_name), type, colis.poids_g);
+  // un redrop reste a 0 € : son prix a ete compte sur le colis d'origine
+  const redrop = Boolean(colis.redrop_de);
+  const price = redrop ? 0 : prixColis(getOrCreateSender(colis.sender_name), type, colis.poids_g);
   const status = "pending";
 
   // changer de type reapplique le tarif de l'expediteur, meme si un prix avait
   // ete fixe manuellement
   db.prepare(
-    "UPDATE colis SET type = ?, price = ?, status = ?, price_locked = 0 WHERE id = ?"
-  ).run(type, price, status, id);
+    "UPDATE colis SET type = ?, price = ?, status = ?, price_locked = ? WHERE id = ?"
+  ).run(type, price, status, redrop ? 1 : 0, id);
   if (colis.type !== type) {
     journalise("modif", `Colis passé en ${TYPES_JOURNAL[type] || type}`, { detail: colisJournal(colis), valeur: price, nombre: 1 });
   }
@@ -364,6 +366,7 @@ function setBatchType(batchId, type) {
   const update = db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?");
   let count = 0;
   for (const c of rows) {
+    if (c.redrop_de) continue; // un redrop reste a 0 €
     const price = prixColis(getOrCreateSender(c.sender_name), type, c.poids_g);
     update.run(type, price, c.id);
     count += 1;

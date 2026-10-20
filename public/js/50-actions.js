@@ -99,10 +99,13 @@ document.addEventListener("click", async (e) => {
   if (goto) return switchView(goto.dataset.goto);
 
   const cible = e.target.closest(
-    "[data-drop-sender], [data-drop-carrier], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn, .drop-except-lit-btn"
+    "[data-drop-sender], [data-drop-carrier], [data-drop-speciaux], [data-delete-sender], [data-quick-add], [data-quick-remove], [data-mark-paid], .drop-all-btn, .drop-except-lit-btn"
   );
   if (!cible) return;
   const d = cible.dataset;
+
+  // les speciaux : on choisit leurs transporteurs
+  if (cible.matches("[data-drop-speciaux]")) return choisirSpeciaux(cible);
 
   if (d.markPaid) {
     const ok = await confirmer({

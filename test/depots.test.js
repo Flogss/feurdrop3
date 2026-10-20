@@ -244,19 +244,24 @@ test("numero vraiment inconnu : retiré de la file active (lectures repetees, es
   await depots.synchronise();
   assert.equal(suivi(n).inconnu_lectures, 2);
   assert.equal(suivi(n).archive_le, null, "deux lectures rapprochees ne suffisent pas");
+  // inconnu a deux lectures, bien apres le drop : « Numéro incorrect », encore dans la liste
+  assert.equal(ligne(id).controle.categorie, "incorrect");
+  assert.equal(ligne(id).controle.libelle, "Numéro incorrect");
+  assert.equal(depots.vue().compteurs.incorrect, 1);
   // 13 h plus tard, toujours inconnu : retire de la file
   db.db.prepare("UPDATE controle_suivis SET inconnu_premier_le = datetime('now', '-13 hours') WHERE numero = ?").run(n);
   rendDu();
   await depots.synchronise();
   const s = suivi(n);
   assert.ok(s.archive_le, "retire");
-  assert.match(s.archive_motif, /inconnu de La Poste : 3 lectures/);
+  assert.match(s.archive_motif, /Numéro incorrect : inconnu de La Poste à 3 lectures/);
   assert.equal(JSON.parse(s.archive_detail).regle, "inconnu");
   assert.equal(s.prochaine_le, null);
   const v = depots.vue();
   assert.equal(v.lignes.some((x) => x.colisId === id), false);
   const retire = v.historique.retires.find((x) => x.colisId === id);
   assert.match(retire.retire.motif, /inconnu/);
+  assert.equal(retire.retire.incorrect, true);
   assert.equal(v.compteurs.retires, 1);
   // plus jamais relu, et le colis n'a pas bouge
   const appels = faux.appels.length;
@@ -282,14 +287,27 @@ test("numero inconnu mais drope recemment : jamais retire (le premier scan peut 
   assert.equal(actif(id), true);
 });
 
-test("numero refusé comme invalide par l'API : retiré tout de suite, avec la raison", async () => {
+test("numero refusé comme invalide par l'API : « Numéro incorrect » dans la liste, jamais relu, puis retiré hors délai", async () => {
   faux.comporte("6A10000000004", "invalide");
   const id = drope("6A10000000004");
   const bilan = await depots.synchronise();
-  assert.equal(bilan.retires, 1);
-  assert.match(suivi("6A10000000004").archive_motif, /refusé par La Poste/);
+  assert.equal(bilan.retires, 0);
+  const l = ligne(id);
+  assert.equal(l.controle.categorie, "incorrect");
+  assert.match(l.controle.raison, /Numéro refusé par La Poste/);
+  assert.equal(actif(id), true);
+  assert.equal(suivi("6A10000000004").prochaine_le, null, "un numero refuse n'est pas relu en boucle");
+  const appels = faux.appels.length;
+  rendDu();
+  await depots.synchronise();
+  assert.equal(faux.appels.length, appels);
+  // 8 jours apres le drop, toujours rien : retiré (hors délai), avec la raison
+  db.db.prepare("UPDATE colis SET dropped_at = datetime('now', '-8 days') WHERE id = ?").run(id);
+  await depots.synchronise();
+  assert.match(suivi("6A10000000004").archive_motif, /Numéro incorrect, hors délai/);
   assert.equal(actif(id), false);
-  assert.ok(depots.vue().historique.retires.some((x) => x.colisId === id));
+  const retire = depots.vue().historique.retires.find((x) => x.colisId === id);
+  assert.equal(retire.retire.incorrect, true);
 });
 
 test("erreur reseau, delai depasse : le vrai colis n'est jamais retiré, sa preuve n'est jamais effacee", async () => {
@@ -922,7 +940,7 @@ test("la table des colis n'est jamais modifiee", async () => {
   faux.suivi("6A93000000001", [ev(1, "RE1", "Retourné à l'expéditeur"), ev(10, "PC1")]);
   faux.comporte("6A93000000002", "invalide");
   const a = drope("6A93000000001", { heures: 30 });
-  drope("6A93000000002");
+  const refuse = drope("6A93000000002");
   const inconnu = drope("6A93000000003", { heures: 100 });
   const ups = drope("1Z999AA10123456785", { carrier: "UPS" });
   const avant = photoColis();
@@ -936,7 +954,7 @@ test("la table des colis n'est jamais modifiee", async () => {
   rendDu();
   await depots.synchronise();
   assert.ok(suivi("6A93000000003").archive_le);
-  assert.ok(suivi("6A93000000002").archive_le);
+  assert.equal(ligne(refuse).controle.categorie, "incorrect");
   const mr = drope("4278870020", { carrier: "MR" });
   const avant2 = photoColis();
   depots.nouvelleCampagne({});

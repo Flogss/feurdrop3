@@ -237,15 +237,23 @@ function renderCarriers(byCarrier) {
     videHtml: vide("party", "Rien à poster", "Tout est dropé, beau travail.", true),
     html: (c) => {
       const part = total ? c.pending_count / total : 0;
+      // les speciaux : une ligne a part, detaillee par transporteur ; on
+      // choisit ceux qu'on droppe (jamais emportes par « Dropper » La Poste)
+      const special = c.carrier === "SPECIAL";
+      const detail = special && c.detail?.length ? ` · ${c.detail.map((d) => `${escapeHtml(CARRIER_LABELS[d.carrier] || d.carrier)} ${entier(d.pending_count)}`).join(", ")}` : "";
       return `
       <div class="lrow carrier" data-carrier="${escapeAttr(c.carrier)}" data-key="${escapeAttr(c.carrier)}">
         <span class="carrier-dot"></span>
         <div class="lrow-main">
           <div class="lrow-title">${escapeHtml(CARRIER_LABELS[c.carrier] || c.carrier)}</div>
-          <div class="lrow-sub">${pluriel(c.pending_count, "colis", "colis")} · ${euro(c.pending_value)}</div>
+          <div class="lrow-sub">${pluriel(c.pending_count, "colis", "colis")} · ${euro(c.pending_value)}${detail}</div>
           <div class="share"><span style="--w:${avant.get(c.carrier) || 0}" data-w="${part.toFixed(3)}"></span></div>
         </div>
-        <button class="btn btn-sm btn-tinted" data-drop-carrier="${escapeAttr(c.carrier)}" type="button">Dropper</button>
+        ${
+          special
+            ? `<button class="btn btn-sm btn-tinted" data-drop-speciaux type="button" aria-haspopup="dialog">Choisir…</button>`
+            : `<button class="btn btn-sm btn-tinted" data-drop-carrier="${escapeAttr(c.carrier)}" type="button">Dropper</button>`
+        }
       </div>`;
     },
   });
@@ -316,7 +324,67 @@ function renderAutoPrint(state) {
   hint.textContent = autoPrintEnabled
     ? `${pluriel(enAttente, "étiquette", "étiquettes")} en attente · les LIT restent à la main`
     : "";
+  chargeAutoPrintChoix();
 }
+
+// Les transporteurs imprimes automatiquement : tous, ou ceux qu'on coche
+// (La Poste, Mondial Relay, DHL, DPD, UPS...). Le choix est garde par le
+// serveur : le Mac n'imprime que ceux-la, que l'ordre vienne du site ou du
+// telephone.
+const autoPrintChoix = { etat: null, charge: 0 };
+
+async function chargeAutoPrintChoix(force = false) {
+  if (!force && Date.now() - autoPrintChoix.charge < 60000) return;
+  autoPrintChoix.charge = Date.now();
+  try {
+    autoPrintChoix.etat = await fetchJSON("/api/print/auto", {}, { essais: 1 });
+    rendAutoPrintChoix();
+  } catch {
+    /* au prochain rafraichissement */
+  }
+}
+
+function rendAutoPrintChoix() {
+  const e = autoPrintChoix.etat;
+  const box = $("autoprint-transporteurs");
+  if (!e) return;
+  const choisis = new Set(e.filtres.transporteurs);
+  box.hidden = false;
+  box.innerHTML = `
+    <span class="autoprint-choix-titre">Transporteurs imprimés${choisis.size ? "" : " · tous"}</span>
+    <div class="tour-choix">
+      <button class="tour-puce" type="button" data-auto-tr="*" aria-pressed="${!choisis.size}"><span>Tous</span></button>
+      ${e.options.transporteurs
+        .map(
+          (t) => `<button class="tour-puce carrier" type="button" data-carrier="${escapeAttr(t.code)}" data-auto-tr="${escapeAttr(t.code)}" aria-pressed="${choisis.has(t.code)}"><i class="carrier-dot"></i><span>${escapeHtml(t.nom)}</span></button>`
+        )
+        .join("")}
+    </div>`;
+}
+
+$("autoprint-transporteurs").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-auto-tr]");
+  const e = autoPrintChoix.etat;
+  if (!b || !e) return;
+  const code = b.dataset.autoTr;
+  const avant = e.filtres.transporteurs;
+  const apres = code === "*" ? [] : avant.includes(code) ? avant.filter((c) => c !== code) : [...avant, code];
+  // tout de suite a l'ecran ; le serveur fait foi
+  e.filtres = { ...e.filtres, transporteurs: apres };
+  rendAutoPrintChoix();
+  haptique();
+  try {
+    autoPrintChoix.etat = await postJSON("/api/print/auto", { filtres: e.filtres });
+    rendAutoPrintChoix();
+    renderCache.clear();
+    refreshAll().catch(() => {});
+    toast(apres.length ? `Impression auto : ${apres.map((c) => CARRIER_LABELS[c] || c).join(", ")} seulement` : "Impression auto : tous les transporteurs");
+  } catch (err) {
+    e.filtres = { ...e.filtres, transporteurs: avant };
+    rendAutoPrintChoix();
+    toast(err.message, "error");
+  }
+});
 
 $("autoprint-toggle").addEventListener("click", async (e) => {
   const sw = e.currentTarget;
@@ -537,6 +605,100 @@ $("tour-btn").addEventListener("click", async (e) => {
 
   // au depart : on choisit ce qu'on emporte
   await choisirTournee(bouton);
+});
+
+// --- Dropper des speciaux : par transporteur ----------------------------------------
+// « Dropper » sur La Poste n'emporte que ses etiquettes classiques ; les
+// speciaux se droppent ici, en cochant leurs transporteurs.
+const choixSpeciaux = { liste: [], selection: new Set(), bouton: null };
+
+async function choisirSpeciaux(bouton) {
+  let r;
+  try {
+    occupe(bouton, true);
+    r = await fetchJSON("/api/colis/specials");
+  } catch (err) {
+    secoue(bouton);
+    toast(err.message || "Connexion impossible", "error");
+    return;
+  } finally {
+    occupe(bouton, false);
+  }
+  if (!r.specials.length) return toast("Aucun spécial à dropper", "info");
+  choixSpeciaux.liste = r.specials;
+  // rien de coche au depart : on choisit ce qu'on droppe
+  choixSpeciaux.selection = new Set(r.specials.length === 1 ? [r.specials[0].carrier] : []);
+  choixSpeciaux.bouton = bouton;
+  rendChoixSpeciaux();
+  const couche = $("speciaux-sheet");
+  couche.classList.remove("closing");
+  couche.hidden = false;
+  haptique();
+}
+
+function fermeChoixSpeciaux() {
+  const couche = $("speciaux-sheet");
+  if (couche.hidden) return;
+  couche.classList.add("closing");
+  setTimeout(() => {
+    couche.hidden = true;
+    couche.classList.remove("closing");
+  }, prefersReducedMotion ? 0 : 260);
+}
+
+function rendChoixSpeciaux() {
+  const sel = choixSpeciaux.selection;
+  $("speciaux-choix").innerHTML = choixSpeciaux.liste
+    .map(
+      (t) => `
+    <button class="tour-puce carrier" type="button" data-code="${escapeAttr(t.carrier)}" data-carrier="${escapeAttr(t.carrier)}" aria-pressed="${sel.has(t.carrier)}">
+      <i class="carrier-dot"></i><span>${escapeHtml(t.carrier === "Inconnu" ? "Sans transporteur" : CARRIER_LABELS[t.carrier] || t.carrier)}</span><b>${entier(t.pending_count)}</b>
+    </button>`
+    )
+    .join("");
+  const pris = choixSpeciaux.liste.filter((t) => sel.has(t.carrier));
+  const count = pris.reduce((n, t) => n + t.pending_count, 0);
+  const value = pris.reduce((n, t) => n + t.pending_value, 0);
+  $("speciaux-tout").textContent = pris.length === choixSpeciaux.liste.length ? "Aucun" : "Tout";
+  $("speciaux-resume").innerHTML = pris.length ? `<b>${pluriel(count, "spécial", "spéciaux")}</b> à dropper · ${euro(value)}` : "Choisis les spéciaux à dropper.";
+  $("speciaux-dropper").disabled = pris.length === 0;
+}
+
+$("speciaux-choix").addEventListener("click", (e) => {
+  const puce = e.target.closest(".tour-puce");
+  if (!puce) return;
+  const sel = choixSpeciaux.selection;
+  if (sel.has(puce.dataset.code)) sel.delete(puce.dataset.code);
+  else sel.add(puce.dataset.code);
+  haptique();
+  rendChoixSpeciaux();
+});
+$("speciaux-tout").addEventListener("click", () => {
+  const tous = choixSpeciaux.liste.map((t) => t.carrier);
+  choixSpeciaux.selection = new Set(choixSpeciaux.selection.size === tous.length ? [] : tous);
+  haptique();
+  rendChoixSpeciaux();
+});
+$("speciaux-sheet").addEventListener("click", (e) => {
+  if (e.target.closest("[data-speciaux-fermer]")) fermeChoixSpeciaux();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") fermeChoixSpeciaux();
+});
+$("speciaux-dropper").addEventListener("click", (e) => {
+  const carriers = [...choixSpeciaux.selection];
+  if (!carriers.length) return;
+  const noms = carriers.map((c) => (c === "Inconnu" ? "sans transporteur" : CARRIER_LABELS[c] || c)).join(", ");
+  agir(
+    e.currentTarget,
+    async () => {
+      const r = await postJSON("/api/colis/drop-specials", { carriers });
+      fermeChoixSpeciaux();
+      await refreshAll();
+      return r;
+    },
+    { succes: (r) => messageDrop(r, ` · spéciaux ${noms}`), eclats: true }
+  );
 });
 
 // --- Choix de la tournee ---------------------------------------------------------

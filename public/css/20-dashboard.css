@@ -617,3 +617,8 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
   .back:hover .icon { transform: translateX(-3px); }
 }
 
+
+/* Impression auto : les transporteurs imprimes (tous, ou ceux qu'on coche) */
+.autoprint-choix { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line, rgb(255 255 255 / 0.08)); }
+.autoprint-choix-titre { font: 600 12px/1.3 var(--font-sans); letter-spacing: 0.02em; color: var(--text-3); }
+.autoprint-choix .tour-puce { min-height: 34px; }

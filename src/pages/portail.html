@@ -116,6 +116,10 @@
     <main class="p-main">
       <div class="p-barre">
         <p class="p-barre-texte" id="barre-texte" aria-live="polite"></p>
+        <!-- les colis drop que le transporteur n'a pas encore scannes -->
+        <button class="p-scan" id="filtre-scan" type="button" aria-pressed="false" hidden>
+          <span class="p-scan-point" aria-hidden="true"></span><span>Pas encore scannés</span><b id="filtre-scan-n">0</b>
+        </button>
         <div class="p-tri" role="group" aria-label="Trier">
           <button type="button" data-tri="recent" aria-pressed="true">Récents</button>
           <button type="button" data-tri="statut" aria-pressed="false">Statut</button>

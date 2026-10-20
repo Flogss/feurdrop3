@@ -21,7 +21,7 @@ function baseTemporaire() {
 
 test("base neuve : toutes les migrations, puis plus rien a faire", () => {
   const db = baseTemporaire();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   assert.equal(versionDe(db), VERSION_SCHEMA);
   for (const c of ["type", "file_id", "printed_at", "note", "source_message_id", "price_locked"]) {
     assert.ok(colonnes(db, "colis").includes(c), c);
@@ -156,4 +156,18 @@ test("v10 : poids et prix du kilo ajoutes, rien de ce qui existe ne change", () 
   assert.equal(colis.poids_g, null);
   const alice = db.prepare("SELECT * FROM senders").get();
   assert.deepEqual([alice.price, alice.lit_price, alice.bj_price, alice.kg_price], [4.5, 6, 4.5, 1]);
+});
+
+test("v12 : redrop et suivi garde ajoutes, rien de ce qui existe ne change ; Mondial Relay relu de nouveau", () => {
+  const db = baseTemporaire();
+  appliqueMigrations(db, { journal: silencieux, jusqua: 11 });
+  db.prepare("INSERT INTO colis (sender_name, type, price, status) VALUES ('Alice', 'normal', 4.5, 'dropped')").run();
+  db.prepare("INSERT INTO controle_suivis (numero, transporteur, methode, statut) VALUES ('4278870015', 'MR', 'manuel', 'non_confirme')").run();
+  db.prepare("INSERT INTO settings (key, value) VALUES ('controle_lecture_coupee', 'GLS,MR')").run();
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux, jusqua: 12 }), [12]);
+  const colis = db.prepare("SELECT * FROM colis").get();
+  assert.deepEqual([colis.price, colis.status, colis.redrop_de], [4.5, "dropped", null]);
+  const s = db.prepare("SELECT * FROM controle_suivis").get();
+  assert.deepEqual([s.statut, s.garde_le], ["non_confirme", null]);
+  assert.equal(db.prepare("SELECT value FROM settings WHERE key = 'controle_lecture_coupee'").get().value, "GLS");
 });

@@ -16,7 +16,7 @@ const { db } = require("./connexion");
 const { getSetting, setSetting } = require("./reglages");
 const { journalise } = require("./journal");
 const { AUTOPRINT_SQL, CARRIER_GROUP_SQL } = require("./sql");
-const { carrierLabel } = require("../carrier");
+const { carrierLabel, CARRIERS } = require("../carrier");
 
 const BAIL_MS = Number(process.env.AUTOPRINT_BAIL_S || 600) * 1000;
 const TACHES_GARDEES = 30;
@@ -216,14 +216,30 @@ function etatAgent() {
 
 // --- Ce que montre le telephone ------------------------------------------------
 
+// Tous les transporteurs connus (La Poste, Mondial Relay, Chronopost, UPS,
+// DPD, GLS, DHL...), les plus utilises ces 60 derniers jours d'abord, puis
+// ceux qu'on n'a pas encore vus : on peut les choisir avant leur premier
+// colis. Les boites jaunes sont une categorie (« BJ »), pas un transporteur.
+const rang = (code) => {
+  const i = CARRIERS.findIndex((c) => c.code === code);
+  return i < 0 ? 99 : i;
+};
+
 function optionsAuto() {
-  const transporteurs = db
-    .prepare(
-      `SELECT DISTINCT ${CARRIER_GROUP_SQL} AS code FROM colis
-       WHERE type != 'lit' AND created_at >= datetime('now', '-60 days') ORDER BY code`
-    )
-    .all()
-    .map((r) => ({ code: r.code, nom: carrierLabel(r.code) }));
+  const usage = new Map(
+    db
+      .prepare(
+        `SELECT ${CARRIER_GROUP_SQL} AS code, COUNT(*) AS n FROM colis
+         WHERE type != 'lit' AND created_at >= datetime('now', '-60 days') GROUP BY code`
+      )
+      .all()
+      .map((r) => [r.code, r.n])
+  );
+  const codes = [...new Set([...CARRIERS.map((c) => c.code).filter((c) => c !== "BJ"), ...[...usage.keys()].filter((c) => c !== "BJ")])];
+  const transporteurs = codes
+    .map((code) => ({ code, nom: code === "Inconnu" ? "Transporteur inconnu" : carrierLabel(code), n: usage.get(code) || 0 }))
+    .sort((a, b) => b.n - a.n || rang(a.code) - rang(b.code))
+    .map(({ code, nom }) => ({ code, nom }));
   const expediteurs = db
     .prepare(
       `SELECT sender_name AS nom, COUNT(*) AS c FROM colis

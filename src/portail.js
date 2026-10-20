@@ -148,16 +148,21 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
   if (!sender || SANS_PORTAIL.has(sender.name)) return null;
 
   const n = Math.min(MAX, Math.max(PAR_PAGE, Math.floor(Number(nombre)) || PAR_PAGE));
-  // l'expediteur vient du jeton : la requete ne prend rien d'autre
+  // l'expediteur vient du jeton : la requete ne prend rien d'autre. Un colis
+  // redropé (oublie, remis « à poster ») ne compte qu'une fois : sa derniere
+  // ligne (le redrop) remplace l'ancienne.
+  const dernier = (a) =>
+    `NOT EXISTS (SELECT 1 FROM colis r WHERE COALESCE(r.redrop_de, r.id) = COALESCE(${a}.redrop_de, ${a}.id) AND r.id > ${a}.id AND r.status IN ('pending', 'dropped'))`;
   const lignes = db
     .prepare(
       `SELECT c.id, c.type, c.carrier, c.status, c.file_id, c.file_name, c.caption,
-              c.created_at, c.printed_at, c.dropped_at
+              c.created_at, c.printed_at, c.dropped_at, c.redrop_de,
+              (SELECT o.created_at FROM colis o WHERE o.id = c.redrop_de) AS recu_le
        FROM colis c JOIN senders s ON s.name = c.sender_name
-       WHERE s.portail_jeton = ? AND c.status IN ('pending', 'dropped')
+       WHERE s.portail_jeton = ? AND c.status IN ('pending', 'dropped') AND ${dernier("c")}
          AND (c.status = 'pending' OR c.id IN (
            SELECT c2.id FROM colis c2 JOIN senders s2 ON s2.name = c2.sender_name
-           WHERE s2.portail_jeton = ? AND c2.status IN ('pending', 'dropped')
+           WHERE s2.portail_jeton = ? AND c2.status IN ('pending', 'dropped') AND ${dernier("c2")}
            ORDER BY c2.created_at DESC, c2.id DESC LIMIT ?))
        ORDER BY c.created_at DESC, c.id DESC`
     )
@@ -165,7 +170,7 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
   const total = db
     .prepare(
       `SELECT COUNT(*) AS c FROM colis c JOIN senders s ON s.name = c.sender_name
-       WHERE s.portail_jeton = ? AND c.status IN ('pending', 'dropped')`
+       WHERE s.portail_jeton = ? AND c.status IN ('pending', 'dropped') AND ${dernier("c")}`
     )
     .get(jeton).c;
 

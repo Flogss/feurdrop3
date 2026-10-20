@@ -14,8 +14,36 @@
 .cat-bloque { --cat: var(--violet-300); }
 /* en attente de lecture : rien n'est conclu, gris lavande, sans alerte */
 .cat-en_attente { --cat: 168 166 196; }
-/* retire de la file (numero inconnu) : discret */
+/* retire de la file (hors delai) : discret */
 .cat-retire { --cat: 140 138 160; }
+/* numero incorrect : le transporteur le dit lui-meme (refuse, inconnu) */
+.cat-incorrect { --cat: var(--danger-rgb); }
+
+/* un redrop : le colis oublie est de retour « à poster » */
+.depot-redrop {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  font: 600 11.5px/1.4 var(--font-sans);
+  color: rgb(var(--violet-200));
+  background: rgb(var(--violet-400) / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.35);
+}
+.depot-redrop .icon { width: 13px; height: 13px; }
+.depot-redrop.is-attente { animation: redrop-pouls 2.4s var(--ease-out, ease-out) infinite; }
+@keyframes redrop-pouls {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.35), 0 0 0 0 rgb(var(--violet-400) / 0); }
+  50% { box-shadow: inset 0 0 0 1px rgb(var(--violet-400) / 0.55), 0 0 14px 0 rgb(var(--violet-400) / 0.35); }
+}
+@media (prefers-reduced-motion: reduce) { .depot-redrop.is-attente { animation: none; } }
+.depot-detail-tete .depot-redrop { margin: 0 0 0 8px; vertical-align: middle; }
+.depot-hors-delai { color: rgb(var(--warn-rgb)); font-weight: 600; }
+/* un badge ne deborde jamais sur la colonne voisine */
+.depot-verdict .depot-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* --- Bandeau (API non configuree, pause demandee, erreur) --------------------- */
 
@@ -334,11 +362,17 @@
 }
 
 @media (min-width: 640px) {
-  .depots-champs { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); }
+  .depots-champs { grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); }
+}
+
+/* cinq compteurs : deux par ligne au telephone (le dernier sur toute la
+   largeur), cinq au bureau */
+@media (max-width: 959px) {
+  .depot-metric:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 
 @media (min-width: 960px) {
-  .depots-compteurs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .depots-compteurs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .depots-entete,
   .depot-ligne {
     grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 1.8fr) minmax(0, 0.8fr) 76px;

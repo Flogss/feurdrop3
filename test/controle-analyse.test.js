@@ -80,7 +80,8 @@ test("livre : depot prouve, la preuve reste la prise en charge", () => {
 
 test("numero invalide ; erreur ; ce qu'on savait reste", () => {
   const invalide = analyse({ colis: colis(10), suivi: { trouve: null, code_erreur: "invalide", erreur: "Le numéro n'est pas valide" }, evenements: [] });
-  assert.equal(invalide.categorie, "a_verifier");
+  assert.equal(invalide.categorie, "incorrect");
+  assert.equal(invalide.libelle, "Numéro incorrect");
   assert.match(invalide.raison, /Numéro refusé/);
   assert.equal(invalide.enRetard, true);
   const garde = analyse({ colis: colis(30), suivi: { trouve: 1, code_erreur: "passagere", erreur: "La Poste injoignable" }, evenements: [lp(20, "PC1")] });

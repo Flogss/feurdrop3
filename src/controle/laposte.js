@@ -36,6 +36,8 @@ let dejaReussi = false; // une cle qui a deja repondu 200 n'est pas "fausse" sur
 // Liste de reference (2020, a completer : des codes comme MD1 ou MD4 existent) :
 // https://github.com/e-amzallag/laposte-suivi-api -- un code inconnu n'est
 // JAMAIS une preuve de depot.
+const { litLibelle, SECONDAIRES } = require("./pages");
+
 const INCIDENTS = {
   RE1: "Retourné à l'expéditeur",
   DI2: "Distribué à l'expéditeur (retour)",
@@ -60,12 +62,25 @@ function lisCode(code) {
 // que le colis n'est pas encore entre les mains de La Poste (« va bientôt nous
 // être confié », « pas encore remis », « en attente de dépôt ») n'est jamais
 // une preuve, quel que soit son code.
-const PAS_ENCORE_REMIS = /va bient[oô]t nous [eê]tre confi|pr[ée]paration chez|pas encore ([ée]t[ée] )?(remis|d[ée]pos|confi|pris)|n.a pas (encore )?[ée]t[ée] (remis|d[ée]pos|confi)|en attente (de|du) (d[ée]p[oô]t|prise en charge|remise|colis)|[ée]tiquette|annonc[ée]|d[ée]claratif/i;
+// « Vous avez fait une demande d'affranchissement » : l'achat d'une etiquette,
+// jamais une prise en charge.
+const PAS_ENCORE_REMIS = /va bient[oô]t nous [eê]tre confi|pr[ée]paration chez|pas encore ([ée]t[ée] )?(remis|d[ée]pos|confi|pris)|n.a pas (encore )?[ée]t[ée] (remis|d[ée]pos|confi)|en attente (de|du) (d[ée]p[oô]t|prise en charge|remise|colis)|[ée]tiquette|annonc[ée]|d[ée]claratif|affranchissement/i;
 
-// Un evenement La Poste dans la forme commune du controle des depots.
+// Un evenement La Poste dans la forme commune du controle des depots. Le code
+// d'abord, confirme par son libelle ; un code que la liste ne connait pas
+// (La Poste en ajoute, DPD a les siens) est lu par son libelle -- une formule
+// explicite (« Tri effectué en agence », « Votre colis vous attend en point
+// relais »), jamais un mot isole ; sinon il ne prouve rien.
 function versEvenement(e) {
   let lu = lisCode(e.code);
   if (lu.physique && PAS_ENCORE_REMIS.test(e.label || "")) lu = { etape: "info_received", physique: false, contredit: true };
+  // une enquete ou une reclamation (meme sous un code d'incident) : la suite
+  // d'un parcours, jamais une preuve a elle seule
+  else if (lu.physique && SECONDAIRES.test(e.label || "")) lu = { etape: "exception", physique: false, incident: String(e.label).slice(0, 120) };
+  else if (lu.etape === "unknown" && e.label) {
+    const phrase = litLibelle(e.label, "LP");
+    if (phrase.etape !== "unknown") lu = { etape: phrase.etape, physique: phrase.physique, incident: phrase.suite ? String(e.label).slice(0, 120) : undefined, parLibelle: true };
+  }
   return {
     cle: `${e.code || "?"}|${e.date || ""}|${e.order ?? ""}`,
     survenuLe: e.date || null,
