@@ -183,8 +183,10 @@ function planPlacement(contentWidth, contentHeight, baseRotation = 0, { reserveB
 // le code-barre du meme numero. Le numero s'imprime en petit, en bas a droite :
 // l'etiquette est calee en haut de la page, si bien que le blanc qu'elle laisse
 // souvent (elle bute sur la largeur) se retrouve en bas. Une marge minimale est
-// gardee pour celles qui remplissent toute la page, qui perdent alors a peine 4 %.
-const MARGE_NUMERO = 16;
+// gardee pour celles qui remplissent toute la page, qui perdent alors a peine 2 %.
+// Discret (7 pt) : il se lit de pres, il n'a pas a se voir de loin.
+const MARGE_NUMERO = 10;
+const TAILLE_NUMERO = 7;
 
 function placementSpecial(largeur, hauteur, rotation, numero) {
   return numero
@@ -195,18 +197,18 @@ function placementSpecial(largeur, hauteur, rotation, numero) {
 async function tamponneNumero(out, page, numero) {
   const gras = await out.embedFont(StandardFonts.HelveticaBold);
   const texte = `#${numero}`;
-  const taille = 12;
+  const taille = TAILLE_NUMERO;
   const largeur = gras.widthOfTextAtSize(texte, taille);
-  const x = LABEL_WIDTH - 6 - largeur;
-  const y = 4;
+  const x = LABEL_WIDTH - 5 - largeur;
+  const y = 3;
   // un cadre fin le detache de ce qui l'entoure : on le trouve du premier coup
   page.drawRectangle({
-    x: x - 3,
-    y: y - 2,
-    width: largeur + 6,
+    x: x - 2,
+    y: y - 1.5,
+    width: largeur + 4,
     height: taille + 1,
     borderColor: rgb(0, 0, 0),
-    borderWidth: 0.8,
+    borderWidth: 0.6,
   });
   page.drawText(texte, { x, y: y + 0.5, size: taille, font: gras, color: rgb(0, 0, 0) });
 }
