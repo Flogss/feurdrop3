@@ -245,3 +245,40 @@ final class FauxServeur: URLProtocol, @unchecked Sendable {
     _ = try? await api.stock()
     #expect(FauxServeur.derniere?.value(forHTTPHeaderField: "Authorization") == nil)
 }
+
+@Test func refonteDuCheckerSeDecode() throws {
+    // « Numéro incorrect », Redrop, historique enrichi, ligne des speciaux
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let compteurs = try decoder.decode(DepotsCompteurs.self, from: Data("""
+    {"confirme":3,"non_confirme":2,"a_verifier":1,"bloque":0,"en_attente":0,"incorrect":4,"pasEncoreScanne":2,"redropsEnAttente":1,
+     "nonConfirmeHorsDelai":1,"aConstater":0,"attention":5,"total":10,"sansNumero":0}
+    """.utf8))
+    #expect(compteurs.nombre(.incorrect) == 4)
+    #expect(compteurs.redropsEnAttente == 1)
+    #expect(DepotCategorie(rawValue: "incorrect") == .incorrect)
+    #expect(DepotCategorie.compteurs.contains(.incorrect))
+    #expect(DepotCategorie.nonConfirme.court == "Pas encore scanné")
+    #expect(DepotCategorie.nonConfirme.rang < DepotCategorie.aVerifier.rang)
+
+    let reponse = try decoder.decode(DepotRedropReponse.self, from: Data("""
+    {"colisId":7,"numero":"4278870015","expediteur":"Alice","transporteur":{"code":"MR","nom":"Mondial Relay","methode":"navigateur"},
+     "statutInterne":{"status":"dropped","libelle":"Dropé","dropeLe":"2026-10-09 18:44:15","imprimeLe":null,"paye":false},
+     "controle":{"categorie":"non_confirme","libelle":"Pas encore scanné","raison":"Étiquette seule","enRetard":true,"livre":false},
+     "attention":false,"evenements":[],"redrop":{"enAttente":42,"de":null},"deja":false,"nouveau":{"id":42,"status":"pending","price":0}}
+    """.utf8))
+    #expect(reponse.nouveau.id == 42)
+    #expect(reponse.deja == false)
+    #expect(reponse.detail.redrop?.enAttente == 42)
+
+    let h = try decoder.decode(DepotHistorique.self, from: Data("""
+    {"colisId":8,"numero":"6A1","expediteur":"Bob","transporteur":{"code":"LP","nom":"La Poste","methode":"laposte"},
+     "retire":{"le":"2026-10-20 10:00:00","motif":"Numéro incorrect : inconnu","regle":"inconnu","incorrect":true},"categorie":"incorrect"}
+    """.utf8))
+    #expect(h.incorrect)
+
+    let s = try decoder.decode(CarrierSummary.self, from: Data("""
+    {"carrier":"SPECIAL","pending_count":3,"pending_value":18,"detail":[{"carrier":"LP","pending_count":1,"pending_value":6},{"carrier":"MR","pending_count":2,"pending_value":12}]}
+    """.utf8))
+    #expect(s.detail?.map(\.carrier) == ["LP", "MR"])
+}

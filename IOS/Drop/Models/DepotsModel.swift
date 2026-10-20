@@ -21,6 +21,27 @@ final class DepotsModel {
     var transporteur: String?
     var expediteur: String?
     var recherche = ""
+    var tri: Tri = .pasEncore
+
+    /// l'ordre de la liste
+    enum Tri: String, CaseIterable, Identifiable {
+        /// ce qui attend son premier scan d'abord (le plus ancien drop en tete)
+        case pasEncore
+        case recents
+        case anciens
+        /// la verification la plus ancienne d'abord
+        case verification
+
+        var id: String { rawValue }
+        var libelle: String {
+            switch self {
+            case .pasEncore: "Pas encore scannés d'abord"
+            case .recents: "Drops les plus récents"
+            case .anciens: "Drops les plus anciens"
+            case .verification: "Vérifiés il y a le plus longtemps"
+            }
+        }
+    }
 
     /// les colis en cours de verification (« Vérifier »)
     private(set) var enVerification: Set<Int> = []
@@ -37,7 +58,7 @@ final class DepotsModel {
             switch self {
             case .tous: "Tous"
             case .attention: "À regarder"
-            case .categorie(let c): c == .aVerifier ? "À vérifier" : c == .bloque ? "Bloquées" : c == .enAttente ? "En attente" : c == .confirme ? "Postés confirmés" : "Non confirmés"
+            case .categorie(let c): c == .aVerifier ? "À vérifier" : c == .bloque ? "Bloquées" : c == .enAttente ? "En attente" : c == .confirme ? "Postés confirmés" : c == .incorrect ? "Numéros incorrects" : "Pas encore scannés"
             case .confirmes: "Confirmés"
             case .retires: "Retirés"
             }
@@ -45,7 +66,7 @@ final class DepotsModel {
 
         var historique: Bool { self == .confirmes || self == .retires }
 
-        static let tousLesFiltres: [Filtre] = [.tous, .attention, .categorie(.nonConfirme), .categorie(.aVerifier), .categorie(.enAttente), .categorie(.bloque), .confirmes, .retires]
+        static let tousLesFiltres: [Filtre] = [.tous, .attention, .categorie(.nonConfirme), .categorie(.aVerifier), .categorie(.incorrect), .categorie(.enAttente), .categorie(.bloque), .confirmes, .retires]
     }
 
     init(app: AppModel) {
@@ -55,11 +76,13 @@ final class DepotsModel {
     var loaded: Bool { vue != nil }
     var laPoste: DepotMethode? { vue?.etat.laPoste }
 
-    /// la liste filtree
+    private var q: String { recherche.replacingOccurrences(of: " ", with: "").uppercased() }
+
+    /// la liste filtree, dans l'ordre choisi
     var lignes: [DepotLigne] {
         guard let vue, !filtre.historique else { return [] }
-        let q = recherche.replacingOccurrences(of: " ", with: "").uppercased()
-        return vue.lignes.filter { l in
+        let q = q
+        let filtrees = vue.lignes.filter { l in
             switch filtre {
             case .tous: break
             case .attention: if !l.attention { return false }
@@ -71,6 +94,25 @@ final class DepotsModel {
             if !q.isEmpty, !l.numero.contains(q) { return false }
             return true
         }
+        let drope = { (l: DepotLigne) in l.statutInterne.dropeLe ?? "" }
+        switch tri {
+        case .recents: return filtrees.sorted { drope($0) > drope($1) }
+        case .anciens: return filtrees.sorted { drope($0) < drope($1) }
+        case .verification: return filtrees.sorted { ($0.verifieLe ?? "", drope($0)) < ($1.verifieLe ?? "", drope($1)) }
+        case .pasEncore: return filtrees.sorted { ($0.controle.cat.rang, drope($0)) < ($1.controle.cat.rang, drope($1)) }
+        }
+    }
+
+    /// une recherche sur « Tous » fouille aussi l'historique : un numero se
+    /// retrouve ou qu'il soit (confirme, retire)
+    var historiqueTrouve: [DepotHistorique] {
+        guard filtre == .tous, !q.isEmpty, let h = vue?.historique else { return [] }
+        let q = q
+        return (h.confirmes + h.retires).filter { l in
+            if let transporteur, l.transporteur.code != transporteur { return false }
+            if let expediteur, l.expediteur != expediteur { return false }
+            return l.numero.contains(q)
+        }
     }
 
     /// l'historique filtre (confirmes ou retires)
@@ -81,7 +123,7 @@ final class DepotsModel {
         case .retires: h.retires
         default: []
         }
-        let q = recherche.replacingOccurrences(of: " ", with: "").uppercased()
+        let q = q
         return liste.filter { l in
             if let transporteur, l.transporteur.code != transporteur { return false }
             if let expediteur, l.expediteur != expediteur { return false }
@@ -232,7 +274,9 @@ final class DepotsModel {
         if etat.compteurs?.verifies != avant || finie { await refresh() }
         if finie, let n = etat.compteurs {
             celebration += 1
-            app.toasts.show("Vérification terminée : \(Format.count(n.confirmes, "posté confirmé", "postés confirmés")), \(Format.count(n.nonConfirmes, "non confirmé", "non confirmés"))" + (n.bloques > 0 ? ", \(Format.count(n.bloques, "bloqué", "bloqués"))" : ""))
+            app.toasts.show("Vérification terminée : \(Format.count(n.confirmes, "posté confirmé", "postés confirmés")), \(Format.count(n.nonConfirmes, "pas encore scanné", "pas encore scannés"))"
+                + ((n.incorrects ?? 0) > 0 ? ", \(Format.count(n.incorrects ?? 0, "numéro incorrect", "numéros incorrects"))" : "")
+                + (n.bloques > 0 ? ", \(Format.count(n.bloques, "bloqué", "bloqués"))" : ""))
         }
     }
 
@@ -276,6 +320,24 @@ final class DepotsModel {
 
     func detail(_ colisID: Int) async -> DepotDetail? {
         await app.perform { try await app.api.depot(colisID) }
+    }
+
+    /// « Redrop » : le colis a ete oublie. Il revient dans « À poster » a 0 € ;
+    /// son suivi et son historique restent, rien d'autre ne bouge. Rejoue, le
+    /// serveur rend le meme (jamais deux).
+    private(set) var enRedrop: Set<Int> = []
+
+    func redrop(_ colisID: Int) async -> DepotDetail? {
+        guard !enRedrop.contains(colisID) else { return nil }
+        enRedrop.insert(colisID)
+        defer { enRedrop.remove(colisID) }
+        guard let r = await app.perform({ try await app.api.redropDepot(colisID) }) else { return nil }
+        celebration += 1
+        app.toasts.show(r.deja ? "\(r.detail.numero) : déjà de retour dans « À poster »" : "\(r.detail.numero) : de retour dans « À poster » (0 €)")
+        await refresh()
+        // « À poster » suit
+        Task { await app.dashboard.refresh() }
+        return r.detail
     }
 
     /// « Relancer les vérifications en attente » : un passage en fond ; la

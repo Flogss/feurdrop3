@@ -285,6 +285,14 @@ final class DashboardModel {
         await runDrop("tr:" + code) { try await app.api.dropCarrier(code) } message: { Self.message($0, suffixe: " · \(Carrier.label(code))") }
     }
 
+    /// les speciaux des seuls transporteurs choisis (« Dropper » La Poste
+    /// n'emporte plus les speciaux La Poste)
+    func dropSpecials(_ codes: [String]) async {
+        guard !codes.isEmpty else { return }
+        let noms = codes.map { $0 == "Inconnu" ? "sans transporteur" : Carrier.label($0) }.joined(separator: ", ")
+        await runDrop("tr:SPECIAL") { try await app.api.dropSpecials(codes) } message: { Self.message($0, suffixe: " · spéciaux \(noms)") }
+    }
+
     /// "8 colis dropés · Mondial Relay · 3 pas encore imprimés restent" ; nil
     /// quand rien n'est parti
     private static func message(_ r: DropResult, suffixe: String = "") -> String? {

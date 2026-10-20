@@ -13,6 +13,9 @@ struct DepotDetailSheet: View {
     @Environment(\.openURL) private var openURL
     @State private var detail: DepotDetail?
     @State private var constatEnCours: DepotConstatChoix?
+    /// « Redrop » : confirme dans une alerte centree (une feuille du bas
+    /// laissait passer l'appui jusqu'a la barre d'onglets -- B05)
+    @State private var confirmeRedrop = false
 
     private var model: DepotsModel { app.depots }
 
@@ -50,6 +53,12 @@ struct DepotDetailSheet: View {
                 .padding(.top, 14)
         }
         .padding(22)
+        .alert("Redrop ce colis ?", isPresented: $confirmeRedrop) {
+            Button("Redrop") { Task { await redrop() } }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("\(detail?.numero ?? "Ce colis") (\(detail?.expediteur ?? "")) revient dans « À poster », à 0 € pour cette opération. Son suivi et son historique sont gardés.")
+        }
         .task(id: ouvert.colisID) {
             detail = nil
             detail = await model.detail(ouvert.colisID)
@@ -71,19 +80,25 @@ struct DepotDetailSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 if let retrait = d.retire {
-                    // retire de la liste (numero inconnu) : on le dit d'abord
-                    Label("Retiré de la liste", systemImage: "tray")
+                    // retire de la liste (hors delai, numero incorrect) : on le dit d'abord
+                    let incorrect = retrait.incorrect == true
+                    Label(incorrect ? "Numéro incorrect · retiré de la liste" : "Retiré de la liste", systemImage: incorrect ? DepotCategorie.incorrect.symbole : "tray")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(Theme.text2)
+                        .foregroundStyle(incorrect ? DepotCategorie.incorrect.couleur : Theme.text2)
                         .padding(.horizontal, 9)
                         .frame(height: 24)
-                        .background(.white.opacity(0.08), in: .capsule)
+                        .background((incorrect ? DepotCategorie.incorrect.couleur.opacity(0.13) : .white.opacity(0.08)), in: .capsule)
                     Text("\(retrait.motif ?? "Retiré de la file de contrôle"). Le colis et son étiquette sont gardés ; « Vérifier maintenant » le remet en contrôle.")
                         .font(.subheadline)
                         .foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    DepotBadge(controle: c, long: true)
+                    HStack(spacing: 8) {
+                        DepotBadge(controle: c, long: true)
+                        if let redrop = d.redrop, redrop.enAttente != nil || redrop.de != nil {
+                            RedropPuce(enAttente: redrop.enAttente != nil)
+                        }
+                    }
                     Text(c.raison)
                         .font(.subheadline)
                         .foregroundStyle(Theme.text2)
@@ -115,6 +130,8 @@ struct DepotDetailSheet: View {
             if let erreur = d.erreur {
                 info("Dernière erreur", erreur.message ?? erreur.code, couleur: Theme.danger)
             }
+
+            redropCarte(d)
 
             if constatPossible(d) { constats(d) }
 
@@ -168,6 +185,54 @@ struct DepotDetailSheet: View {
         var texte = ilYa(d.verifieLe ?? d.essaiLe)
         if let prochaine = d.prochaineLe { texte += " · prochaine \(ServerDate.shortDayTime(prochaine))" }
         return texte
+    }
+
+    // MARK: Redrop
+
+    /// Le colis a ete oublie (dropé, jamais parti) : il revient « à poster ».
+    /// Jamais pour un depot prouve ; un redrop deja en attente est dit.
+    @ViewBuilder
+    private func redropCarte(_ d: DepotDetail) -> some View {
+        if d.redrop?.enAttente != nil {
+            Label("Redrop à poster : le colis est de retour dans « À poster », à 0 €. Son suivi reprendra après son nouveau drop.", systemImage: "shippingbox.and.arrow.backward")
+                .font(.footnote)
+                .foregroundStyle(Theme.text2)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.violet.opacity(0.12), in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.violetLight.opacity(0.3), lineWidth: 0.8))
+                .transition(.scale(scale: 0.96).combined(with: .opacity))
+        } else if d.controle.cat != .confirme {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Colis oublié ?").font(.subheadline.weight(.semibold))
+                    Text("Redrop : il revient dans « À poster », à 0 €.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.text3)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    confirmeRedrop = true
+                } label: {
+                    Group {
+                        if model.enRedrop.contains(d.colisId) { ProgressView().controlSize(.small) } else { Label("Redrop", systemImage: "shippingbox.and.arrow.backward") }
+                    }
+                    .font(.footnote.weight(.bold))
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                }
+                .boutonVerre()
+                .disabled(model.enRedrop.contains(d.colisId))
+            }
+            .padding(12)
+            .background(.white.opacity(0.04), in: .rect(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.hairline, lineWidth: 0.8))
+        }
+    }
+
+    private func redrop() async {
+        guard let maj = await model.redrop(ouvert.colisID) else { return }
+        withAnimation(Theme.spring) { detail = maj }
     }
 
     // MARK: Constats

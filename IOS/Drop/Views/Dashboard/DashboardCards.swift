@@ -241,6 +241,8 @@ struct CarriersCard: View {
     /// grande fenetre : au moins la hauteur de la carte des expediteurs voisine
     var hauteurMin: CGFloat?
     @Environment(AppModel.self) private var app
+    /// les speciaux : on choisit leurs transporteurs avant de dropper
+    @State private var speciaux: CarrierSummary?
 
     var body: some View {
         let lignes = carriers.filter { $0.pendingCount > 0 }
@@ -267,6 +269,17 @@ struct CarriersCard: View {
         .frame(maxWidth: .infinity, minHeight: hauteurMin.map { $0 - 2 * Theme.Space.xl }, alignment: .top)
         .surfaceCard()
         .animation(Theme.spring, value: lignes)
+        .sheet(item: $speciaux) { s in
+            SpeciauxSheet(detail: s.detail ?? []) { codes in
+                speciaux = nil
+                Task { await app.dashboard.dropSpecials(codes) }
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            #if os(macOS)
+            .frame(minWidth: 420, minHeight: 360)
+            #endif
+        }
     }
 
     private func ligne(_ c: CarrierSummary, part: Double) -> some View {
@@ -278,17 +291,24 @@ struct CarriersCard: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(Carrier.label(c.carrier))
                     .font(.subheadline.weight(.semibold))
-                Text("\(Format.count(c.pendingCount, "colis", "colis")) · \(Format.euro(c.pendingValue))")
+                Text("\(Format.count(c.pendingCount, "colis", "colis")) · \(Format.euro(c.pendingValue))" + detailSpeciaux(c))
                     .font(.caption)
                     .foregroundStyle(Theme.text3)
+                    .lineLimit(1)
                     .contentTransition(.numericText())
                 ShareBar(fraction: part, color: couleur)
             }
             Button {
-                Task { await app.dashboard.dropCarrier(c.carrier) }
+                // les speciaux : on choisit lesquels (jamais emportes par
+                // « Dropper » La Poste) ; un serveur plus ancien : tous
+                if c.carrier == "SPECIAL", c.detail != nil {
+                    speciaux = c
+                } else {
+                    Task { await app.dashboard.dropCarrier(c.carrier) }
+                }
             } label: {
                 Group {
-                    if occupe { ProgressView().controlSize(.small) } else { Text("Dropper") }
+                    if occupe { ProgressView().controlSize(.small) } else { Text(c.carrier == "SPECIAL" && c.detail != nil ? "Choisir…" : "Dropper") }
                 }
                 .font(.subheadline.weight(.semibold))
                 .frame(minWidth: 70)
@@ -297,6 +317,106 @@ struct CarriersCard: View {
             .disabled(occupe)
         }
         .padding(.vertical, 8)
+    }
+
+    private func detailSpeciaux(_ c: CarrierSummary) -> String {
+        guard c.carrier == "SPECIAL", let detail = c.detail, !detail.isEmpty else { return "" }
+        return " · " + detail.map { "\($0.carrier == "Inconnu" ? "?" : Carrier.label($0.carrier)) \($0.pendingCount)" }.joined(separator: ", ")
+    }
+}
+
+/// Dropper des speciaux : on coche leurs transporteurs. Rien n'est coche au
+/// depart (sauf s'il n'y en a qu'un) : on choisit ce qu'on droppe.
+private struct SpeciauxSheet: View {
+    let detail: [CarrierSummary]
+    let dropper: ([String]) -> Void
+    @State private var choisis: Set<String> = []
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let pris = detail.filter { choisis.contains($0.carrier) }
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Quels spéciaux dropper ?").font(.title3.weight(.bold))
+                Spacer()
+                Button(choisis.count == detail.count ? "Aucun" : "Tout") {
+                    withAnimation(Theme.spring) { choisis = choisis.count == detail.count ? [] : Set(detail.map(\.carrier)) }
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.violetLight)
+            }
+            FlowChips(detail: detail, choisis: $choisis)
+            Text(pris.isEmpty ? "Choisis les spéciaux à dropper." : "\(Format.count(pris.reduce(0) { $0 + $1.pendingCount }, "spécial", "spéciaux")) à dropper · \(Format.euro(pris.reduce(0) { $0 + $1.pendingValue }))")
+                .font(.subheadline)
+                .foregroundStyle(Theme.text2)
+                .contentTransition(.numericText())
+            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Annuler")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .boutonVerre()
+                Button {
+                    dropper(detail.map(\.carrier).filter { choisis.contains($0) })
+                } label: {
+                    Label("Dropper", systemImage: "checkmark")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .boutonVerreFort(Theme.violetDeep)
+                .disabled(pris.isEmpty)
+            }
+        }
+        .padding(22)
+        .onAppear { if detail.count == 1 { choisis = [detail[0].carrier] } }
+        .sensoryFeedback(.selection, trigger: choisis)
+    }
+
+    private struct FlowChips: View {
+        let detail: [CarrierSummary]
+        @Binding var choisis: Set<String>
+
+        var body: some View {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+                ForEach(detail) { t in
+                    let actif = choisis.contains(t.carrier)
+                    Button {
+                        withAnimation(Theme.spring) {
+                            if actif { choisis.remove(t.carrier) } else { choisis.insert(t.carrier) }
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            CarrierDot(color: .carrier(t.carrier), size: 8)
+                                .opacity(actif ? 1 : 0.4)
+                                .scaleEffect(actif ? 1.15 : 1)
+                            Text(t.carrier == "Inconnu" ? "Sans transporteur" : Carrier.label(t.carrier))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Spacer(minLength: 4)
+                            Text(Format.integer(t.pendingCount)).monospacedDigit().opacity(0.75)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(actif ? Theme.text : Theme.text2)
+                        .padding(.horizontal, 12)
+                        .frame(height: 40)
+                        .background {
+                            Capsule()
+                                .fill(actif ? Color.carrier(t.carrier).opacity(0.22) : .white.opacity(0.05))
+                                .overlay(Capsule().strokeBorder(actif ? Color.carrier(t.carrier).opacity(0.55) : Theme.hairline, lineWidth: 0.9))
+                        }
+                    }
+                    .buttonStyle(PressScaleStyle(scale: 0.95))
+                    .accessibilityAddTraits(actif ? .isSelected : [])
+                }
+            }
+        }
     }
 }
 

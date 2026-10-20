@@ -59,7 +59,17 @@ public struct CarrierSummary: Codable, Sendable, Equatable, Identifiable {
     public var carrier: String
     public var pendingCount: Int
     public var pendingValue: Double
+    /// la ligne des speciaux (« SPECIAL ») : ses transporteurs, pour choisir
+    /// lesquels dropper (« Dropper » La Poste n'emporte plus les speciaux)
+    public var detail: [CarrierSummary]?
     public var id: String { carrier }
+
+    public init(carrier: String, pendingCount: Int, pendingValue: Double, detail: [CarrierSummary]? = nil) {
+        self.carrier = carrier
+        self.pendingCount = pendingCount
+        self.pendingValue = pendingValue
+        self.detail = detail
+    }
 }
 
 public struct AutoPrint: Codable, Sendable, Equatable {

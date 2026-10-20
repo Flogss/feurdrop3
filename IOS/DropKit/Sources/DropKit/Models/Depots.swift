@@ -17,20 +17,25 @@ public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
     case aVerifier = "a_verifier"
     case bloque
     case enAttente = "en_attente"
+    /// le transporteur dit lui-meme que le numero est faux (refuse, ou
+    /// inconnu a plusieurs lectures bien apres le drop) -- jamais un delai,
+    /// une panne ou une protection anti-robot
+    case incorrect
 
     public var id: String { rawValue }
 
-    /// les quatre compteurs de la page
-    public static let compteurs: [DepotCategorie] = [.confirme, .nonConfirme, .aVerifier, .bloque]
+    /// les cinq compteurs de la page
+    public static let compteurs: [DepotCategorie] = [.confirme, .nonConfirme, .aVerifier, .incorrect, .bloque]
 
     /// le libelle complet (compteurs, detail)
     public var libelle: String {
         switch self {
         case .confirme: "Postés confirmés"
-        case .nonConfirme: "Non confirmés"
+        case .nonConfirme: "Pas encore scannés"
         case .aVerifier: "À vérifier"
         case .bloque: "Vérification bloquée"
         case .enAttente: "En attente de lecture"
+        case .incorrect: "Numéros incorrects"
         }
     }
 
@@ -38,12 +43,34 @@ public enum DepotCategorie: String, CaseIterable, Sendable, Identifiable {
     public var court: String {
         switch self {
         case .confirme: "Posté confirmé"
-        case .nonConfirme: "Non confirmé"
+        case .nonConfirme: "Pas encore scanné"
         case .aVerifier: "À vérifier"
         case .bloque: "Vérif. bloquée"
         case .enAttente: "En attente"
+        case .incorrect: "Numéro incorrect"
         }
     }
+
+    /// « Pas encore scannés d'abord » : ce qui attend son premier scan, puis
+    /// ce qui demande un regard, puis ce qui n'est pas tranche
+    public var rang: Int {
+        switch self {
+        case .nonConfirme: 0
+        case .incorrect: 1
+        case .aVerifier: 2
+        case .bloque: 3
+        case .enAttente: 4
+        case .confirme: 5
+        }
+    }
+}
+
+/// Un colis oublie (dropé, jamais parti) remis « à poster » : en attente
+/// (l'identifiant du nouveau colis, 0 €), ou cette ligne suit deja le redrop
+/// (l'identifiant du colis d'origine).
+public struct DepotRedrop: Codable, Sendable, Equatable {
+    public var enAttente: Int?
+    public var de: Int?
 }
 
 /// `GET /api/depots`
@@ -76,7 +103,14 @@ public struct DepotHistorique: Codable, Sendable, Equatable, Identifiable {
     public var livre: Bool?
     public var retire: DepotRetrait?
     public var lien: String?
+    /// ce que la liste savait au moment de la sortie (absent d'un serveur plus ancien)
+    public var categorie: String?
+    public var dernierEvenement: DepotEvenementResume?
+    public var verifieLe: String?
+    public var redrop: DepotRedrop?
     public var id: Int { colisId }
+    /// retire parce que le numero est incorrect (inconnu ou refuse)
+    public var incorrect: Bool { retire?.incorrect == true }
 }
 
 public struct DepotPreuve: Codable, Sendable, Equatable {
@@ -88,6 +122,10 @@ public struct DepotPreuve: Codable, Sendable, Equatable {
 public struct DepotRetrait: Codable, Sendable, Equatable {
     public var le: String?
     public var motif: String?
+    /// "inconnu", "hors_delai" (anciennes lignes : "invalide")
+    public var regle: String?
+    /// le numero est incorrect (inconnu ou refuse par le transporteur)
+    public var incorrect: Bool?
 }
 
 /// `GET /api/depots/resume` : la pastille du dashboard.
@@ -100,6 +138,12 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
     public var nonConfirme: Int
     public var aVerifier: Int
     public var bloque: Int
+    /// « Numéro incorrect » (absent d'un serveur plus ancien)
+    public var incorrect: Int?
+    /// « Pas encore scanné » (= non confirmes)
+    public var pasEncoreScanne: Int?
+    /// des colis oublies remis « à poster » (Redrop)
+    public var redropsEnAttente: Int?
     /// (anciennes versions du serveur)
     public var anomalie: Int?
     /// non confirmes au-dela du delai normal d'un premier scan
@@ -129,6 +173,7 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
         case .aVerifier: aVerifier
         case .bloque: bloque
         case .enAttente: enAttente ?? 0
+        case .incorrect: incorrect ?? 0
         }
     }
 }
@@ -255,6 +300,7 @@ public struct DepotLigne: Codable, Sendable, Equatable, Identifiable {
     public var lecture: DepotLectureMemoire?
     public var confirmeLe: String?
     public var retire: DepotRetrait?
+    public var redrop: DepotRedrop?
 
     public var id: Int { colisId }
     public var manuel: Bool { transporteur.methode == "manuel" }
@@ -384,9 +430,33 @@ public struct DepotDetail: Codable, Sendable, Equatable, Identifiable {
     public var enAttenteDuMac: Bool?
     public var confirmeLe: String?
     public var retire: DepotRetrait?
+    public var redrop: DepotRedrop?
 
     public var id: Int { colisId }
     public var manuel: Bool { transporteur.methode == "manuel" }
+}
+
+/// `POST /api/depots/:colisId/redrop` : le detail de la ligne (qui montre le
+/// redrop en attente), et le nouveau colis « à poster » (0 €). `deja` : un
+/// redrop attendait deja -- le meme est rendu, jamais deux.
+public struct DepotRedropReponse: Decodable, Sendable, Equatable {
+    public struct Nouveau: Codable, Sendable, Equatable {
+        public var id: Int
+        public var status: String?
+        public var price: Double?
+    }
+    public var deja: Bool
+    public var nouveau: Nouveau
+    public var detail: DepotDetail
+
+    private enum Cles: String, CodingKey { case deja, nouveau }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Cles.self)
+        deja = try c.decodeIfPresent(Bool.self, forKey: .deja) ?? false
+        nouveau = try c.decode(Nouveau.self, forKey: .nouveau)
+        detail = try DepotDetail(from: decoder)
+    }
 }
 
 public struct DepotEvenement: Codable, Sendable, Equatable, Identifiable {
@@ -464,6 +534,8 @@ public struct DepotCampagneCompteurs: Codable, Sendable, Equatable {
     public var aConstater: Int
     /// numeros retires de la file a la lecture (inconnus)
     public var retires: Int?
+    /// numeros incorrects (refuses ou inconnus du transporteur)
+    public var incorrects: Int?
 
     /// la part faite (0...1)
     public var avancee: Double { total > 0 ? Double(total - restants) / Double(total) : 1 }

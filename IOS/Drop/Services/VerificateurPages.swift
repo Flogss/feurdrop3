@@ -245,7 +245,7 @@ final class VerificateurPages: NSObject, WKNavigationDelegate {
         let t = texte.lowercased(), ti = titre.lowercased()
         if ti.contains("just a moment") || ti.contains("attention required") || ti.contains("access denied") { return true }
         switch transporteur {
-        case "MR": return t.contains("suivi détaillé de mon colis") || t.contains("aucun colis portant")
+        case "MR": return t.contains("suivi détaillé de mon colis") || t.contains("suivi détaillé de votre colis") || t.contains("aucun colis portant")
         // (le formulaire et la FAQ s'affichent avant le suivi : seul un texte
         // stable dit que le suivi d'un colis reel est la)
         case "DHL": return t.contains("tentative de suivi a échoué") || t.contains("tracking attempt")

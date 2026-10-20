@@ -73,8 +73,13 @@ struct DepotsView: View {
                 ForEach(toutes) { cat in compteur(cat, c) }
             }
         } else {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                ForEach(toutes) { cat in compteur(cat, c) }
+            // deux par ligne ; le dernier (impair) sur toute la largeur
+            let paires = Array(toutes.prefix(toutes.count - toutes.count % 2))
+            VStack(spacing: 10) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    ForEach(paires) { cat in compteur(cat, c) }
+                }
+                if toutes.count % 2 == 1, let dernier = toutes.last { compteur(dernier, c) }
             }
         }
     }
@@ -132,7 +137,8 @@ struct DepotsView: View {
         switch cat {
         case .confirme: (c.retires ?? 0) > 0 ? "historique · \(Format.count(c.retires ?? 0, "retiré", "retirés"))" : "sortis de la liste (historique)"
         case .nonConfirme: c.nonConfirmeHorsDelai > 0 ? "dont \(c.nonConfirmeHorsDelai) hors délai" : "étiquette seule"
-        case .aVerifier: (c.enAttente ?? 0) > 0 ? "+ \(c.enAttente ?? 0) en attente de lecture" : "inconnu, illisible ou en échec"
+        case .aVerifier: (c.enAttente ?? 0) > 0 ? "+ \(c.enAttente ?? 0) en attente de lecture" : "illisible ou en échec répété"
+        case .incorrect: (c.incorrect ?? 0) > 0 ? "refusés ou inconnus du transporteur" : "aucun numéro refusé"
         // le « dont » ne compte que les bloques (B02 : sinon il depassait le total)
         case .bloque: (c.aConstaterBloques ?? min(c.aConstater, c.bloque)) > 0 ? "dont \(c.aConstaterBloques ?? min(c.aConstater, c.bloque)) à constater" : "site protégé ou à la main"
         case .enAttente: "pas encore lu"
@@ -162,6 +168,7 @@ struct DepotsView: View {
                 .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.8))
                 choix("Transporteur", selection: $model.transporteur, options: model.transporteursPresents.map { ($0.code, $0.nom) })
                 choix("Expéditeur", selection: $model.expediteur, options: model.expediteursPresents.map { ($0, $0) })
+                choixTri($model.tri)
             }
 
             if model.filtre.historique {
@@ -201,6 +208,23 @@ struct DepotsView: View {
                     }
                 }
                 .animation(Theme.spring, value: lignes.map(\.id))
+            }
+
+            // une recherche sur « Tous » : ce qui est deja sorti de la liste
+            let anciens = model.historiqueTrouve
+            if !anciens.isEmpty {
+                Text("Dans l'historique")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.text3)
+                    .padding(.top, 4)
+                LazyVStack(spacing: 0) {
+                    ForEach(anciens) { h in
+                        HistoriqueRow(ligne: h) { ouvert = DepotOuvert(colisID: h.colisId) }
+                        if h.id != anciens.last?.id {
+                            Divider().overlay(Theme.hairline)
+                        }
+                    }
+                }
             }
 
             if let pied = pied(vue, affichees: model.filtre.historique ? model.historique.count : lignes.count) {
@@ -279,6 +303,25 @@ struct DepotsView: View {
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
         .accessibilityLabel(titre)
+    }
+
+    /// l'ordre de la liste (« Pas encore scannés d'abord » par defaut)
+    private func choixTri(_ tri: Binding<DepotsModel.Tri>) -> some View {
+        Menu {
+            Picker("Trier", selection: tri) {
+                ForEach(DepotsModel.Tri.allCases) { t in Text(t.libelle).tag(t) }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(tri.wrappedValue == .pasEncore ? Theme.text2 : Theme.text)
+                .frame(width: 38, height: 38)
+                .background((tri.wrappedValue == .pasEncore ? Color.white.opacity(0.05) : Theme.violet.opacity(0.26)), in: .circle)
+                .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 0.8))
+        }
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Trier : \(tri.wrappedValue.libelle)")
     }
 
     private func pied(_ vue: DepotsVue, affichees: Int) -> String? {
@@ -547,11 +590,17 @@ private struct DepotRow: View {
                     Spacer(minLength: 8)
                     DepotBadge(controle: c)
                 }
+                if let redrop = ligne.redrop, redrop.enAttente != nil || redrop.de != nil {
+                    RedropPuce(enAttente: redrop.enAttente != nil)
+                }
                 HStack(spacing: 5) {
                     CarrierDot(color: .carrier(ligne.transporteur.code), size: 6)
                     Text("\(ligne.transporteur.nom) · \(ligne.expediteur)")
                         .lineLimit(1)
                     Spacer(minLength: 8)
+                    if c.cat == .nonConfirme && c.enRetard {
+                        Text("hors délai ·").foregroundStyle(Theme.warn)
+                    }
                     Text(statutTransporteur + (c.suite?.retour == true ? " · retour" : c.livre ? " · livré" : ""))
                         .lineLimit(1)
                 }
@@ -628,7 +677,7 @@ private struct HistoriqueRow: View {
 
     var body: some View {
         let retire = ligne.retire != nil
-        let couleur = retire ? Theme.text3 : DepotCategorie.confirme.couleur
+        let couleur = ligne.incorrect ? DepotCategorie.incorrect.couleur : retire ? Theme.text3 : DepotCategorie.confirme.couleur
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(ligne.numero)
@@ -636,7 +685,7 @@ private struct HistoriqueRow: View {
                     .foregroundStyle(Theme.text2)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Label(retire ? "Retiré" : "Posté confirmé", systemImage: retire ? "tray" : "checkmark")
+                Label(ligne.incorrect ? "Numéro incorrect" : retire ? "Retiré" : "Posté confirmé", systemImage: ligne.incorrect ? DepotCategorie.incorrect.symbole : retire ? "tray" : "checkmark")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(couleur)
                     .padding(.horizontal, 9)
@@ -706,7 +755,8 @@ struct DepotBadge: View {
 
     var body: some View {
         let cat = controle.cat
-        let texte = long ? controle.libelle : cat == .nonConfirme && controle.enRetard ? "Non confirmé · hors délai" : cat.court
+        // (« hors délai » est dit sous le badge : il reste court)
+        let texte = long ? controle.libelle : cat.court
         Label(texte, systemImage: cat.symbole)
             .font(.caption.weight(.bold))
             .foregroundStyle(cat.couleur)
@@ -729,6 +779,8 @@ extension DepotCategorie {
         case .bloque: Theme.violetLight
         // rien n'est encore lu : gris lavande, sans alerte
         case .enAttente: Color(red: 0.66, green: 0.65, blue: 0.77)
+        // le transporteur dit que le numero est faux
+        case .incorrect: Theme.danger
         }
     }
 
@@ -739,7 +791,32 @@ extension DepotCategorie {
         case .aVerifier: "magnifyingglass"
         case .bloque: "lock.fill"
         case .enAttente: "arrow.clockwise"
+        case .incorrect: "xmark.octagon"
         }
+    }
+}
+
+/// Un redrop : le colis oublie est de retour « à poster » (il pulse
+/// doucement tant qu'il attend), ou la ligne suit deja le redrop.
+struct RedropPuce: View {
+    let enAttente: Bool
+    @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduit
+
+    var body: some View {
+        Label(enAttente ? "Redrop à poster" : "Redrop", systemImage: "shippingbox.and.arrow.backward")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Theme.violetLight)
+            .padding(.horizontal, 8)
+            .frame(height: 20)
+            .background(Theme.violet.opacity(0.18), in: .capsule)
+            .overlay(Capsule().strokeBorder(Theme.violetLight.opacity(pulse ? 0.6 : 0.3), lineWidth: 0.8))
+            .shadow(color: Theme.violet.opacity(pulse ? 0.5 : 0), radius: 8)
+            .onAppear {
+                guard enAttente, !reduit else { return }
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { pulse = true }
+            }
+            .accessibilityLabel(enAttente ? "Redrop : de retour dans À poster" : "Colis redropé")
     }
 }
 

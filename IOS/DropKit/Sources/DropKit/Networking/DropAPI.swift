@@ -118,8 +118,15 @@ public struct DropAPI: Sendable {
         try await client.send(.post, "/api/colis/drop-sender/\(segment(name))")
     }
 
+    /// un transporteur : ses etiquettes classiques, jamais ses speciaux
     public func dropCarrier(_ code: String) async throws -> DropResult {
         try await client.send(.post, "/api/colis/drop-carrier/\(segment(code))")
+    }
+
+    /// les speciaux des seuls transporteurs choisis
+    public func dropSpecials(_ carriers: [String]) async throws -> DropResult {
+        struct Corps: Encodable, Sendable { let carriers: [String] }
+        return try await client.send(.post, "/api/colis/drop-specials", body: Corps(carriers: carriers))
     }
 
     /// annule un drop : le colis repasse en attente
@@ -241,6 +248,12 @@ public struct DropAPI: Sendable {
     public func constateDepot(_ colisID: Int, _ choix: DepotConstatChoix) async throws -> DepotDetail {
         struct Corps: Encodable, Sendable { let resultat: String }
         return try await client.send(.post, "/api/depots/\(colisID)/constat", body: Corps(resultat: choix.rawValue))
+    }
+
+    /// « Redrop » : le colis a ete oublie ; il revient « à poster » a 0 €, son
+    /// suivi et son historique restent. Rejoue, le serveur rend le meme.
+    public func redropDepot(_ colisID: Int) async throws -> DepotRedropReponse {
+        try await client.send(.post, "/api/depots/\(colisID)/redrop")
     }
 
     /// « Relancer les vérifications en attente » : un passage en fond, au

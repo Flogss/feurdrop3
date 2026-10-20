@@ -113,3 +113,21 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 
 - iPhone 15 Pro / 16 réels : les confirmations en alerte centrée (B17), les mises en page iPhone (B12, B13, B15, B20, B21). Testé seulement sur le simulateur.
 - Mac : installer la nouvelle version (pas encore faite) pour B10, B11, B14 et les confirmations.
+
+## Refonte du checker (20/10/2026)
+
+| ID | Gravité | Plateforme | Écran / fonction | Résumé | Statut |
+|---|---|---|---|---|---|
+| C01 | Élevée | Serveur | Statuts La Poste / DPD / Colissimo | Un code d'évènement absent de la liste (DPD « Tri effectué en agence », etc.) n'était jamais lu, même avec un libellé explicite : « À vérifier » au lieu de « Posté confirmé » | vérifié (tests) |
+| C02 | Critique | Serveur | Statuts La Poste | « Vous avez fait une demande d'affranchissement » sous un code physique aurait confirmé un dépôt | vérifié (tests : jamais une preuve, quel que soit le code) |
+| C03 | Élevée | Serveur | Statuts (tous) | « Une enquête est en cours » sous un code d'incident (PB1) comptait comme une preuve de prise en charge | vérifié (tests : jamais une preuve, ne retire pas une preuve antérieure) |
+| C04 | Élevée | Serveur, Mac | Lecture Mondial Relay | Un libellé de numéro un peu différent (« Numéro de colis : 78870015 ») ou une mise en page sur une ligne : toutes les pages en « autre numéro », jamais lues | vérifié (tests) ; lecture réelle sur le site MR par l'app Mac : 2 pages lues |
+| C05 | Mineure | Serveur | Pages DHL | « Livré » seul n'était pas reconnu ; un résumé non daté en tête de page devenait un évènement | vérifié (tests) |
+| C06 | Moyenne | Serveur, site, iOS, Mac | Contrôle | Numéro refusé / inconnu confondu avec « À vérifier » (pannes, délais) | vérifié : « Numéro incorrect » (tests, site, simulateur) |
+| C07 | Moyenne | Serveur, site, iOS | Drop par transporteur | « Dropper » La Poste emportait aussi les spéciaux La Poste | vérifié : spéciaux à part, choix des transporteurs (tests, site, simulateur) |
+
+Ajouts : Redrop (migration v12 additive), règle « hors délai » (`CONTROLE_ARCHIVE_JOURS`, 7 j ; `CONTROLE_ARCHIVE_CALME_JOURS`, 2 j), tri « Pas encore scannés d'abord », recherche dans l'historique, filtre « Pas encore scannés » du portail, tous les transporteurs au choix pour l'impression auto.
+
+Vérifications faites : 222 tests serveur, 25 tests Swift ; site (navigateur intégré, base de démo) : Redrop, choix des spéciaux, transporteurs de l'impression auto, recherche dans l'historique, filtre du portail ; simulateur iPhone 16 : liste, Redrop, choix des spéciaux ; app Mac (Debug) contre le serveur local : 2 pages Mondial Relay lues sur le vrai site (numéros de démo, donc « inconnu »).
+
+Limites : aucun vrai numéro Mondial Relay pris en charge n'était disponible pour relire une page « trouvée » aujourd'hui (structure relevée le 09/10) ; UPS reste à la main sans son API officielle (lecture automatisée interdite par UPS, et ups.com refuse les accès automatisés) ; au premier passage après le déploiement, la règle « hors délai » retire d'un coup les anciens « pas encore scannés » sans nouvelle depuis 2 jours (base de démo : 37) — rien n'est supprimé, « Vérifier » les remet.
