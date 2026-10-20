@@ -150,9 +150,17 @@ function colisDuNumero(numero) {
   return colisDropes().avec.find((x) => x.suivi.numero === numero) || null;
 }
 
+// (une page qui ne donne que le jour d'un evenement, sans heure -- Mondial
+// Relay pour les jours passes : `jourSeul`, compare au jour, pas a l'heure)
+const jourSeulDe = (e) => {
+  if (e.source !== "navigateur") return false;
+  const b = safeJson(e.brut);
+  return Boolean(b?.jour) && !b.heure;
+};
 const versEvenement = (e) => ({
   id: e.id,
   survenuLe: e.survenu_le,
+  jourSeul: jourSeulDe(e),
   ordre: e.ordre,
   code: e.code,
   libelle: e.libelle,
@@ -390,7 +398,8 @@ function archiveHorsDelai(affiches) {
     // inconnu du transporteur : sa propre regle (deux lectures espacees), pas celle-ci
     if (s.trouve === 0) continue;
     const c = ligneDe(x, s, evenements.get(numero), ctx).controle;
-    if (!["non_confirme", "a_verifier", "incorrect"].includes(c.categorie) || c.nonConfigure || c.erreurTechnique) continue;
+    // (un statut non reconnu peut etre une vraie prise en charge : un regard d'abord)
+    if (!["non_confirme", "a_verifier", "incorrect"].includes(c.categorie) || c.nonConfigure || c.erreurTechnique || c.nonReconnu) continue;
     const dates = (evenements.get(numero) || []).map((e) => versMs(e.survenuLe)).filter(Number.isFinite);
     const derniere = dates.length ? Math.max(...dates) : null;
     if (derniere != null && derniere > calme) continue;

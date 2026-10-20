@@ -387,6 +387,8 @@ public struct DepotSuite: Codable, Sendable, Equatable {
 public struct DepotEvenementResume: Codable, Sendable, Equatable {
     /// heure du transporteur, avec son fuseau ("2026-10-09T18:45:00+02:00")
     public var le: String?
+    /// la page ne donnait que le jour (pas d'heure)
+    public var jourSeul: Bool?
     public var statut: String
     public var lieu: String?
     public var etape: String?
@@ -462,6 +464,8 @@ public struct DepotRedropReponse: Decodable, Sendable, Equatable {
 public struct DepotEvenement: Codable, Sendable, Equatable, Identifiable {
     public var id: Int
     public var survenuLe: String?
+    /// la page ne donnait que le jour (pas d'heure)
+    public var jourSeul: Bool?
     public var code: String?
     public var libelle: String?
     public var lieu: String?

@@ -99,6 +99,12 @@ public enum ServerDate {
     }
 
     /// "17/09 18:21"
+    /// "09/10" seul quand la page ne donnait que le jour
+    public static func shortDayTime(_ texte: String?, jourSeul: Bool?) -> String {
+        let t = shortDayTime(texte)
+        return jourSeul == true && t != "—" ? String(t.prefix(5)) : t
+    }
+
     public static func shortDayTime(_ texte: String?) -> String {
         guard let date = parse(texte) else { return "—" }
         let f = DateFormatter()

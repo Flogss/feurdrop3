@@ -343,7 +343,7 @@ struct DepotDetailSheet: View {
                             .background(Theme.teal.opacity(0.14), in: .capsule)
                     }
                 }
-                Text(ServerDate.shortDayTime(e.survenuLe) + (e.lieu.map { " · \($0)" } ?? ""))
+                Text(ServerDate.shortDayTime(e.survenuLe, jourSeul: e.jourSeul) + (e.lieu.map { " · \($0)" } ?? ""))
                     .font(.caption)
                     .foregroundStyle(Theme.text2)
                 Text(manuel ? "constat sur la page officielle" : e.source == "navigateur" ? "page officielle lue sur le Mac" : "La Poste · \(e.code ?? "?")\(e.etape == "unknown" ? " (code non reconnu)" : "")")

@@ -64,9 +64,11 @@ function depotHeure(valeur) {
 }
 
 // l'heure d'un evenement telle que le transporteur la donne (heure locale) ;
-// un constat fait ici est en UTC : il passe par l'heure du navigateur
-function depotHeureTransporteur(texte) {
+// un constat fait ici est en UTC : il passe par l'heure du navigateur. Un
+// evenement donne au jour seulement (`jourSeul`) : sa date, sans heure.
+function depotHeureTransporteur(texte, jourSeul = false) {
   if (!texte) return "—";
+  if (jourSeul) return depotHeureTransporteur(texte).slice(0, 5);
   if (/Z$/.test(texte)) return depotHeure(texte);
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(texte);
   if (!m) return escapeHtml(texte);
@@ -396,7 +398,7 @@ function ligneDepot(l) {
       </div>
       <div class="depot-cell depot-evenement">
         <span class="depot-evenement-texte">${dernier ? escapeHtml(dernier.statut) : manuel && !c.constat ? "À constater sur la page officielle" : "—"}</span>
-        <span class="depot-sous">${dernier ? `${depotHeureTransporteur(dernier.le)}${dernier.lieu ? ` · ${escapeHtml(dernier.lieu)}` : ""}` : escapeHtml(c.raison)}</span>
+        <span class="depot-sous">${dernier ? `${depotHeureTransporteur(dernier.le, dernier.jourSeul)}${dernier.lieu ? ` · ${escapeHtml(dernier.lieu)}` : ""}` : escapeHtml(c.raison)}</span>
       </div>
       <div class="depot-cell depot-verifie">
         <span class="depot-sous">${l.erreur ? `<span class="depot-erreur">${ico("alert")}erreur</span> · ` : ""}${escapeHtml(quand)}</span>
@@ -685,7 +687,7 @@ function evenementDepot(e, preuve) {
       <span class="depot-evt-point" aria-hidden="true"></span>
       <div class="depot-evt-corps">
         <span class="depot-evt-statut">${escapeHtml(statut)}${estPreuve ? `<span class="depot-evt-preuve">preuve de dépôt</span>` : ""}</span>
-        <span class="depot-evt-meta">${depotHeureTransporteur(e.survenuLe)}${e.lieu ? ` · ${escapeHtml(e.lieu)}` : ""}</span>
+        <span class="depot-evt-meta">${depotHeureTransporteur(e.survenuLe, e.jourSeul)}${e.lieu ? ` · ${escapeHtml(e.lieu)}` : ""}</span>
         <span class="depot-evt-code">${escapeHtml(origine)}</span>
       </div>
     </li>`;

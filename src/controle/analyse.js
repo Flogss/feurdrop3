@@ -102,11 +102,15 @@ const heureLisible = (ms) =>
     ? "?"
     : new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(ms);
 
+// un evenement donne au jour seulement : sa date, sans heure inventee
+const quandLisible = (e) => (e?.jourSeul ? heureLisible(e.ms).slice(0, 5) : heureLisible(e?.ms));
+
 function decrit(e) {
   if (!e) return null;
   return {
     le: e.survenuLe,
     ms: e.ms,
+    jourSeul: Boolean(e.jourSeul),
     statut: e.libelle || ETAPES_FR[e.etape] || e.code || "—",
     lieu: e.lieu || null,
     etape: e.etape || null,
@@ -133,7 +137,15 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   const tous = evenements
     .map((e) => ({ ...e, ms: versMs(e.survenuLe) }))
     .sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity) || (b.ordre ?? 0) - (a.ordre ?? 0));
-  const ancien = (e) => seuilAncien != null && e.ms != null && e.ms < seuilAncien;
+  // un evenement donne au jour seulement (sans heure) se compare au jour :
+  // « 09/10 · Colis pris en charge » le jour de la reception de l'etiquette
+  // n'est pas un ancien parcours
+  const ancien = (e) => {
+    if (seuilAncien == null || e.ms == null) return false;
+    if (e.jourSeul) return jourParis(e.ms) < jourParis(recuMs);
+    return e.ms < seuilAncien;
+  };
+  const passe = (e) => (e.jourSeul ? jourParis(e.ms) <= jourParis(maintenant) : e.ms <= maintenant + HEURE);
   // le constat manuel le plus recent fait foi parmi les constats
   const dernierConstat = tous.find((e) => e.source === "manuel") || null;
   const lusTransporteur = tous.filter((e) => e.source !== "manuel");
@@ -156,7 +168,7 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   // --- preuve physique : le depot est prouve, et le reste --------------------------
   // (datee, d'une etape physique, APRES la reception de l'etiquette, pas dans
   // le futur ; un constat a la main est date de l'instant ou il est fait)
-  const physiques = retenus.filter((e) => e.ms != null && e.physique && (e.source === "manuel" || ETAPES_PHYSIQUES.has(e.etape)) && e.ms <= maintenant + HEURE);
+  const physiques = retenus.filter((e) => e.ms != null && e.physique && (e.source === "manuel" || ETAPES_PHYSIQUES.has(e.etape)) && passe(e));
   const preuves = physiques.filter((e) => !ancien(e)).sort((a, b) => a.ms - b.ms || (a.ordre ?? 0) - (b.ordre ?? 0));
   if (preuves.length) {
     const p = preuves.find((e) => e.etape !== "delivered" && e.etape !== "exception") || preuves.find((e) => e.etape !== "delivered") || preuves[0];
@@ -172,8 +184,8 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     const seulementLivre = preuves.every((e) => e.etape === "delivered");
     const ou = p.source && p.source !== "laposte" ? ` — ${SOURCES_FR[p.source] || p.source}` : "";
     const raison = seulementLivre
-      ? `Livré le ${heureLisible(preuve.ms)} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé${ou}.`
-      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${heureLisible(preuve.ms)} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}${ou}.`;
+      ? `Livré le ${quandLisible(preuve)} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé${ou}.`
+      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${quandLisible(preuve)} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}${ou}.`;
     return resultat("confirme", raison, { preuve, suite });
   }
 
@@ -198,13 +210,29 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     return resultat("a_verifier", `Problème signalé à la main le ${heureLisible(dernierConstat.ms)}, sans prise en charge visible : à regarder sur la page officielle.`, { enRetard: true });
   }
 
+  // --- un statut que la liste ne connait pas, apres la reception de l'etiquette ---
+  // (une formule nouvelle du transporteur peut etre une vraie prise en charge :
+  // a regarder, jamais « pas encore scanne » ni retire de la liste sans un regard)
+  const nonReconnus = lusTransporteur.filter((e) => e.etape === "unknown" && e.ms != null && !ancien(e) && passe(e));
+  if (nonReconnus.length) {
+    const reperes = lusTransporteur.filter((e) => e.etape !== "unknown" && e.ms != null);
+    const dernierRepere = reperes.length ? Math.max(...reperes.map((e) => e.ms)) : -Infinity;
+    const recent = nonReconnus.reduce((a, b) => (b.ms > a.ms ? b : a));
+    if (recent.ms >= dernierRepere) {
+      return resultat("a_verifier", `Statut transporteur non reconnu depuis la réception de l'étiquette (« ${recent.libelle || recent.code || "?"} ») : à vérifier sur la page officielle.`, {
+        enRetard: retard,
+        nonReconnu: true,
+      });
+    }
+  }
+
   // --- un ancien parcours seulement : ce n'est pas CE depot ---------------------------
   const anciens = physiques.filter(ancien);
   if (anciens.length) {
     const dernierAncien = anciens.reduce((a, b) => (b.ms > a.ms ? b : a));
     return resultat(
       "non_confirme",
-      `Aucune prise en charge depuis la réception de l'étiquette (${heureLisible(recuMs)}) : le suivi ne montre qu'un ancien parcours de ce numéro (dernier scan le ${heureLisible(dernierAncien.ms)}, « ${dernierAncien.libelle || ETAPES_FR[dernierAncien.etape]} »).`,
+      `Aucune prise en charge depuis la réception de l'étiquette (${heureLisible(recuMs)}) : le suivi ne montre qu'un ancien parcours de ce numéro (dernier scan le ${quandLisible(dernierAncien)}, « ${dernierAncien.libelle || ETAPES_FR[dernierAncien.etape]} »).`,
       { enRetard: retard, ancienParcours: true }
     );
   }

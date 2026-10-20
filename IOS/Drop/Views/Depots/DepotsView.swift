@@ -612,7 +612,7 @@ private struct DepotRow: View {
                         .font(.footnote)
                         .foregroundStyle(Theme.text)
                         .lineLimit(2)
-                    Text(c.dernierEvenement.map { ServerDate.shortDayTime($0.le) } ?? c.raison)
+                    Text(c.dernierEvenement.map { ServerDate.shortDayTime($0.le, jourSeul: $0.jourSeul) } ?? c.raison)
                         .font(.caption)
                         .foregroundStyle(Theme.text3)
                         .lineLimit(2)

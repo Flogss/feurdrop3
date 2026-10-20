@@ -78,8 +78,11 @@ const INFO = {
 
 // Un evenement secondaire : il raconte la suite (une enquete, une
 // reclamation), il ne prouve rien a lui seul -- et n'efface jamais une preuve
-// deja lue (« Une enquête est en cours » apres « Colis livré »).
-const SECONDAIRES = /enqu[eê]te|r[ée]clamation|investigation|claim/i;
+// deja lue (« Une enquête est en cours » apres « Colis livré »). Releve sur de
+// vrais colis Mondial Relay (octobre 2026) : « Nous avons bien pris en charge
+// de votre demande » (la demande, pas le colis), « Une recherche est en cours
+// concernant votre colis ».
+const SECONDAIRES = /enqu[eê]te|r[ée]clamation|investigation|claim|recherche est en cours|votre demande|nous reviendrons vers vous/i;
 
 // la prise en charge et la suite (pour chaque transporteur), du plus precis
 // au plus general ; « suite » = apres la prise en charge (retour, souci)
@@ -90,8 +93,12 @@ const ETAPES = {
     { etape: "delivered", re: /colis (livr[ée]|remis) (au|à au|a au) destinataire|colis r[ée]cup[ée]r[ée] par le destinataire|colis livr[ée](?![a-zà-ÿ])/i },
     { etape: "available_for_pickup", re: /colis (est )?disponible (au|en|dans)|colis (est )?(mis|d[ée]pos[ée])e? [àa] (la )?disposition/i },
     { etape: "out_for_delivery", re: /en cours de livraison/i },
-    // « Colis expédié depuis site logistique », « Colis pris en charge au PR »
-    { etape: "in_transit", re: /colis pris en charge|^pris en charge (en|au|par|dans)|colis d[ée]pos[ée] (en|au|dans)|colis remis [àa] mondial relay|colis (en cours d.acheminement|en cours de traitement|achemin[ée])|colis arriv[ée] (sur|au|à|a l|en|dans)|colis (exp[ée]di[ée]|collect[ée]|tri[ée])|colis en cours de tri/i },
+    // « 5 jours restants pour retirer le colis en Locker »
+    { etape: "available_for_pickup", re: /restante?s? pour (le )?retirer/i },
+    // « Colis expédié depuis site logistique », « Colis pris en charge au PR »,
+    // « Prise en charge de votre colis sur notre site logistique de Wissous. »,
+    // « Colis en route vers le point de livraison »
+    { etape: "in_transit", re: /colis pris en charge|^pris en charge (en|au|par|dans)|prise en charge (de votre|du) colis|colis d[ée]pos[ée] (en|au|dans)|colis remis [àa] mondial relay|colis (en cours d.acheminement|en cours de traitement|achemin[ée])|colis arriv[ée] (sur|au|à|a l|en|dans)|colis (exp[ée]di[ée]|collect[ée]|tri[ée])|colis en cours de tri|colis en route/i },
     { etape: "exception", re: /retour|renvoy[ée]|non (livr[ée]|distribu)|refus[ée]|incident|probl[eè]me/i, suite: true },
   ],
   DHL: [
@@ -133,10 +140,10 @@ ETAPES.LP = [
 function litLibelle(libelle, code = "MR") {
   const l = String(libelle || "");
   if ((INFO[code] || []).some((re) => re.test(l))) return { etape: "info_received", physique: false };
-  // au futur ou a la negation : ce n'est pas arrive
-  if (PAS_ENCORE.test(l)) return { etape: "unknown", physique: false };
   // une enquete, une reclamation : la suite, jamais une preuve
   if (SECONDAIRES.test(l)) return { etape: "exception", physique: false, suite: true };
+  // au futur ou a la negation : ce n'est pas arrive
+  if (PAS_ENCORE.test(l)) return { etape: "unknown", physique: false };
   for (const { etape, re, suite } of ETAPES[code] || []) {
     if (re.test(l)) return { etape, physique: true, suite: suite || undefined };
   }
@@ -304,19 +311,20 @@ const chiffres = (t) => String(t || "").replace(/\D/g, "");
 const LECTEURS = {
   MR: {
     introuvable: /aucun colis portant ce num[ée]ro|n.avons identifi[ée] aucun colis/i,
-    // la page affiche le numero (souvent ses 8 derniers chiffres) sous
-    // « NUMÉRO DE COLIS », ou sur la meme ligne ; a defaut, une ligne faite du
-    // numero seul. Jamais le numero du formulaire de recherche (« composé de
-    // 8 chiffres ») : il faut 8 chiffres au moins.
+    // la page affiche le numero (ses 7 ou 8 derniers chiffres : « 9185908 »
+    // pour 2109185908, vu sur un vrai colis) sous « NUMÉRO DE COLIS », ou sur
+    // la meme ligne ; a defaut, une ligne faite du numero seul. Jamais le
+    // numero du formulaire de recherche (« composé de 8 chiffres ») : il faut
+    // 6 chiffres au moins.
     numeroAffiche: (lignes, numero) => {
       for (let i = 0; i < lignes.length; i++) {
         if (!/num[ée]ro (de |d.)?(colis|suivi|exp[ée]dition)|n° (de )?colis/i.test(lignes[i])) continue;
         const ici = chiffres(lignes[i]);
-        const d = ici.length >= 8 ? ici : chiffres(lignes[i + 1] || "");
-        if (d.length >= 8 && d.length <= 16) return d;
+        const d = ici.length >= 6 ? ici : chiffres(lignes[i + 1] || "");
+        if (d.length >= 6 && d.length <= 16) return d;
       }
       const n = chiffres(numero);
-      const seul = n && lignes.find((l) => /^[\d\s]{8,16}$/.test(l) && (n.endsWith(chiffres(l)) || chiffres(l).endsWith(n)));
+      const seul = n && lignes.find((l) => /^[\d\s]{6,16}$/.test(l) && (n.endsWith(chiffres(l)) || chiffres(l).endsWith(n)));
       return seul ? chiffres(seul) : null;
     },
     concerne: (affiche, numero) => Boolean(affiche) && (chiffres(numero).includes(affiche) || affiche.includes(chiffres(numero))),
