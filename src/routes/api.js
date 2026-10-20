@@ -5,6 +5,7 @@ const {
   transaction,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
+  DEFAULT_KG_PRICE,
   updateSenderPrices,
   setColisType,
   quickAddColis,
@@ -562,20 +563,23 @@ router.post("/senders", (req, res) => {
   const price = Number(req.body.price);
   const litPrice = req.body.litPrice === undefined ? DEFAULT_LIT_PRICE : Number(req.body.litPrice);
   const bjPrice = req.body.bjPrice === undefined ? price : Number(req.body.bjPrice);
+  const kgPrice = req.body.kgPrice === undefined ? DEFAULT_KG_PRICE : Number(req.body.kgPrice);
   if (
     !name ||
     Number.isNaN(price) || price < 0 ||
     Number.isNaN(litPrice) || litPrice < 0 ||
-    Number.isNaN(bjPrice) || bjPrice < 0
+    Number.isNaN(bjPrice) || bjPrice < 0 ||
+    Number.isNaN(kgPrice) || kgPrice < 0
   ) {
     return res.status(400).json({ error: "Nom ou prix invalide" });
   }
   try {
-    db.prepare("INSERT INTO senders (name, price, lit_price, bj_price) VALUES (?, ?, ?, ?)").run(
+    db.prepare("INSERT INTO senders (name, price, lit_price, bj_price, kg_price) VALUES (?, ?, ?, ?, ?)").run(
       name,
       arrondiCentimes(price),
       arrondiCentimes(litPrice),
-      arrondiCentimes(bjPrice)
+      arrondiCentimes(bjPrice),
+      arrondiCentimes(kgPrice)
     );
   } catch (err) {
     return res.status(400).json({ error: "Cet expediteur existe deja" });
@@ -600,6 +604,11 @@ router.put("/senders/:id", (req, res) => {
     const bjPrice = Number(req.body.bjPrice);
     if (Number.isNaN(bjPrice) || bjPrice < 0) return res.status(400).json({ error: "Prix BJ invalide" });
     patch.bjPrice = bjPrice;
+  }
+  if (req.body.kgPrice !== undefined) {
+    const kgPrice = Number(req.body.kgPrice);
+    if (Number.isNaN(kgPrice) || kgPrice < 0) return res.status(400).json({ error: "Prix du kilo invalide" });
+    patch.kgPrice = kgPrice;
   }
   const sender = updateSenderPrices(req.params.id, patch);
   if (!sender) return res.status(404).json({ error: "Expediteur introuvable" });

@@ -225,7 +225,7 @@ document.addEventListener("change", async (e) => {
   const senderId = input.dataset.senderId;
   if (!senderId) return;
 
-  const allowedFields = ["price", "litPrice", "bjPrice"];
+  const allowedFields = ["price", "litPrice", "bjPrice", "kgPrice"];
   const field = allowedFields.includes(input.dataset.field) ? input.dataset.field : "price";
   const valeur = Number(String(input.value).replace(",", "."));
   if (input.value === "" || !Number.isFinite(valeur) || valeur < 0) {

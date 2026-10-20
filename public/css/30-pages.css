@@ -311,6 +311,7 @@
 .dot-normal { background: rgb(var(--violet-400)); box-shadow: 0 0 8px rgb(var(--accent-rgb)); }
 .dot-lit { background: rgb(var(--c-lit)); }
 .dot-bj { background: rgb(var(--c-bj)); }
+.dot-kg { background: rgb(var(--violet-300)); }
 
 /* Ligne "prix par expediteur" : le nom sur sa propre ligne, puis les trois
    tarifs etiquetes en dessous (sinon le nom devenait illisible). */
@@ -327,7 +328,11 @@
 .sender-price-head { display: flex; align-items: center; gap: 12px; }
 .sender-price-head .lrow-title { flex: 1; min-width: 0; }
 .sender-price-head .btn-icon { color: var(--text-3); }
-.sender-price-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.sender-price-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+/* quatre tarifs sur un telephone etroit : deux par ligne */
+@media (max-width: 420px) {
+  .sender-price-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .price-field { position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .price-tag { display: inline-flex; align-items: center; gap: 6px; font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
 .price-field .field { height: 42px; padding: 0 30px 0 12px; font-variant-numeric: tabular-nums; }

@@ -475,6 +475,21 @@ const MIGRATIONS = [
       db.prepare("UPDATE settings SET value = ? WHERE key = 'controle_lecture_coupee'").run(reste.join(","));
     },
   },
+  {
+    version: 10,
+    nom: "poids des colis paye au kilo (prix du kilo par expediteur)",
+    applique(db) {
+      // deux colonnes ajoutees, rien n'est modifie : un colis sans poids garde
+      // son prix, chaque expediteur part a 1 €/kg (DEFAULT_KG_PRICE)
+      const colis = db.prepare("PRAGMA table_info(colis)").all().map((c) => c.name);
+      if (!colis.includes("poids_g")) db.exec("ALTER TABLE colis ADD COLUMN poids_g INTEGER");
+      const senders = db.prepare("PRAGMA table_info(senders)").all().map((c) => c.name);
+      if (!senders.includes("kg_price")) {
+        const parDefaut = Number(process.env.DEFAULT_KG_PRICE || 1);
+        db.exec(`ALTER TABLE senders ADD COLUMN kg_price REAL NOT NULL DEFAULT ${Number.isFinite(parDefaut) && parDefaut >= 0 ? parDefaut : 1}`);
+      }
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

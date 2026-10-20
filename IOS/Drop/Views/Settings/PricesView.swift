@@ -1,7 +1,8 @@
 import SwiftUI
 import DropKit
 
-/// Les tarifs de chaque expediteur (normal, LIT, BJ). Une valeur s'enregistre
+/// Les tarifs de chaque expediteur (normal, LIT, BJ, et le kilo paye en plus
+/// pour un colis qui a un poids). Une valeur s'enregistre
 /// en quittant le champ ; balayer une ligne supprime l'expediteur.
 struct PricesView: View {
     @Environment(AppModel.self) private var app
@@ -65,10 +66,13 @@ private struct PriceRow: View {
                 SenderAvatar(name: sender.name, size: 30)
                 Text(sender.name).font(.body.weight(.medium)).lineLimit(1)
             }
-            HStack(spacing: 8) {
+            // quatre tarifs : sur une ligne quand la place le permet (Mac),
+            // deux par ligne sur un iPhone
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
                 PriceInput(sender: sender, field: .price, color: Theme.violet)
                 PriceInput(sender: sender, field: .litPrice, color: .carrier("LIT"))
                 PriceInput(sender: sender, field: .bjPrice, color: .carrier("BJ"))
+                PriceInput(sender: sender, field: .kgPrice, color: Theme.violetLight)
             }
         }
         .padding(.vertical, 4)
@@ -99,7 +103,7 @@ private struct PriceInput: View {
                     .clavier(.decimal)
                     .focused($focus)
                     .font(.subheadline.weight(.semibold).monospacedDigit())
-                Text("€").font(.caption).foregroundStyle(Theme.text3)
+                Text(field.unite).font(.caption).foregroundStyle(Theme.text3).lineLimit(1).fixedSize()
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

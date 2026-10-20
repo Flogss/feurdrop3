@@ -53,6 +53,7 @@ async function loadSenders() {
           ${champPrix(s, "price", "price", "Normal", "normal")}
           ${champPrix(s, "lit_price", "litPrice", "LIT", "lit")}
           ${champPrix(s, "bj_price", "bjPrice", "BJ", "bj")}
+          ${champPrix(s, "kg_price", "kgPrice", "€/kg", "kg")}
         </div>
       </div>`,
   });

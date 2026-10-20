@@ -3,8 +3,8 @@
 const { db, transaction } = require("./connexion");
 const { journalise, journaliseRecu, colisJournal, euroTexte, plurielJournal, TYPES_JOURNAL } = require("./journal");
 const { getOrCreateSender } = require("./expediteurs");
-const { priceForType, arrondiCentimes } = require("./montants");
-const { VIVANT_SQL, PAR_MESSAGE_SQL } = require("./sql");
+const { prixColis, arrondiCentimes } = require("./montants");
+const { VIVANT_SQL, PAR_MESSAGE_SQL, FREE_STATUS } = require("./sql");
 const { carrierLabel } = require("../carrier");
 
 function getPendingSummary() {
@@ -34,15 +34,17 @@ function addColis(
     sourceChatId = null,
     sourceMessageId = null,
     journal = true,
+    poidsG = null,
   } = {}
 ) {
   const sender = getOrCreateSender(senderName);
-  const price = priceForType(sender, type);
+  const poids = Number.isInteger(poidsG) && poidsG > 0 ? poidsG : null;
+  const price = prixColis(sender, type, poids);
   const info = db
     .prepare(
       `INSERT INTO colis (sender_name, type, price, status, chat_id, message_id, batch_id, carrier,
-                          file_name, caption, file_id, file_kind, source_chat_id, source_message_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                          file_name, caption, file_id, file_kind, source_chat_id, source_message_id, poids_g)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       sender.name,
@@ -58,7 +60,8 @@ function addColis(
       fileId || null,
       fileKind || null,
       sourceChatId,
-      sourceMessageId
+      sourceMessageId,
+      poids
     );
   const colis = {
     id: info.lastInsertRowid,
@@ -141,7 +144,7 @@ function setColisType(id, type) {
   const colis = db.prepare(`SELECT * FROM colis WHERE id = ? AND ${VIVANT_SQL}`).get(id);
   if (!colis) return null;
 
-  const price = priceForType(getOrCreateSender(colis.sender_name), type);
+  const price = prixColis(getOrCreateSender(colis.sender_name), type, colis.poids_g);
   const status = "pending";
 
   // changer de type reapplique le tarif de l'expediteur, meme si un prix avait
@@ -251,6 +254,26 @@ function colisDecoupesRecents(chatId) {
     .filter((c) => /^[A-Z0-9]{8,30}\.pdf$/.test(c.file_name || ""));
 }
 
+// Le poids d'un colis (en grammes ; null l'efface). Son prix suit -- sauf un
+// prix fixe a la main (/prix) ou un colis deja paye.
+function setColisPoids(id, poidsG) {
+  const colis = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+  if (!colis) return null;
+  const poids = Number.isInteger(poidsG) && poidsG > 0 ? poidsG : null;
+  const recalcule = !colis.price_locked && !colis.paid && colis.status !== FREE_STATUS;
+  const price = recalcule ? prixColis(getOrCreateSender(colis.sender_name), colis.type, poids) : colis.price;
+  db.prepare("UPDATE colis SET poids_g = ?, price = ? WHERE id = ?").run(poids, price, id);
+  if ((colis.poids_g || null) !== poids) {
+    journalise("modif", poids ? `Poids ${poidsTexte(poids)}` : "Poids effacé", { detail: colisJournal(colis), valeur: price, nombre: 1 });
+  }
+  return db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
+}
+
+// « 5 kg », « 1,5 kg », « 750 g »
+function poidsTexte(g) {
+  return g >= 1000 ? `${String(Math.round(g / 10) / 100).replace(".", ",")} kg` : `${g} g`;
+}
+
 function setColisNote(id, note) {
   const propre = (note || "").trim() || null;
   const info = db.prepare("UPDATE colis SET note = ? WHERE id = ?").run(propre, id);
@@ -341,7 +364,7 @@ function setBatchType(batchId, type) {
   const update = db.prepare("UPDATE colis SET type = ?, price = ?, price_locked = 0 WHERE id = ?");
   let count = 0;
   for (const c of rows) {
-    const price = priceForType(getOrCreateSender(c.sender_name), type);
+    const price = prixColis(getOrCreateSender(c.sender_name), type, c.poids_g);
     update.run(type, price, c.id);
     count += 1;
   }
@@ -350,6 +373,8 @@ function setBatchType(batchId, type) {
 }
 
 module.exports = {
+  setColisPoids,
+  poidsTexte,
   colisAvecNumero,
   colisDecoupesRecents,
   getPendingSummary,

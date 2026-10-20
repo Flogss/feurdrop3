@@ -27,6 +27,7 @@ const {
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
   DEFAULT_BJ_PRICE,
+  DEFAULT_KG_PRICE,
   arrondiCentimes,
 } = require("./montants");
 const {
@@ -86,6 +87,8 @@ const {
   setColisNote,
   colisAvecNumero,
   colisDecoupesRecents,
+  setColisPoids,
+  poidsTexte,
   setBatchNote,
   quickAddColis,
   quickRemoveColis,
@@ -172,6 +175,7 @@ module.exports = {
   cheminBase,
   DEFAULT_PRICE,
   DEFAULT_LIT_PRICE,
+  DEFAULT_KG_PRICE,
   DEFAULT_BJ_PRICE,
   arrondiCentimes,
   journalise,
@@ -222,6 +226,8 @@ module.exports = {
   setColisNote,
   colisAvecNumero,
   colisDecoupesRecents,
+  setColisPoids,
+  poidsTexte,
   setBatchNote,
   quickAddColis,
   quickRemoveColis,

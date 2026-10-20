@@ -21,7 +21,7 @@ function baseTemporaire() {
 
 test("base neuve : toutes les migrations, puis plus rien a faire", () => {
   const db = baseTemporaire();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(versionDe(db), VERSION_SCHEMA);
   for (const c of ["type", "file_id", "printed_at", "note", "source_message_id", "price_locked"]) {
     assert.ok(colonnes(db, "colis").includes(c), c);
@@ -141,6 +141,19 @@ test("v9 : la lecture automatique de Mondial Relay est rallumee, les autres inte
   const db = baseTemporaire();
   appliqueMigrations(db, { journal: silencieux, jusqua: 8 });
   db.prepare("INSERT INTO settings (key, value) VALUES ('controle_lecture_coupee', 'MR,DHL')").run();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [9]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux, jusqua: 9 }), [9]);
   assert.equal(db.prepare("SELECT value FROM settings WHERE key = 'controle_lecture_coupee'").get().value, "DHL");
+});
+
+test("v10 : poids et prix du kilo ajoutes, rien de ce qui existe ne change", () => {
+  const db = baseTemporaire();
+  appliqueMigrations(db, { journal: silencieux, jusqua: 9 });
+  db.prepare("INSERT INTO senders (name, price, lit_price, bj_price) VALUES ('Alice', 4.5, 6, 4.5)").run();
+  db.prepare("INSERT INTO colis (sender_name, type, price, status) VALUES ('Alice', 'normal', 4.5, 'pending')").run();
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [10]);
+  const colis = db.prepare("SELECT * FROM colis").get();
+  assert.equal(colis.price, 4.5);
+  assert.equal(colis.poids_g, null);
+  const alice = db.prepare("SELECT * FROM senders").get();
+  assert.deepEqual([alice.price, alice.lit_price, alice.bj_price, alice.kg_price], [4.5, 6, 4.5, 1]);
 });

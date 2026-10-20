@@ -1,12 +1,14 @@
 import Foundation
 
-/// `GET /api/senders` : un expediteur et ses trois tarifs.
+/// `GET /api/senders` : un expediteur, ses trois tarifs et le prix du kilo.
 public struct Sender: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var id: Int
     public var name: String
     public var price: Double
     public var litPrice: Double
     public var bjPrice: Double
+    /// le kilo paye en plus (absent d'un serveur plus ancien : 1 €)
+    public var kgPrice: Double?
     public var createdAt: String?
     /// son espace prive (absent d'un serveur plus ancien)
     public var portail: PortailExpediteur?
@@ -26,23 +28,28 @@ public struct PortailExpediteur: Codable, Sendable, Equatable, Hashable {
     }
 }
 
-/// Les trois tarifs, tels que `PUT /api/senders/:id` les attend.
+/// Les tarifs, tels que `PUT /api/senders/:id` les attend.
 public enum PriceField: String, Sendable, CaseIterable, Identifiable {
-    case price, litPrice, bjPrice
+    case price, litPrice, bjPrice, kgPrice
     public var id: String { rawValue }
     public var label: String {
         switch self {
         case .price: "Normal"
         case .litPrice: "LIT"
         case .bjPrice: "BJ"
+        case .kgPrice: "Le kilo"
         }
     }
+
+    /// l'unite affichee apres le montant
+    public var unite: String { self == .kgPrice ? "€/kg" : "€" }
 
     public func value(in sender: Sender) -> Double {
         switch self {
         case .price: sender.price
         case .litPrice: sender.litPrice
         case .bjPrice: sender.bjPrice
+        case .kgPrice: sender.kgPrice ?? 1
         }
     }
 }

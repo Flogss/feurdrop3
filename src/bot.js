@@ -31,6 +31,8 @@ const {
   setColisNote,
   colisAvecNumero,
   colisDecoupesRecents,
+  setColisPoids,
+  poidsTexte,
   setBatchNote,
   getPendingSummary,
   getStatsMessageId,
@@ -109,6 +111,7 @@ const {
 } = require("./bot/impression");
 const { handleFusion, ajouteAFusion, handleStopFusion } = require("./bot/fusion");
 const { handleSave } = require("./bot/sauvegarde");
+const { lisPoids } = require("./poids");
 const {
   lisListeDrops,
   lisAnnoncePdf,
@@ -295,7 +298,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/poids 5 en reponse a un colis : 5 kg, payes en plus au prix du kilo de l'expediteur (/poids seul efface). Un poids ecrit dans la description (\"📦 mondial relay 5kg\") est compte tout seul\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
         {},
         30000
       );
@@ -318,6 +321,13 @@ function startBot() {
   bot.onText(
     /^\/note(@\w+)?(?:\s+([\s\S]+))?$/i,
     command((msg, match) => handleNote(bot, msg, match[2]))
+  );
+
+  // /poids 5    (en reponse a un colis : 5 kg, paye au kilo ; /poids 750g)
+  // /poids      efface le poids
+  bot.onText(
+    /^\/poids(@\w+)?(?:\s+([\s\S]+))?$/i,
+    command((msg, match) => handlePoids(bot, msg, match[2]))
   );
 
   // /transporteur MR  (en reponse a un colis, sinon applique au dernier lot)
@@ -446,6 +456,7 @@ async function registerCommands(bot) {
     { command: "unlitall", description: "Repasser tout le dernier lot en normal" },
     { command: "prix", description: "Forcer le montant, ex: /prix 7.5" },
     { command: "note", description: "Annoter le colis : il sort en premier (en reponse)" },
+    { command: "poids", description: "Poids du colis, paye au kilo, ex: /poids 5 (en reponse)" },
     { command: "transporteur", description: "Choisir le transporteur (en reponse au colis)" },
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "fusion", description: "Mode fusion : les fichiers envoyes ne comptent pas" },
@@ -950,6 +961,8 @@ async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
     // le fichier d'origine en prive : y repondre /lit ou /normal doit marcher
     sourceChatId: direct ? null : msg.chat.id,
     sourceMessageId: direct ? null : msg.message_id,
+    // « 📦 mondial relay 5kg » : le poids se paie au kilo (prix de l'expediteur)
+    poidsG: lisPoids(msg.caption),
   });
   // aussitot lie a son inscription : une reprise ne le recreera pas
   if (arrivee) arriveeLiee(arrivee.id, { colisId: colis.id });
@@ -1011,6 +1024,8 @@ function appliquePoids(bot, poids, chatId) {
       enAttente[numero] = grammes;
       continue;
     }
+    // le poids se paie : pose s'il manque (un poids donne a la main reste)
+    if (!colis.poids_g) setColisPoids(colis.id, grammes);
     if (colis.note) continue;
     const maj = setColisNote(colis.id, notePoids(grammes));
     if (maj) {
@@ -1132,6 +1147,7 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
       caption: null,
       fileId,
       fileKind: "pdf",
+      poidsG: poids[numero] || null,
     });
     if (poids[numero]) {
       colis = setColisNote(colis.id, notePoids(poids[numero])) || colis;
@@ -1775,6 +1791,32 @@ async function handleBatchType(bot, msg, type) {
 // site : la note n'est pas un pense-bete mort, elle change l'ordre du travail.
 // Contrairement a /prix, elle s'applique aussi a un colis deja drope ou deja
 // imprime -- "le client rappelle" reste vrai apres coup.
+// Le poids d'un colis, en reponse a son fichier : il se paie au kilo, au
+// prix de l'expediteur (Reglages du dashboard). Un nombre seul est en kg.
+function handlePoids(bot, msg, texte) {
+  const reply = msg.reply_to_message;
+  const colis = reply ? findAnyColisByMessage(msg.chat.id, reply.message_id) : null;
+  if (!colis) {
+    replyEphemeral(bot, msg, "Reponds au message du fichier : /poids 5 (kg) ou /poids 750g.");
+    return;
+  }
+  const brut = (texte || "").trim();
+  const efface = !brut || /^0+([.,]0+)?\s*(kg|g)?$/i.test(brut);
+  const grammes = efface ? null : lisPoids(brut, { nombreSeulEnKg: true });
+  if (!efface && !grammes) {
+    replyEphemeral(bot, msg, `Poids illisible : « ${brut} ». Exemple : /poids 5 ou /poids 750g.`);
+    return;
+  }
+  const maj = setColisPoids(colis.id, grammes);
+  replyEphemeral(
+    bot,
+    msg,
+    grammes
+      ? `⚖️ Colis #${maj.id} (${maj.sender_name}) : ${poidsTexte(grammes)} · ${maj.price.toFixed(2)} EUR${maj.price_locked ? " (prix fixe a la main, inchange)" : ""}`
+      : `Poids efface sur le colis #${maj.id} · ${maj.price.toFixed(2)} EUR`
+  );
+}
+
 function handleNote(bot, msg, texte) {
   const note = (texte || "").trim();
 

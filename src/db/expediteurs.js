@@ -16,31 +16,39 @@ function getOrCreateSender(name) {
   return db.prepare("SELECT * FROM senders WHERE name = ?").get(clean);
 }
 
-function updateSenderPrices(id, { price, litPrice, bjPrice }) {
+function updateSenderPrices(id, { price, litPrice, bjPrice, kgPrice }) {
   const current = db.prepare("SELECT * FROM senders WHERE id = ?").get(id);
   if (!current) return null;
 
   const nextPrice = price === undefined ? current.price : arrondiCentimes(price);
   const nextLitPrice = litPrice === undefined ? current.lit_price : arrondiCentimes(litPrice);
   const nextBjPrice = bjPrice === undefined ? current.bj_price : arrondiCentimes(bjPrice);
-  db.prepare("UPDATE senders SET price = ?, lit_price = ?, bj_price = ? WHERE id = ?").run(
+  const nextKgPrice = kgPrice === undefined ? current.kg_price : arrondiCentimes(kgPrice);
+  db.prepare("UPDATE senders SET price = ?, lit_price = ?, bj_price = ?, kg_price = ? WHERE id = ?").run(
     nextPrice,
     nextLitPrice,
     nextBjPrice,
+    nextKgPrice,
     id
   );
 
-  // chaque type suit son propre tarif ; les prix fixes manuellement via /prix
-  // ne sont pas ecrases
+  // chaque type suit son propre tarif, plus son poids au prix du kilo ; les
+  // prix fixes manuellement via /prix ne sont pas ecrases
   const applyTo = db.prepare(
-    "UPDATE colis SET price = ? WHERE status = 'pending' AND price_locked = 0 AND type = ? AND sender_name = ?"
+    `UPDATE colis SET price = round(? + COALESCE(poids_g, 0) / 1000.0 * ?, 2)
+     WHERE status = 'pending' AND price_locked = 0 AND type = ? AND sender_name = ?`
   );
-  applyTo.run(nextPrice, "normal", current.name);
-  applyTo.run(nextLitPrice, "lit", current.name);
-  applyTo.run(nextBjPrice, "bj", current.name);
-  if (nextPrice !== current.price || nextLitPrice !== current.lit_price || nextBjPrice !== current.bj_price) {
+  applyTo.run(nextPrice, nextKgPrice, "normal", current.name);
+  applyTo.run(nextLitPrice, nextKgPrice, "lit", current.name);
+  applyTo.run(nextBjPrice, nextKgPrice, "bj", current.name);
+  if (
+    nextPrice !== current.price ||
+    nextLitPrice !== current.lit_price ||
+    nextBjPrice !== current.bj_price ||
+    nextKgPrice !== current.kg_price
+  ) {
     journalise("expediteur", `Tarifs de ${current.name}`, {
-      detail: `${euroTexte(nextPrice)} · LIT ${euroTexte(nextLitPrice)} · BJ ${euroTexte(nextBjPrice)}`,
+      detail: `${euroTexte(nextPrice)} · LIT ${euroTexte(nextLitPrice)} · BJ ${euroTexte(nextBjPrice)} · ${euroTexte(nextKgPrice)}/kg`,
     });
   }
 

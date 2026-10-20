@@ -153,6 +153,9 @@ test("la liste puis le PDF de 4 pages : 4 etiquettes, chacune sous son numero, s
   assert.deepEqual(colis.map((c) => c.file_name), ["8R50345899012.pdf", "8R49597374149.pdf", "8R49597373395.pdf", "8571271394.pdf"]);
   assert.deepEqual(colis.map((c) => c.carrier), ["LP", "LP", "LP", "MR"]);
   assert.deepEqual(colis.map((c) => c.note), ["1kg", null, null, null]);
+  // le poids se paie : 4 € + 1 kg × 1 €
+  assert.deepEqual(colis.map((c) => c.poids_g), [1000, null, null, null]);
+  assert.deepEqual(colis.map((c) => c.price), [5, 4, 4, 4]);
   assert.ok(colis.every((c) => c.type === "normal" && c.file_id && c.chat_id === GROUPE));
   // les boutons (Imprimé, Clean, Del) sous CHAQUE etiquette, pas seulement
   // sous celle qui porte la note
@@ -227,4 +230,29 @@ test("sans liste, un PDF suit le chemin habituel (un colis, copie a l'identique)
   faux.livre(pdf("PDF1", "etiquettes.pdf"));
   assert.ok(await faux.attends(() => colisTous().length === 1, 8000));
   assert.equal(colisTous()[0].file_id, "PDF1");
+});
+
+test("un poids dans la description se paie, /poids le corrige", async () => {
+  faux.fichier("PDFP", await pdfDe(1));
+  const envoi = pdf("PDFP", "colis.pdf", "📦 mondial relay\n5kg");
+  faux.livre(envoi);
+  assert.ok(await faux.attends(() => colisTous().length === 1, 8000));
+  const c = colisTous()[0];
+  assert.equal(c.poids_g, 5000);
+  assert.equal(c.price, 9, "4 € + 5 kg × 1 €");
+
+  // /poids 2 en reponse au fichier
+  faux.livre({
+    message: {
+      message_id: numero++,
+      from: { id: ADMIN, first_name: "Flo" },
+      chat: { id: ADMIN, type: "private" },
+      date: maintenant(),
+      text: "/poids 2",
+      reply_to_message: { message_id: envoi.message.message_id, chat: { id: ADMIN, type: "private" }, date: maintenant() },
+    },
+  });
+  assert.ok(await faux.attends(() => colisTous()[0].poids_g === 2000));
+  assert.equal(colisTous()[0].price, 6);
+  assert.ok(await faux.attends(() => reponses(/2 kg · 6\.00 EUR/).length === 1));
 });
