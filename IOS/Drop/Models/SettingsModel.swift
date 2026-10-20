@@ -106,7 +106,7 @@ final class SettingsModel {
 
     func markPaid(_ dette: Debt) async {
         let ok = await act("paye:" + dette.senderName) {
-            _ = try await app.api.markPaid(sender: dette.senderName)
+            _ = try await app.api.markPaid(sender: dette.senderName, owed: dette.owed)
         } succes: {
             "Paiement de \(dette.senderName) enregistré"
         }
@@ -200,7 +200,12 @@ final class SettingsModel {
         guard !busy.contains(cle) else { return false }
         busy.insert(cle)
         defer { busy.remove(cle) }
-        guard await app.perform({ try await action() }) != nil else { return false }
+        // un refus (montant change, conflit) se relit aussi : l'ecran montre
+        // alors la valeur a jour au lieu de l'ancienne
+        guard await app.perform({ try await action() }) != nil else {
+            await refresh()
+            return false
+        }
         app.toasts.show(succes())
         await refresh()
         return true

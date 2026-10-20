@@ -339,8 +339,11 @@ public struct DropAPI: Sendable {
         try await client.send(.get, "/api/debts")
     }
 
-    public func markPaid(sender: String) async throws -> PayResult {
-        try await client.send(.post, "/api/debts/\(segment(sender))/pay")
+    /// `owed` : le montant affiche (et confirme). Si un autre colis a ete drope
+    /// entre-temps, le serveur refuse (409) au lieu de marquer plus que prevu.
+    public func markPaid(sender: String, owed: Double? = nil) async throws -> PayResult {
+        struct Corps: Encodable, Sendable { let owed: Double? }
+        return try await client.send(.post, "/api/debts/\(segment(sender))/pay", body: Corps(owed: owed))
     }
 
     public func mergeCandidates() async throws -> [MergeCandidate] {

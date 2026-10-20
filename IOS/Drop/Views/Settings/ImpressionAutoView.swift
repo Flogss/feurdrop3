@@ -38,7 +38,7 @@ struct ImpressionAutoView: View {
             }
         }
         .refreshable { await model.chargeImpression() }
-        .confirmationDialog("Activer l'impression auto ?", isPresented: $confirmeAuto, titleVisibility: .visible) {
+        .alert("Activer l'impression auto ?", isPresented: $confirmeAuto) {
             Button("Activer") { Task { await model.setAutoPrint(true) } }
             Button("Annuler", role: .cancel) {}
         } message: {

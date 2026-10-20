@@ -46,29 +46,28 @@ struct SettingsView: View {
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: model.celebration)
         .onAppear { adresse = app.serverURL.absoluteString }
-        .confirmationDialog("Déconnecter tous les appareils ?", isPresented: $confirmeToutDeconnecter, titleVisibility: .visible) {
+        .alert("Déconnecter tous les appareils ?", isPresented: $confirmeToutDeconnecter) {
             Button("Tout déconnecter", role: .destructive) { Task { await app.seDeconnecte(partout: true) } }
             Button("Annuler", role: .cancel) {}
         } message: {
             Text("Toutes les sessions ouvertes (téléphones, ordinateurs, navigateurs) sont fermées tout de suite, celle-ci comprise. Le mot de passe sera redemandé partout.")
         }
-        .confirmationDialog("Activer l'impression auto ?", isPresented: $confirmeAuto, titleVisibility: .visible) {
+        .alert("Activer l'impression auto ?", isPresented: $confirmeAuto) {
             Button("Activer") { Task { await model.setAutoPrint(true) } }
             Button("Annuler", role: .cancel) {}
         } message: {
             Text("Les étiquettes déjà en attente restent à imprimer à la main : seules les prochaines partent toutes seules.")
         }
-        .confirmationDialog(
+        .alert(
             "\(dettePayee?.senderName ?? "") a payé ?",
-            isPresented: Binding(get: { dettePayee != nil }, set: { if !$0 { dettePayee = nil } }),
-            titleVisibility: .visible, presenting: dettePayee
+            isPresented: Binding(get: { dettePayee != nil }, set: { if !$0 { dettePayee = nil } }), presenting: dettePayee
         ) { dette in
             Button("Marquer payé") { Task { await model.markPaid(dette) } }
             Button("Annuler", role: .cancel) {}
         } message: { dette in
             Text("\(Format.euro(dette.owed)) seront marqués comme payés.")
         }
-        .confirmationDialog(titreFusion, isPresented: $confirmeFusion, titleVisibility: .visible) {
+        .alert(titreFusion, isPresented: $confirmeFusion) {
             Button("Fusionner", role: .destructive) {
                 guard let s = expediteur(source), let c = expediteur(cible) else { return }
                 Task { await model.merge(source: s, into: c) }

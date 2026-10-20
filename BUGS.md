@@ -35,6 +35,13 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 | N02 | — | Site | Lancement | Logo du lancement resté au milieu de l'écran | non reproduit : artefact du panneau masqué (aucune image dessinée), le logo se pose normalement (vérifié à 9 s) |
 
 | B15 | Mineure | iOS | Contrôle des dépôts | Sous-titre des compteurs coupé (« inconnu, illisible ou en é… ») | corrigé, à vérifier |
+| B16 | Moyenne | Serveur, site | Stock | « 1.5 » accepté : le stock pouvait contenir 1,5 pochette | vérifié (test) |
+| B17 | Critique | iOS | Tournée (et toutes les confirmations) | La confirmation « Tout est posté ? » s'ouvre en bulle au-dessus de la barre d'onglets : un appui sur « Oui, tout est dropé » termine la tournée ET change d'onglet ; une fois, l'appui n'a atteint que la barre d'onglets (tournée non terminée) | vérifié (simulateur iPhone 15 Pro) |
+| B18 | Moyenne | Serveur, site, iOS | Dettes « Payé » | Un colis drope entre l'affichage et l'appui sur « Payé » était marqué payé aussi : plus que le montant confirmé | vérifié (test) |
+| B19 | Mineure | Serveur | Impression (app) | Confirmation d'impression renvoyée après un redémarrage : seconde fournée identique dans le menu de réimpression | vérifié (test) |
+| B20 | Mineure | iOS, Mac | Dashboard | La bulle « +N € » des cartes « Aujourd'hui » / « Gagné au total » couvrait leur titre | vérifié (simulateur) |
+| B21 | Mineure | iOS | Dashboard en tournée | « Annuler » : texte violet sur pastille violette sur carte violette, peu lisible | à corriger |
+| N03 | — | iOS (simulateur) | Onglets, boutons | Des appuis semblaient ignorés | non reproduit : l'outil du simulateur applique les appuis avec retard (captures faites trop tôt) ; à confirmer sur l'iPhone |
 
 ## Détail
 
@@ -86,3 +93,12 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 - **B09** : `test/blocages.test.js` — modules du serveur rechargés (redémarrage simulé), même clé renvoyée : réponse rejouée, 2 colis ajoutés et pas 4. Le test échoue sur l'ancien code.
 - **B10–B13** : captures Mac (premier plan) et simulateur iPhone 15 Pro.
 - Suite complète : 192 tests serveur, 24 tests Swift, lint OK.
+
+### Résultats des vérifications (lot 2)
+
+- **B16** : `test/operations.test.js` — `delta: 1.5` et `"abc"` → 400 ; `3` → 200.
+- **B17** : reproduit deux fois sur le simulateur (une fois l'appui a changé d'onglet sans terminer la tournée, une fois il a terminé la tournée ET changé d'onglet). Les 15 confirmations de l'app passent en alerte centrée (`.alert`) : le fond et la barre d'onglets sont bloqués. Vérifié : « Oui, tout est dropé » termine la tournée (serveur : plus de tournée, 0 en attente) et l'app reste sur le Dashboard.
+- **B18** : `test/operations.test.js` — l'écran a montré 4 €, un autre colis est dropé, « Payé » avec 4 € → 409 et rien n'est marqué ; avec 8 € → 2 colis marqués ; renvoyé → 0, sans erreur. L'app relit la liste après un refus.
+- **B19** : `test/operations.test.js` — deux confirmations pour une fournée oubliée : une seule fournée.
+- **B20** : captures image par image après un drop : la bulle se pose à cheval sur le coin de la carte, les titres restent lisibles.
+- Opérations groupées ajoutées aux tests (aucun test ne les couvrait) : drop par transporteur, par expéditeur, sauf LIT, boîtes jaunes (stock BJ), drop en tournée limité au sac, modification et retrait d'un colis.

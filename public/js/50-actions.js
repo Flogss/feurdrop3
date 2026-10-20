@@ -114,8 +114,13 @@ document.addEventListener("click", async (e) => {
     return agir(
       cible,
       async () => {
-        await postJSON(`/api/debts/${encodeURIComponent(d.markPaid)}/pay`);
-        await refreshAll();
+        // le montant confirme part avec : s'il a change entre-temps (un autre
+        // colis drope), le serveur refuse au lieu de marquer plus que prevu
+        try {
+          await postJSON(`/api/debts/${encodeURIComponent(d.markPaid)}/pay`, { owed: Number(d.owed) });
+        } finally {
+          await refreshAll().catch(() => {});
+        }
       },
       { succes: `Paiement de ${d.markPaid} enregistré`, eclats: true }
     );

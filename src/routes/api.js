@@ -434,7 +434,8 @@ router.get("/stock", (req, res) => {
 router.post("/stock/adjust", (req, res) => {
   const delta = Number(req.body.delta);
   const kind = req.body.kind === "bj" ? "bj" : "normal";
-  if (Number.isNaN(delta)) return res.status(400).json({ error: "Quantite invalide" });
+  // des pochettes : un nombre entier (« 1.5 » donnait 1,5 pochette en stock)
+  if (!Number.isInteger(delta) || Math.abs(delta) > 100000) return res.status(400).json({ error: "Quantité invalide : un nombre entier de pochettes" });
   const total = adjustStock(delta, kind);
   journalise("stock", `Stock ${kind === "bj" ? "BJ" : "normal"} ${delta > 0 ? "+" : "−"}${Math.abs(delta)}`, {
     detail: `${total} pochette${Math.abs(total) > 1 ? "s" : ""}`,
@@ -447,7 +448,22 @@ router.get("/debts", (req, res) => {
   res.json(getDebtsBySender());
 });
 
+// `owed` : le montant que l'ecran a montre (et que l'on a confirme). Si un
+// autre colis de cet expediteur a ete drope entre-temps, le du a change : on
+// refuse au lieu de marquer paye plus que ce qui a ete confirme. (Sans
+// `owed` -- ancienne app --, tout le du est marque, comme avant.)
 router.post("/debts/:sender/pay", (req, res) => {
+  const attendu = req.body?.owed;
+  if (attendu !== undefined && attendu !== null) {
+    const du = getDebtsBySender().find((d) => d.sender_name === req.params.sender);
+    const actuel = du ? du.owed : 0;
+    if (arrondiCentimes(Number(attendu)) !== arrondiCentimes(actuel)) {
+      return res.status(409).json({
+        error: `Le montant a changé : ${req.params.sender} doit maintenant ${euro(actuel)}. Vérifie avant de marquer payé.`,
+        owed: actuel,
+      });
+    }
+  }
   const count = markSenderPaid(req.params.sender);
   res.json({ ok: true, count });
 });

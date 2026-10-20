@@ -67,7 +67,7 @@ struct MergeOtherView: View {
             .padding(.bottom, 90)
             .animation(Theme.spring, value: choisis)
         }
-        .confirmationDialog("Regrouper \(Format.count(choisis.count, "expéditeur", "expéditeurs")) en « Autre » ?", isPresented: $confirme, titleVisibility: .visible) {
+        .alert("Regrouper \(Format.count(choisis.count, "expéditeur", "expéditeurs")) en « Autre » ?", isPresented: $confirme) {
             Button("Regrouper", role: .destructive) {
                 Task {
                     if await model.mergeIntoOther(choisis) { choisis = [] }

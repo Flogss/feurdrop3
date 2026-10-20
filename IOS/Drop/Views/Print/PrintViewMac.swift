@@ -67,7 +67,7 @@ struct PrintViewMac: View {
             }
             .frame(minWidth: 480, minHeight: 420)
         }
-        .confirmationDialog("Retirer ce colis ?", isPresented: Binding(get: { aRetirer != nil }, set: { if !$0 { aRetirer = nil } }), titleVisibility: .visible, presenting: aRetirer) { colis in
+        .alert("Retirer ce colis ?", isPresented: Binding(get: { aRetirer != nil }, set: { if !$0 { aRetirer = nil } }), presenting: aRetirer) { colis in
             Button("Retirer", role: .destructive) { Task { await model.delete(colis) } }
             Button("Annuler", role: .cancel) {}
         } message: { _ in

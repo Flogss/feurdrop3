@@ -234,7 +234,11 @@ router.post("/job/:id/imprime", (req, res) => {
   if (job?.marque) return res.json({ ok: true, marked: 0, deja: true });
   if (job) job.marque = true;
   const par = typeof req.body?.par === "string" && req.body.par.trim() ? req.body.par.trim().slice(0, 40) : "app";
-  res.json({ ok: true, marked: marqueFournee(ids, par) });
+  // fournee oubliee (redemarrage) : seules les etiquettes pas encore marquees
+  // le sont -- une confirmation renvoyee ne cree pas une seconde fournee
+  const aMarquer = job ? ids : ids.filter((id) => getColisById(id)?.printed_at == null);
+  if (!aMarquer.length) return res.json({ ok: true, marked: 0, deja: true });
+  res.json({ ok: true, marked: marqueFournee(aMarquer, par) });
 });
 
 // --- Modifier un colis -------------------------------------------------------

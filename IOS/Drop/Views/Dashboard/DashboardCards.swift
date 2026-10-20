@@ -113,7 +113,9 @@ struct MetricsRow: View {
                     .foregroundStyle(Theme.text2)
                 AnimatedNumber(
                     value: valeur, format: Format.euroCompact, start: start, delay: start == nil ? 0 : retard,
-                    bubble: { "+" + Format.euroCompact($0) }
+                    bubble: { "+" + Format.euroCompact($0) },
+                    // la bulle dans le coin de la carte, plus sur son titre
+                    pleineLargeur: true
                 )
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .foregroundStyle(accent ? AnyShapeStyle(Theme.moneyGradient) : AnyShapeStyle(Theme.numberGradient))
@@ -378,13 +380,13 @@ struct SendersCard: View {
         .surfaceCard()
         .animation(Theme.spring, value: senders)
         .animation(Theme.spring, value: voirTous)
-        .confirmationDialog("Tout marquer comme dropé ?", isPresented: $confirmeTout, titleVisibility: .visible) {
+        .alert("Tout marquer comme dropé ?", isPresented: $confirmeTout) {
             Button("Tout dropper") { Task { await app.dashboard.dropAll() } }
             Button("Annuler", role: .cancel) {}
         } message: {
             Text("\(Format.count(stats?.pendingCount ?? 0, "colis en attente", "colis en attente")) · \(Format.euro(stats?.pendingValue ?? 0)). Seuls ceux déjà imprimés seront dropés.")
         }
-        .confirmationDialog("Tout dropper sauf les LIT ?", isPresented: $confirmeSaufLit, titleVisibility: .visible) {
+        .alert("Tout dropper sauf les LIT ?", isPresented: $confirmeSaufLit) {
             Button("Dropper") { Task { await app.dashboard.dropAllExceptLit() } }
             Button("Annuler", role: .cancel) {}
         } message: {

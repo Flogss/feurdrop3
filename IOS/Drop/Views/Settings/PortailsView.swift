@@ -26,20 +26,18 @@ struct PortailsView: View {
         .navigationTitle("Espaces expéditeurs")
         .task { await model.refresh() }
         .refreshable { await model.refresh() }
-        .confirmationDialog(
+        .alert(
             "Nouveau lien pour \(aRegenerer?.name ?? "") ?",
-            isPresented: Binding(get: { aRegenerer != nil }, set: { if !$0 { aRegenerer = nil } }),
-            titleVisibility: .visible, presenting: aRegenerer
+            isPresented: Binding(get: { aRegenerer != nil }, set: { if !$0 { aRegenerer = nil } }), presenting: aRegenerer
         ) { sender in
             Button("Régénérer") { Task { await model.creePortail(sender) } }
             Button("Annuler", role: .cancel) {}
         } message: { _ in
             Text("L'ancien lien cessera de marcher immédiatement. Il faudra lui envoyer le nouveau.")
         }
-        .confirmationDialog(
+        .alert(
             "Désactiver l'espace de \(aCouper?.name ?? "") ?",
-            isPresented: Binding(get: { aCouper != nil }, set: { if !$0 { aCouper = nil } }),
-            titleVisibility: .visible, presenting: aCouper
+            isPresented: Binding(get: { aCouper != nil }, set: { if !$0 { aCouper = nil } }), presenting: aCouper
         ) { sender in
             Button("Désactiver", role: .destructive) { Task { await model.retirePortail(sender) } }
             Button("Annuler", role: .cancel) {}

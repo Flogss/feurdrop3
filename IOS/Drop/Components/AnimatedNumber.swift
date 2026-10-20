@@ -32,6 +32,9 @@ struct AnimatedNumber: View {
     var delay: Double = 0
     var bubble: ((Double) -> String)? = nil
     var glow: Color = Theme.violet
+    /// le nombre occupe toute la largeur : la bulle se pose alors dans le coin
+    /// de la carte, et non sur son titre (petites cartes : « Aujourd'hui »)
+    var pleineLargeur = false
 
     @State private var shown: Double?
     @State private var counting = false
@@ -49,6 +52,7 @@ struct AnimatedNumber: View {
             .shadow(color: glow.opacity(counting ? 0.85 : 0), radius: counting ? 16 : 0)
             .scaleEffect(counting ? 1.035 : 1, anchor: .leading)
             .background { ondeVisuelle }
+            .frame(maxWidth: pleineLargeur ? .infinity : nil, alignment: .leading)
             .overlay(alignment: .topTrailing) { bulle }
             .onAppear(perform: premierAffichage)
             .onChange(of: value) { ancien, nouveau in
@@ -106,7 +110,9 @@ struct AnimatedNumber: View {
                 .glassEffect(.regular.tint(Theme.violet.opacity(0.85)), in: .capsule)
                 .shadow(color: Theme.violet.opacity(0.9), radius: 14)
                 .fixedSize()
-                .offset(x: 18, y: -26)
+                // pleine largeur (petites cartes) : a cheval sur le coin de la
+                // carte, comme une pastille -- plus bas, elle couvrait le titre
+                .offset(x: pleineLargeur ? 10 : 18, y: pleineLargeur ? -52 : -26)
                 .transition(
                     .asymmetric(
                         insertion: .scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity).combined(with: .offset(y: 12)),

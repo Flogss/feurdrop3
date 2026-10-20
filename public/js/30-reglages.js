@@ -425,7 +425,8 @@ document.querySelectorAll("[data-stock-form]").forEach((form) => {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const n = Number(input.value);
-    if (!n) {
+    // un nombre entier de pochettes
+    if (!n || !Number.isInteger(n)) {
       rejoue(input, "invalid", 1400);
       return;
     }

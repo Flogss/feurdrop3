@@ -78,13 +78,13 @@ struct HeroCard: View {
         }
         .shadow(color: Theme.violet.opacity(0.25), radius: 30, y: 14)
         .animation(Theme.spring, value: enTournee)
-        .confirmationDialog("Tout est posté ?", isPresented: $confirmeRetour, titleVisibility: .visible) {
+        .alert("Tout est posté ?", isPresented: $confirmeRetour) {
             Button("Oui, tout est dropé") { Task { await model.endTour(drop: true) } }
             Button("Retour", role: .cancel) {}
         } message: {
             Text("Les colis déjà imprimés seront marqués dropés. Ceux pas encore imprimés restent en attente pour la prochaine tournée.")
         }
-        .confirmationDialog("Annuler la tournée ?", isPresented: $confirmeAnnulation, titleVisibility: .visible) {
+        .alert("Annuler la tournée ?", isPresented: $confirmeAnnulation) {
             Button("Annuler la tournée", role: .destructive) { Task { await model.endTour(drop: false) } }
             Button("Continuer", role: .cancel) {}
         } message: {

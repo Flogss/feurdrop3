@@ -44,10 +44,9 @@ struct PricesView: View {
         }
         .sheet(isPresented: $ajout) { AddSenderSheet() }
         .task { if !model.loaded { await model.refresh() } }
-        .confirmationDialog(
+        .alert(
             "Supprimer \(aSupprimer?.name ?? "") ?",
-            isPresented: Binding(get: { aSupprimer != nil }, set: { if !$0 { aSupprimer = nil } }),
-            titleVisibility: .visible, presenting: aSupprimer
+            isPresented: Binding(get: { aSupprimer != nil }, set: { if !$0 { aSupprimer = nil } }), presenting: aSupprimer
         ) { s in
             Button("Supprimer", role: .destructive) { Task { await model.delete(s) } }
             Button("Annuler", role: .cancel) {}
