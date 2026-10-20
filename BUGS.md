@@ -19,9 +19,9 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 |---|---|---|---|---|---|
 | B01 | Critique | Serveur (toutes) | Impression auto | Activer l'impression auto marque « imprimées » toutes les étiquettes en attente, sans les imprimer | vérifié (tests) |
 | B02 | Moyenne | Site, iOS, Mac | Contrôle des dépôts | « Vérification bloquée 72 — dont 92 à constater » : le sous-ensemble dépasse le total | vérifié (site, Mac, iPhone) |
-| B03 | Moyenne | Site, iOS, Mac | Dashboard (stock, compteurs) | Une lecture partie avant une action arrive après elle et ré-affiche l'ancienne valeur | vérifié (tests Swift) ; site : corrigé, à vérifier |
-| B04 | Mineure | Site | Stats, revenus par jour | La plage de dates affichée compte un point à moitié caché (« 15 oct. » alors que le 1er point visible est le 16) | corrigé, à vérifier |
-| B05 | Mineure | Site (1024 px) | Dashboard | Placeholder « Rechercher u… » tronqué ; titre « Contrôle des dépôts » sur deux lignes à cause de sa pastille | corrigé, à vérifier |
+| B03 | Moyenne | Site, iOS, Mac | Dashboard (stock, compteurs) | Une lecture partie avant une action arrive après elle et ré-affiche l'ancienne valeur | vérifié (tests Swift ; site : scénario rejoué dans le navigateur) |
+| B04 | Mineure | Site | Stats, revenus par jour | La plage de dates affichée compte un point à moitié caché (« 15 oct. » alors que le 1er point visible est le 16) | vérifié (« 16 oct. – 20 oct. » = premier et dernier points visibles) |
+| B05 | Mineure | Site (1024 px) | Dashboard | Placeholder « Rechercher u… » tronqué ; titre « Contrôle des dépôts » sur deux lignes à cause de sa pastille | vérifié (« Rechercher » à 120 px ; titre sur une ligne) |
 | B06 | Moyenne | Site | Réglages | Avec beaucoup d'expéditeurs, la page fait 50 000 px (dettes, espaces, prix, regroupement listés en entier, sans recherche) | vérifié (5 776 px, recherche, voir/replier) |
 | B07 | Mineure | Site (mobile) | Contrôle des dépôts | Le numéro de suivi, information principale de la ligne, est tronqué | vérifié (deux moitiés égales) |
 | B08 | Mineure | Serveur | Tarifs | Changer le tarif d'un expéditeur ne met pas à jour ses colis « spéciaux » en attente (ils suivent pourtant le tarif normal) | vérifié (test) |
@@ -40,7 +40,7 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 | B18 | Moyenne | Serveur, site, iOS | Dettes « Payé » | Un colis drope entre l'affichage et l'appui sur « Payé » était marqué payé aussi : plus que le montant confirmé | vérifié (test) |
 | B19 | Mineure | Serveur | Impression (app) | Confirmation d'impression renvoyée après un redémarrage : seconde fournée identique dans le menu de réimpression | vérifié (test) |
 | B20 | Mineure | iOS, Mac | Dashboard | La bulle « +N € » des cartes « Aujourd'hui » / « Gagné au total » couvrait leur titre | vérifié (simulateur) |
-| B21 | Mineure | iOS | Dashboard en tournée | « Annuler » : texte violet sur pastille violette sur carte violette, peu lisible | à corriger |
+| B21 | Mineure | iOS | Dashboard en tournée | « Annuler » : texte violet sur pastille violette sur carte violette, peu lisible | vérifié (simulateur) |
 | N03 | — | iOS (simulateur) | Onglets, boutons | Des appuis semblaient ignorés | non reproduit : l'outil du simulateur applique les appuis avec retard (captures faites trop tôt) ; à confirmer sur l'iPhone |
 
 ## Détail
@@ -102,3 +102,5 @@ Statuts : `à corriger` · `corrigé, à vérifier` · `vérifié` (test exécut
 - **B19** : `test/operations.test.js` — deux confirmations pour une fournée oubliée : une seule fournée.
 - **B20** : captures image par image après un drop : la bulle se pose à cheval sur le coin de la carte, les titres restent lisibles.
 - Opérations groupées ajoutées aux tests (aucun test ne les couvrait) : drop par transporteur, par expéditeur, sauf LIT, boîtes jaunes (stock BJ), drop en tournée limité au sac, modification et retrait d'un colis.
+
+- **B03 (site)** : dans le navigateur, une lecture du stock ralentie de 1,2 s, « + » pendant ce temps : le serveur confirme −129, l'ancienne réponse (−130) arrive ensuite et est ignorée, l'écran reste à −129.

@@ -192,6 +192,8 @@ struct HeroCard: View {
                 .frame(height: 50)
                 .padding(.horizontal, 6)
                 .boutonVerre()
+                // texte clair : en violet sur une carte violette, il se lisait mal (B21)
+                .tint(.white.opacity(0.92))
                 .transition(.scale(scale: 0.5, anchor: .leading).combined(with: .opacity))
             }
         }
