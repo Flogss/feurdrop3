@@ -540,7 +540,7 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
 .tool-icon-blue { --c: var(--info-rgb); }
 .tool-icon-gold { --c: var(--special-rgb); }
 .tool-text { position: relative; z-index: 1; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.tool-title { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; }
+.tool-title { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-sub { font-size: 13px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-badge {
   position: relative;
@@ -556,6 +556,13 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
   font-variant-numeric: tabular-nums;
 }
 .tool-badge:empty { display: none; }
+/* Carte etroite (deux colonnes a 1024 px) : la pastille repete la ligne du
+   dessous (« 138 colis à regarder ») et faisait passer le titre sur deux
+   lignes. Elle s'efface, le compte reste lisible juste en dessous. */
+.tools .tool { container-type: inline-size; }
+@container (max-width: 300px) {
+  .tool-badge { display: none; }
+}
 .tool-chev { position: relative; z-index: 1; width: 18px; height: 18px; color: var(--text-3); transition: transform var(--t-3) var(--ease-spring), color var(--t-2); }
 
 /* ==========================================================================

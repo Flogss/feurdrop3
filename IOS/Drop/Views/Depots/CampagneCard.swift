@@ -16,45 +16,18 @@ struct CampagneCard: View {
         let c = etat?.campagne
         let visible = c != nil && (etat?.active == true || model.campagneMasquee != c?.id) && recente(etat)
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(titre(etat, visible: visible))
-                        .font(.headline)
-                    Text(sousTitre(etat, visible: visible))
-                        .font(.footnote)
-                        .foregroundStyle(Theme.text2)
-                        .fixedSize(horizontal: false, vertical: true)
+            // cote a cote quand la place le permet (Mac) ; sur iPhone, le texte
+            // puis le bouton en pleine largeur -- a cote du bouton, le texte
+            // s'ecrasait sur 8 lignes (B12)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    textes(etat, visible: visible)
+                    Spacer(minLength: 8)
+                    boutons(etat, visible: visible, c: c, large: false)
                 }
-                Spacer(minLength: 8)
-                if etat?.active == true {
-                    Button("Annuler") { Task { await model.annuleCampagne() } }
-                        .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.text2)
-                } else {
-                    if visible, let id = c?.id {
-                        Button {
-                            withAnimation(Theme.spring) { model.campagneMasquee = id }
-                        } label: {
-                            Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.text3)
-                        .accessibilityLabel("Masquer")
-                    }
-                    Button {
-                        Task { await model.toutVerifier() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if model.lancement { ProgressView().controlSize(.small).tint(.white) } else { Image(systemName: "checkmark.seal.fill") }
-                            Text("Tout vérifier")
-                        }
-                        .font(.subheadline.weight(.bold))
-                        .padding(.horizontal, 8)
-                        .frame(height: 40)
-                    }
-                    .boutonVerreFort(Theme.violetDeep)
-                    .disabled(model.lancement)
+                VStack(alignment: .leading, spacing: 12) {
+                    textes(etat, visible: visible)
+                    boutons(etat, visible: visible, c: c, large: true)
                 }
             }
 
@@ -68,6 +41,54 @@ struct CampagneCard: View {
             if etat?.active == true { LueurCampagne().allowsHitTesting(false) }
         }
         .animation(Theme.spring, value: etat)
+    }
+
+    private func textes(_ etat: DepotCampagneEtat?, visible: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(titre(etat, visible: visible))
+                .font(.headline)
+            Text(sousTitre(etat, visible: visible))
+                .font(.footnote)
+                .foregroundStyle(Theme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func boutons(_ etat: DepotCampagneEtat?, visible: Bool, c: DepotCampagne?, large: Bool) -> some View {
+        if etat?.active == true {
+            Button("Annuler") { Task { await model.annuleCampagne() } }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.text2)
+        } else {
+            HStack(spacing: 8) {
+                if visible, let id = c?.id {
+                    Button {
+                        withAnimation(Theme.spring) { model.campagneMasquee = id }
+                    } label: {
+                        Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.text3)
+                    .accessibilityLabel("Masquer")
+                }
+                Button {
+                    Task { await model.toutVerifier() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if model.lancement { ProgressView().controlSize(.small).tint(.white) } else { Image(systemName: "checkmark.seal.fill") }
+                        Text("Tout vérifier")
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: large ? .infinity : nil)
+                    .frame(height: 40)
+                }
+                .boutonVerreFort(Theme.violetDeep)
+                .disabled(model.lancement)
+            }
+        }
     }
 
     private func recente(_ etat: DepotCampagneEtat?) -> Bool {

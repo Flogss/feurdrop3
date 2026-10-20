@@ -92,13 +92,21 @@ struct SectionHeader<Trailing: View>: View {
     }
 
     var body: some View {
+        // le titre d'abord, sur une ligne : c'est l'information a la droite
+        // (une plage de dates) qui se resserre -- « Revenus par semaine »
+        // passait sur deux lignes sur iPhone (B13)
         HStack(alignment: .firstTextBaseline) {
             Text(title)
                 .font(.title3.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .layoutPriority(1)
             Spacer(minLength: 8)
             trailing
                 .font(.subheadline)
                 .foregroundStyle(Theme.text3)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
     }
 }

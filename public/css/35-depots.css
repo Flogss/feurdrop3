@@ -196,6 +196,12 @@
   white-space: nowrap;
 }
 .depot-numero:focus-visible { outline: 2px solid rgb(var(--violet-400) / 0.9); outline-offset: 3px; border-radius: 4px; }
+/* telephone : le verdict prend la droite de la ligne et coupait le numero
+   (« JJD014600010000… ») -- c'est pourtant ce qu'on cherche a lire. Il passe
+   a la ligne plutot que d'etre tronque. */
+@media (max-width: 520px) {
+  .depot-numero { white-space: normal; overflow-wrap: anywhere; text-wrap: balance; font-size: 13.5px; }
+}
 .depot-sous {
   font-size: 12.5px;
   color: var(--text-3);

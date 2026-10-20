@@ -22,18 +22,23 @@ beforeEach(() => {
   db.setSetting("auto_print_taches", "[]");
   db.setSetting("auto_print_filtres", "{}");
   db.setSetting("auto_print", "0");
+  db.db.prepare("DELETE FROM settings WHERE key = 'auto_print_depuis'").run();
 });
 
 const etiquette = (sender, carrier, type = "normal") =>
   db.addColis(sender, { fileId: `F-${Math.random()}`, fileKind: "pdf", carrier, type, fileName: "x.pdf" }).id;
 
 test("depuis le telephone : activer, filtrer, et l'agent ne recoit que la file filtree", async () => {
-  // deja la avant l'activation : considere comme imprime (pas de deballage)
-  etiquette("Alice", "UPS");
+  // deja la avant l'activation : l'agent ne la sort pas (pas de deballage du
+  // stock), mais elle n'est PAS marquee imprimee -- elle reste a imprimer a la
+  // main (bug B01 : avant, tout le stock passait « imprime » sans l'etre)
+  const avant = etiquette("Alice", "UPS");
   let r = await app.appel("/api/print/auto", { methode: "POST", corps: { enabled: true } });
   assert.equal(r.status, 200);
   assert.equal(r.json.enabled, true);
   assert.equal(r.json.pending, 0);
+  assert.equal(db.getColisById(avant).printed_at, null, "jamais marquee imprimee sans l'avoir ete");
+  assert.equal(db.countUnprintedLabels(), 1, "toujours dans « À imprimer »");
 
   const ups = etiquette("Alice", "UPS");
   etiquette("Bob", "MR");
@@ -127,4 +132,16 @@ test("une preparation qui echoue (Telegram absent) ne perd rien et ne marque rie
 test("le telephone ne touche jamais aux routes de l'agent, et l'inverse", async () => {
   assert.equal((await app.appel("/api/print/queue")).status, 401);
   assert.equal((await agent("/api/print/auto")).status, 401);
+});
+
+test("B01 : une base deja en impression auto (version precedente) ne ressort pas l'arriere au deploiement", () => {
+  // impression auto active, sans point de depart enregistre
+  db.setSetting("auto_print", "1");
+  db.db.prepare("DELETE FROM settings WHERE key = 'auto_print_depuis'").run();
+  const ancienne = etiquette("Alice", "UPS");
+  // premiere lecture apres le deploiement : le repere se pose maintenant
+  assert.equal(db.compteFileAuto(), 0);
+  assert.equal(db.getColisById(ancienne).printed_at, null);
+  const nouvelle = etiquette("Alice", "UPS");
+  assert.deepEqual(db.fileAuto().map((c) => c.id), [nouvelle]);
 });

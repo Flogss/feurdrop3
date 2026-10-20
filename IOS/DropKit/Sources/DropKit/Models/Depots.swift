@@ -106,6 +106,8 @@ public struct DepotsCompteurs: Codable, Sendable, Equatable {
     public var nonConfirmeHorsDelai: Int
     /// UPS, DHL... a regarder sur la page officielle
     public var aConstater: Int
+    /// parmi eux, ceux de la categorie « bloque » (absent d'un serveur plus ancien)
+    public var aConstaterBloques: Int?
     /// ce qui demande un regard (badge de l'outil)
     public var attention: Int
     /// rien n'a encore ete lu (le Mac ou la file du serveur s'en charge)

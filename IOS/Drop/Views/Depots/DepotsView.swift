@@ -100,10 +100,13 @@ struct DepotsView: View {
                     .foregroundStyle(couleur)
                     .shadow(color: couleur.opacity(0.4), radius: 12)
                     .contentTransition(.numericText(value: Double(c.nombre(cat))))
+                // deux lignes reservees : « inconnu, illisible ou en échec »
+                // etait coupe sur iPhone, et les quatre cartes gardent la meme
+                // hauteur
                 Text(sousCompteur(cat, c))
                     .font(.caption)
                     .foregroundStyle(Theme.text3)
-                    .lineLimit(1)
+                    .lineLimit(2, reservesSpace: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
@@ -130,7 +133,8 @@ struct DepotsView: View {
         case .confirme: (c.retires ?? 0) > 0 ? "historique · \(Format.count(c.retires ?? 0, "retiré", "retirés"))" : "sortis de la liste (historique)"
         case .nonConfirme: c.nonConfirmeHorsDelai > 0 ? "dont \(c.nonConfirmeHorsDelai) hors délai" : "étiquette seule"
         case .aVerifier: (c.enAttente ?? 0) > 0 ? "+ \(c.enAttente ?? 0) en attente de lecture" : "inconnu, illisible ou en échec"
-        case .bloque: c.aConstater > 0 ? "dont \(c.aConstater) à constater" : "site protégé ou à la main"
+        // le « dont » ne compte que les bloques (B02 : sinon il depassait le total)
+        case .bloque: (c.aConstaterBloques ?? min(c.aConstater, c.bloque)) > 0 ? "dont \(c.aConstaterBloques ?? min(c.aConstater, c.bloque)) à constater" : "site protégé ou à la main"
         case .enAttente: "pas encore lu"
         }
     }
@@ -335,6 +339,20 @@ private struct PassageCard: View {
     let constater: () -> Void
     @Environment(AppModel.self) private var app
 
+    private func rallumer(_ l: DepotLecture) -> some View {
+        Button {
+            Task { await app.depots.lecture(l.code, active: true) }
+        } label: {
+            Text("Rallumer")
+                .font(.subheadline.weight(.semibold))
+                .fixedSize()
+                .frame(height: 36)
+                .padding(.horizontal, 10)
+        }
+        .boutonVerre()
+        .accessibilityLabel("Rallumer la lecture automatique de \(l.nom)")
+    }
+
     var body: some View {
         let etat = vue.etat
         let lp = etat.laPoste
@@ -348,19 +366,17 @@ private struct PassageCard: View {
             }
             // une lecture automatique coupee (depuis le site) : on la rallume d'ici
             ForEach((etat.lecture ?? []).filter { !$0.active }) { l in
-                HStack(spacing: 10) {
-                    bandeau("info.circle.fill", Theme.info, "Lecture automatique coupée pour \(l.nom) : ses colis ne sont pas lus par l'app du Mac.")
-                    Button {
-                        Task { await app.depots.lecture(l.code, active: true) }
-                    } label: {
-                        Text("Rallumer")
-                            .font(.subheadline.weight(.semibold))
-                            .fixedSize()
-                            .frame(height: 36)
-                            .padding(.horizontal, 10)
+                // a cote du bandeau quand la place le permet (Mac) ; dessous sur
+                // iPhone, ou le texte s'ecrasait sur 5 lignes (B12)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        bandeau("info.circle.fill", Theme.info, "Lecture automatique coupée pour \(l.nom) : ses colis ne sont pas lus par l'app du Mac.")
+                        rallumer(l)
                     }
-                    .boutonVerre()
-                    .accessibilityLabel("Rallumer la lecture automatique de \(l.nom)")
+                    VStack(alignment: .trailing, spacing: 8) {
+                        bandeau("info.circle.fill", Theme.info, "Lecture automatique coupée pour \(l.nom) : ses colis ne sont pas lus par l'app du Mac.")
+                        rallumer(l)
+                    }
                 }
             }
 

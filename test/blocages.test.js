@@ -73,3 +73,28 @@ test("« Fait » sur un code seul renvoye apres une coupure : rejoue, pas d'erre
   assert.equal(rejoue.status, 200);
   assert.equal(rejoue.entetes.get("idempotent-replay"), "true");
 });
+
+test("B09 : un ajout de colis renvoye APRES un redemarrage du serveur n'est pas applique deux fois", async () => {
+  db.addColis("Alice", { fileId: "f-b09", fileKind: "pdf" });
+  const avant = db.db.prepare("SELECT COUNT(*) AS n FROM colis").get().n;
+  const cle = { "Idempotency-Key": "ajout-b09" };
+  const r = await app.appel("/api/colis/quick-add/Alice", { methode: "POST", corps: { n: 2 }, entetes: cle });
+  assert.equal(r.status, 200);
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM colis").get().n, avant + 2);
+
+  // le serveur redemarre (deploiement) : ses modules repartent de zero, seule
+  // la base reste
+  for (const m of Object.keys(require.cache)) {
+    if (/[\\/]src[\\/](app|idempotence|routes[\\/][^\\/]+)\.js$/.test(m)) delete require.cache[m];
+  }
+  const relance = await demarreApp();
+  try {
+    // l'app n'a jamais recu la reponse : elle renvoie la meme operation
+    const encore = await relance.appel("/api/colis/quick-add/Alice", { methode: "POST", corps: { n: 2 }, entetes: cle });
+    assert.equal(encore.status, 200);
+    assert.equal(encore.entetes.get("idempotent-replay"), "true", "la reponse d'origine est rejouee");
+    assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM colis").get().n, avant + 2, "toujours deux colis de plus, pas quatre");
+  } finally {
+    await relance.ferme();
+  }
+});

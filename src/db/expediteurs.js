@@ -39,6 +39,9 @@ function updateSenderPrices(id, { price, litPrice, bjPrice, kgPrice }) {
      WHERE status = 'pending' AND price_locked = 0 AND type = ? AND sender_name = ?`
   );
   applyTo.run(nextPrice, nextKgPrice, "normal", current.name);
+  // un special suit le tarif normal (montants.js) ; ses codes-barres (images
+  // gratuites) ne sont pas « pending » et restent a 0
+  applyTo.run(nextPrice, nextKgPrice, "special", current.name);
   applyTo.run(nextLitPrice, nextKgPrice, "lit", current.name);
   applyTo.run(nextBjPrice, nextKgPrice, "bj", current.name);
   if (

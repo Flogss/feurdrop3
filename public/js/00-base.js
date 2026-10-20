@@ -65,6 +65,16 @@ class ErreurReseau extends Error {}
 // Une session expiree (72 h) ou revoquee renvoie a la page de connexion.
 const jetonCsrf = () => (/(?:^|;\s*)(?:__Host-)?feurdrop_csrf=([^;]+)/.exec(document.cookie) || [])[1] || "";
 let sessionPerdue = false;
+// Les ecritures qui changent le dashboard (stock, colis, tournee, impression,
+// expediteurs, dettes, codes) : compteur monte au depart ET a l'arrivee de
+// chacune. Une lecture qui en a croise une (`lectureFraiche`) arrive peut-etre
+// avec l'etat d'avant : elle est ignoree, la relecture qui suit l'ecriture fait
+// foi. Sans ca, le rafraichissement de 5 s parti juste avant un appui sur
+// « + » remettait l'ancien stock pendant quelques secondes (B03).
+let ecrituresDashboard = 0;
+const ECRITURES_DASHBOARD = /^\/api\/(stock|colis|tour|print|senders|debts|special)\b/;
+const instantLecture = () => ecrituresDashboard;
+const lectureFraiche = (instant) => instant === ecrituresDashboard;
 {
   const fetchServeur = window.fetch.bind(window);
   window.fetch = async (ressource, opts = {}) => {
@@ -76,7 +86,14 @@ let sessionPerdue = false;
       entetes.set("X-CSRF-Token", jetonCsrf());
       opts = { ...opts, headers: entetes };
     }
-    const reponse = await fetchServeur(ressource, opts);
+    const ecrit = ici && methode !== "GET" && methode !== "HEAD" && ECRITURES_DASHBOARD.test(url.pathname);
+    if (ecrit) ecrituresDashboard += 1;
+    let reponse;
+    try {
+      reponse = await fetchServeur(ressource, opts);
+    } finally {
+      if (ecrit) ecrituresDashboard += 1;
+    }
     if (ici && reponse.status === 401 && url.pathname.startsWith("/api/") && !sessionPerdue) {
       sessionPerdue = true;
       location.replace("/connexion");

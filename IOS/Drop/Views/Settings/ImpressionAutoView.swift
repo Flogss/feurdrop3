@@ -28,7 +28,7 @@ struct ImpressionAutoView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .toggleStyle(.switch)
+        .interrupteursDrop()
         .navigationTitle("Impression auto")
         // relu toutes les 5 s tant que l'ecran est ouvert
         .task {
@@ -42,7 +42,7 @@ struct ImpressionAutoView: View {
             Button("Activer") { Task { await model.setAutoPrint(true) } }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("Les colis déjà en attente ne seront pas imprimés, seulement les prochains.")
+            Text("Les étiquettes déjà en attente restent à imprimer à la main : seules les prochaines partent toutes seules.")
         }
     }
 

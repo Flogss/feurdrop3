@@ -38,6 +38,13 @@ struct DonutChart: View {
                 centre
             }
             .frame(maxWidth: .infinity)
+            // l'anneau se dessine quand IL est a l'ecran : mesure sur tout le
+            // bloc (anneau + longue legende), il restait vide a « 0,00 € »
+            // alors qu'il etait deja visible (B10)
+            .onScrollVisibilityChange(threshold: 0.5) { vu in
+                visible = vu
+                if vu { rejoue() }
+            }
 
             legende
         }
@@ -46,10 +53,6 @@ struct DonutChart: View {
             if !dedans && selection != nil { withAnimation(Theme.spring) { selection = nil } }
         }
         #endif
-        .onScrollVisibilityChange(threshold: 0.4) { vu in
-            visible = vu
-            if vu { rejoue() }
-        }
         .onChange(of: reveal) {
             if visible { rejoue() } else { dejaVu = -1 }
         }

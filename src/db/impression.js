@@ -3,7 +3,7 @@
 const crypto = require("crypto");
 const { db } = require("./connexion");
 const { getSetting, setSetting } = require("./reglages");
-const { journalise, plurielJournal } = require("./journal");
+const { journalise } = require("./journal");
 const {
   HAS_FILE_SQL,
   PRINTABLE_SQL,
@@ -14,6 +14,7 @@ const {
   AUTOPRINT_SQL,
 } = require("./sql");
 const { carrierLabel } = require("../carrier");
+const { marqueDepartAuto } = require("./impressionAuto");
 
 // Trois lectures de la file d'impression :
 //   "new"     (defaut) ce qui n'est jamais sorti de l'imprimante. Imprimer
@@ -104,27 +105,17 @@ function isAutoPrintEnabled() {
   return getSetting("auto_print", "0") === "1";
 }
 
-// En activant, on considere tout ce qui est deja en attente comme deja
-// imprime : sinon la premiere execution sortirait tout le stock d'un coup.
+// En activant, l'agent ne doit pas sortir tout le stock d'un coup. Avant,
+// tout ce qui attendait etait marque « imprime » sans l'avoir ete : ces
+// etiquettes disparaissaient de la file et comptaient comme pretes pour la
+// tournee. Maintenant la file automatique part du dernier colis existant
+// (voir impressionAuto.js) : ce qui attendait reste « a imprimer », a la main.
 function setAutoPrintEnabled(enabled) {
   const avant = isAutoPrintEnabled();
-  if (enabled && !avant) markPendingAsPrinted();
+  if (enabled && !avant) marqueDepartAuto();
   setSetting("auto_print", enabled ? "1" : "0");
   if (avant !== Boolean(enabled)) journalise("reglage", enabled ? "Impression auto activée" : "Impression auto désactivée");
   return isAutoPrintEnabled();
-}
-
-function markPendingAsPrinted() {
-  const n = db
-    .prepare(`UPDATE colis SET printed_at = datetime('now') WHERE ${AUTOPRINT_SQL}`)
-    .run().changes;
-  if (n) {
-    journalise("impression", `${plurielJournal(n, "étiquette considérée", "étiquettes considérées")} comme imprimée${n > 1 ? "s" : ""}`, {
-      detail: "à l'activation de l'impression auto",
-      nombre: n,
-    });
-  }
-  return n;
 }
 
 // Triees par transporteur : meme en impression continue, la pile reste
@@ -211,7 +202,6 @@ module.exports = {
   getPrintableSummary,
   isAutoPrintEnabled,
   setAutoPrintEnabled,
-  markPendingAsPrinted,
   getUnprintedLabels,
   countUnprintedLabels,
   markPrinted,

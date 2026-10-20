@@ -66,6 +66,17 @@ public final class APIClient: Sendable {
 
     public enum Method: String, Sendable { case get = "GET", post = "POST", put = "PUT", patch = "PATCH", delete = "DELETE" }
 
+    /// Les ecritures qui changent le dashboard (stock, colis, tournee,
+    /// impression, expediteurs, dettes, codes) : compteur monte au depart ET a
+    /// l'arrivee de chacune. Une lecture qui en a croise une arrive peut-etre
+    /// avec l'etat d'avant : `lectureFraiche` le dit, la relecture qui suit
+    /// l'ecriture fait foi. Les ecritures de fond (lecture des pages de suivi,
+    /// « vu ») ne comptent pas : elles ne doivent pas geler le dashboard.
+    private let ecritures = Mutex<Int>(0)
+    public var instantLecture: Int { ecritures.withLock { $0 } }
+    public func lectureFraiche(_ instant: Int) -> Bool { ecritures.withLock { $0 } == instant }
+    private static let prefixesDashboard = ["/api/stock", "/api/colis", "/api/tour", "/api/print", "/api/senders", "/api/debts", "/api/special"]
+
     /// Le jeton de session en cours (nil : pas connecte).
     public var jeton: String? { jetonCourant.withLock { $0 } }
 
@@ -128,6 +139,10 @@ public final class APIClient: Sendable {
         }
 
         if operation { requete.setValue(UUID().uuidString, forHTTPHeaderField: "Idempotency-Key") }
+
+        let ecrit = method != .get && Self.prefixesDashboard.contains { path.hasPrefix($0) }
+        if ecrit { ecritures.withLock { $0 += 1 } }
+        defer { if ecrit { ecritures.withLock { $0 += 1 } } }
 
         // une lecture, ou une operation identifiee, se renvoie sans risque
         let essais = method == .get ? 2 : (operation ? 3 : 1)

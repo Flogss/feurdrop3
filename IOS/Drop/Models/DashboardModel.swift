@@ -55,13 +55,19 @@ final class DashboardModel {
     func refresh() async {
         guard app.connecte else { return }
         do {
+            let instant = app.api.client.instantLecture
             async let s = app.api.stats()
             async let k = app.api.stock()
             let (nouvelles, stockServeur) = try await (s, k)
             app.reachedServer()
             if loadError != nil { loadError = nil }
-            applique(nouvelles)
-            appliqueStock(stockServeur)
+            // partie avant une ecriture (drop, stock, +1 colis...) : peut-etre
+            // l'etat d'avant ; la relecture qui suit l'ecriture fait foi (B03).
+            // Le premier chargement passe toujours.
+            if !loaded || app.api.client.lectureFraiche(instant) {
+                applique(nouvelles)
+                appliqueStock(stockServeur)
+            }
             // l'historique (le dernier evenement, sous son bouton) et la pastille
             // du controle des depots (au plus une fois par minute)
             async let historique: Void = app.journal.refresh()

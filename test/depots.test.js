@@ -521,6 +521,12 @@ test("UPS sans identifiants d'API : jamais lu automatiquement (conditions d'UPS)
   assert.equal(depots.campagne().compteurs.aConstater, 2);
   // le Mac recoit les numeros a ouvrir un par un dans le navigateur
   assert.ok(depots.campagne().numerosAConstater.includes("1Z999AA10123456784"));
+  // B02 : le « dont N à constater » de la carte « bloquée » ne compte que
+  // les bloques (aConstater compte aussi des non confirmes : le « dont »
+  // depassait le total)
+  const c = depots.vue();
+  assert.equal(c.compteurs.aConstaterBloques, c.lignes.filter((x) => x.aConstater && x.controle.categorie === "bloque").length);
+  assert.ok(c.compteurs.aConstaterBloques <= c.compteurs.bloque);
   assert.equal(depots.etat().methodes.ups.configure, false);
 
   assert.equal(depots.constate(ups, "pris").controle.categorie, "confirme");

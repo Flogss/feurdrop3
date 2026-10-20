@@ -35,7 +35,10 @@ struct SettingsView: View {
             serveur
         }
         .scrollContentBackground(.hidden)
-        .toggleStyle(.switch)
+        .interrupteursDrop()
+        // tous les interrupteurs allumes en violet : sur Mac, ceux sans teinte
+        // restaient gris une fois actives, comme eteints (B11)
+        .tint(Theme.violet)
         .navigationTitle("Réglages")
         .task { await model.refresh() }
         .task { await model.chargeImpression() }
@@ -53,7 +56,7 @@ struct SettingsView: View {
             Button("Activer") { Task { await model.setAutoPrint(true) } }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("Les colis déjà en attente ne seront pas imprimés, seulement les prochains.")
+            Text("Les étiquettes déjà en attente restent à imprimer à la main : seules les prochaines partent toutes seules.")
         }
         .confirmationDialog(
             "\(dettePayee?.senderName ?? "") a payé ?",

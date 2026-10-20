@@ -3,7 +3,12 @@
 let statsChargees = false;
 
 async function loadStats(animate, force, riche) {
+  const instant = instantLecture();
   const s = await fetchJSON("/api/stats");
+  // partie avant une ecriture (drop, stock, +1 colis...) : peut-etre l'etat
+  // d'avant -- la relecture qui suit l'ecriture fait foi (B03). Le tout
+  // premier chargement passe toujours.
+  if (statsChargees && !lectureFraiche(instant)) return;
   const premier = !statsChargees;
   statsChargees = true;
 
@@ -163,6 +168,13 @@ function afficheExpediteurs() {
   const efface = $("sender-search-clear");
   const scroll = $("sender-scroll");
   let minuteur = 0;
+  // champ etroit (1024 px, deux colonnes) : « Rechercher u… » coupe en plein
+  // mot ; le texte court tient, l'icone dit deja de quoi il s'agit
+  const indice = () => {
+    const court = champ.clientWidth > 0 && champ.clientWidth < 210;
+    champ.placeholder = court ? "Rechercher" : "Rechercher un expéditeur";
+  };
+  if ("ResizeObserver" in window) new ResizeObserver(indice).observe(champ);
   champ.addEventListener("input", () => {
     efface.hidden = !champ.value;
     clearTimeout(minuteur);
@@ -315,7 +327,7 @@ $("autoprint-toggle").addEventListener("click", async (e) => {
     next &&
     !(await confirmer({
       titre: "Activer l'impression auto ?",
-      message: "Les colis déjà en attente ne seront pas imprimés, seulement les prochains.",
+      message: "Les étiquettes déjà en attente restent à imprimer à la main : seules les prochaines partent toutes seules.",
       action: "Activer",
     }))
   )

@@ -83,3 +83,11 @@ test("le prix du kilo se regle par expediteur depuis le dashboard (et l'app)", a
   r = await app.appel("/api/senders", { methode: "POST", corps: { name: "Dan", price: 3 } });
   assert.equal(r.json.kg_price, 1, "1 € le kilo par defaut");
 });
+
+test("B08 : un special en attente suit le tarif normal de son expediteur quand il change", () => {
+  const sp = db.addColis("Eve", { fileId: "s", fileKind: "pdf", type: "special", poidsG: 1000 });
+  assert.equal(db.getColisById(sp.id).price, 5, "4 € + 1 kg");
+  const eve = db.db.prepare("SELECT * FROM senders WHERE name = 'Eve'").get();
+  db.updateSenderPrices(eve.id, { price: 6 });
+  assert.equal(db.getColisById(sp.id).price, 7, "6 € + 1 kg");
+});

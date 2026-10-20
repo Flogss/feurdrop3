@@ -399,8 +399,11 @@ function espacement(container, n) {
 // afficher un intitule de plage qui suit le glisser en temps reel.
 function visibleRange(container, n) {
   const pas = container._spacing || CHART_SPACING;
-  const first = Math.max(0, Math.round((container.scrollLeft - CHART_PAD) / pas));
-  const last = Math.min(n - 1, Math.round((container.scrollLeft + container.clientWidth - CHART_PAD) / pas));
+  // seulement les points dont le centre est dans la zone : un point coupe par
+  // le bord ne compte pas (la plage annoncait « 15 oct. » quand le premier
+  // point vraiment visible etait le 16)
+  const first = Math.min(n - 1, Math.max(0, Math.ceil((container.scrollLeft - CHART_PAD) / pas - 0.001)));
+  const last = Math.min(n - 1, Math.floor((container.scrollLeft + container.clientWidth - CHART_PAD) / pas + 0.001));
   return [first, Math.max(first, last)];
 }
 

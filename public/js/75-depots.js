@@ -1,3 +1,13 @@
+// Un numero long peut passer a la ligne sur telephone : on lui donne un point
+// de coupure au milieu (invisible, sans effet sur le copier-coller), pour deux
+// moities egales plutot qu'un « 29 » tout seul en dessous.
+function numeroCoupe(numero) {
+  const n = String(numero || "");
+  if (n.length < 14) return escapeHtml(n);
+  const milieu = Math.ceil(n.length / 2);
+  return `${escapeHtml(n.slice(0, milieu))}<wbr>${escapeHtml(n.slice(milieu))}`;
+}
+
 // --- Controle des depots ------------------------------------------------------------
 // Une question : le transporteur a-t-il pris en charge ce colis ? Le serveur
 // interroge les API officielles (La Poste pour La Poste, Colissimo,
@@ -136,7 +146,10 @@ function rendDepots() {
   $("depots-n-hors-delai").textContent = c.nonConfirmeHorsDelai
     ? `dont ${pluriel(c.nonConfirmeHorsDelai, "hors délai", "hors délai")}`
     : "étiquette seule, pas de prise en charge";
-  $("depots-n-a-constater").textContent = c.aConstater ? `dont ${pluriel(c.aConstater, "à constater", "à constater")}` : "site protégé, en pause ou à la main";
+  // le « dont » ne compte que les bloques (B02 : aConstater compte aussi des
+  // non confirmes, et le « dont » depassait le total)
+  const constatBloques = c.aConstaterBloques ?? Math.min(c.aConstater || 0, c.bloque || 0);
+  $("depots-n-a-constater").textContent = constatBloques ? `dont ${pluriel(constatBloques, "à constater", "à constater")}` : "site protégé, en pause ou à la main";
   document.querySelectorAll(".depot-metric").forEach((b) => b.classList.toggle("active", b.dataset.depotsFiltre === depotsEtat.filtre));
 
   $("depots-sub").textContent = c.total
@@ -340,7 +353,7 @@ function ligneDepot(l) {
   return `
     <div class="depot-ligne cat-${escapeAttr(c.categorie)}${l.attention ? " attention" : ""}" data-key="${l.colisId}" data-depot="${l.colisId}">
       <div class="depot-cell depot-colis">
-        <button class="depot-numero" type="button" aria-label="Détail du colis ${numero}">${escapeHtml(l.numero)}</button>
+        <button class="depot-numero" type="button" aria-label="Détail du colis ${numero}">${numeroCoupe(l.numero)}</button>
         <span class="depot-sous"><span class="carrier depot-transporteur" data-carrier="${escapeAttr(l.transporteur.code)}"><i class="carrier-dot"></i>${escapeHtml(l.transporteur.nom)}</span> · ${escapeHtml(l.expediteur)}</span>
       </div>
       <div class="depot-cell depot-interne">
@@ -375,7 +388,7 @@ function ligneHistorique(h) {
   return `
     <div class="depot-ligne is-histo cat-${cat}" data-key="h${h.colisId}" data-depot="${h.colisId}">
       <div class="depot-cell depot-colis">
-        <button class="depot-numero" type="button" aria-label="Détail du colis ${numero}">${escapeHtml(h.numero)}</button>
+        <button class="depot-numero" type="button" aria-label="Détail du colis ${numero}">${numeroCoupe(h.numero)}</button>
         <span class="depot-sous"><span class="carrier depot-transporteur" data-carrier="${escapeAttr(h.transporteur.code)}"><i class="carrier-dot"></i>${escapeHtml(h.transporteur.nom)}</span> · ${escapeHtml(h.expediteur)}</span>
       </div>
       <div class="depot-cell depot-interne">

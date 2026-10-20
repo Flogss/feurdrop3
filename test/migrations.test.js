@@ -21,7 +21,7 @@ function baseTemporaire() {
 
 test("base neuve : toutes les migrations, puis plus rien a faire", () => {
   const db = baseTemporaire();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   assert.equal(versionDe(db), VERSION_SCHEMA);
   for (const c of ["type", "file_id", "printed_at", "note", "source_message_id", "price_locked"]) {
     assert.ok(colonnes(db, "colis").includes(c), c);
@@ -150,7 +150,7 @@ test("v10 : poids et prix du kilo ajoutes, rien de ce qui existe ne change", () 
   appliqueMigrations(db, { journal: silencieux, jusqua: 9 });
   db.prepare("INSERT INTO senders (name, price, lit_price, bj_price) VALUES ('Alice', 4.5, 6, 4.5)").run();
   db.prepare("INSERT INTO colis (sender_name, type, price, status) VALUES ('Alice', 'normal', 4.5, 'pending')").run();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [10]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux, jusqua: 10 }), [10]);
   const colis = db.prepare("SELECT * FROM colis").get();
   assert.equal(colis.price, 4.5);
   assert.equal(colis.poids_g, null);

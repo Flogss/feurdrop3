@@ -64,6 +64,24 @@ function setFiltresAuto(f) {
   return filtres;
 }
 
+// --- Point de depart ----------------------------------------------------------
+// La file automatique ne prend que les colis arrives apres l'activation : le
+// dernier colis existant est retenu a ce moment-la. Une base qui n'a pas
+// encore ce repere (version precedente, impression auto deja active) le prend
+// a la premiere lecture : un deploiement ne fait jamais sortir l'arriere.
+
+function marqueDepartAuto() {
+  const dernier = db.prepare("SELECT COALESCE(MAX(id), 0) AS m FROM colis").get().m;
+  setSetting("auto_print_depuis", String(dernier));
+  return dernier;
+}
+
+function departAuto() {
+  const brut = getSetting("auto_print_depuis", null);
+  if (brut === null) return marqueDepartAuto();
+  return Number(brut) || 0;
+}
+
 // --- Taches --------------------------------------------------------------------
 
 function lisTaches() {
@@ -95,8 +113,8 @@ function idsReserves(taches = lisTaches()) {
 
 function clauseAuto() {
   const f = getFiltresAuto();
-  const conds = [AUTOPRINT_SQL];
-  const params = [];
+  const conds = [AUTOPRINT_SQL, "id > ?"];
+  const params = [departAuto()];
   const dans = (expr, valeurs) => {
     conds.push(`${expr} IN (${valeurs.map(() => "?").join(",")})`);
     params.push(...valeurs);
@@ -239,6 +257,8 @@ function etatImpressionAuto(enabled) {
 }
 
 module.exports = {
+  marqueDepartAuto,
+  departAuto,
   getFiltresAuto,
   setFiltresAuto,
   fileAuto,

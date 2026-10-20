@@ -740,3 +740,9 @@ body.locker-ouvert { overflow: hidden; }
 .suivi-row-num { font: 600 14px var(--font-mono); letter-spacing: 0.01em; }
 #suivi-more { margin-top: 12px; }
 
+
+/* listes par expediteur repliees (reglages) : recherche au-dessus, « voir les
+   autres » en dessous */
+.liste-recherche { margin: 4px 0 10px; }
+.liste-recherche[hidden], .liste-plus[hidden] { display: none; }
+.liste-plus { width: 100%; margin-top: 8px; justify-content: center; color: var(--text-2); }

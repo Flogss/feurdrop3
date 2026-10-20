@@ -490,6 +490,24 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 11,
+    nom: "operations rejouees : reponses gardees en base (idempotence)",
+    applique(db) {
+      // une operation renvoyee apres une coupure est reconnue meme si le
+      // serveur a redemarre entre-temps (deploiement) : la reponse d'origine
+      // est gardee 30 min. Table ajoutee, rien d'autre ne change.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS idempotence (
+          cle TEXT PRIMARY KEY,
+          a INTEGER NOT NULL,
+          statut INTEGER NOT NULL,
+          corps TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_idempotence_a ON idempotence(a);
+      `);
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

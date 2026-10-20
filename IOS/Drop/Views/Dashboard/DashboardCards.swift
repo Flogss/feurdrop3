@@ -357,7 +357,9 @@ struct SendersCard: View {
                     ScrollView {
                         liste.padding(.vertical, 6)
                     }
-                    .scrollIndicators(.automatic)
+                    // pas de barre, comme partout ailleurs : les bords estompes
+                    // disent deja qu'il reste a voir (B14)
+                    .scrollIndicators(.never)
                     .mask {
                         VStack(spacing: 0) {
                             LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 10)

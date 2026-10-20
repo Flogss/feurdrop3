@@ -283,7 +283,7 @@ $("merge-pair-form").addEventListener("submit", async (e) => {
 
 $("merge-to-other-btn").addEventListener("click", async (e) => {
   const bouton = e.currentTarget;
-  const senderIds = [...document.querySelectorAll(".merge-check:checked")].map((el) => Number(el.value));
+  const senderIds = [...regroupesChoisis];
   if (senderIds.length === 0) return;
   const ok = await confirmer({
     titre: `Regrouper ${pluriel(senderIds.length, "expéditeur", "expéditeurs")} en « Autre » ?`,
@@ -296,7 +296,9 @@ $("merge-to-other-btn").addEventListener("click", async (e) => {
     bouton,
     async () => {
       await postJSON("/api/senders/merge-to-other", { senderIds });
+      regroupesChoisis.clear();
       await refreshAll();
+      updateMergeButtonState();
     },
     { succes: "Expéditeurs regroupés en « Autre »" }
   );

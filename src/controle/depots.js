@@ -1080,6 +1080,9 @@ function vue() {
     anomalie: 0,
     nonConfirmeHorsDelai: 0,
     aConstater: 0,
+    // parmi les « bloques » seulement : c'est ce que dit la carte
+    // « Verification bloquee » (aConstater compte aussi des non confirmes)
+    aConstaterBloques: 0,
     attention: 0,
     actifs: lignes.length,
     retires: retires.length,
@@ -1091,6 +1094,7 @@ function vue() {
     compteurs[l.controle.categorie] += 1;
     if (l.controle.categorie === "non_confirme" && l.controle.enRetard) compteurs.nonConfirmeHorsDelai += 1;
     if (l.aConstater) compteurs.aConstater += 1;
+    if (l.aConstater && l.controle.categorie === "bloque") compteurs.aConstaterBloques += 1;
     if (l.attention) compteurs.attention += 1;
   }
   return { etat: etat(toutes), compteurs, lignes, historique: { confirmes: confirmes.slice(0, 500), retires } };

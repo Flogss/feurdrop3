@@ -1,12 +1,71 @@
 // --- Reglages : dettes, prix, fusions -------------------------------------------
 
+// Les listes par expediteur (dettes, espaces, prix, regroupement) : au-dela
+// de quelques lignes, les premieres seulement, un champ de recherche et
+// « Voir les N autres ». Avec 120 expediteurs, la page faisait 50 000 px de
+// haut et les prix etaient introuvables (B06).
+const LIGNES_REPLIEES = 8;
+const replis = {}; // id de la liste -> { recherche, ouvert }
+const normaliseNom = (t) =>
+  String(t || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+function rendRepliable(id, rows, { nom, ...options }) {
+  const box = $(id);
+  if (!box) return;
+  const etat = (replis[id] ||= { recherche: "", ouvert: false });
+  const long = rows.length > LIGNES_REPLIEES;
+
+  let outils = box.previousElementSibling?.classList.contains("liste-recherche") ? box.previousElementSibling : null;
+  if (long && !outils) {
+    outils = document.createElement("label");
+    outils.className = "senders-search liste-recherche";
+    outils.innerHTML = `${ico("search")}<input type="search" placeholder="Rechercher un expéditeur" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Rechercher un expéditeur" />`;
+    box.before(outils);
+    outils.querySelector("input").addEventListener("input", (e) => {
+      etat.recherche = e.target.value;
+      box._rendre?.();
+    });
+  }
+  if (outils) outils.hidden = !long;
+
+  const q = normaliseNom(etat.recherche.trim());
+  const trouves = long && q ? rows.filter((r) => normaliseNom(nom(r)).includes(q)) : rows;
+  const visibles = !long || q || etat.ouvert ? trouves : trouves.slice(0, LIGNES_REPLIEES);
+  rendListe(box, visibles, {
+    ...options,
+    videHtml: q ? vide("search", "Aucun expéditeur", `Rien ne correspond à « ${escapeHtml(etat.recherche.trim())} ».`) : options.videHtml,
+  });
+
+  let pied = box.nextElementSibling?.classList.contains("liste-plus") ? box.nextElementSibling : null;
+  if (long && !q && !pied) {
+    pied = document.createElement("button");
+    pied.type = "button";
+    pied.className = "btn btn-sm btn-ghost liste-plus";
+    box.after(pied);
+    pied.addEventListener("click", () => {
+      etat.ouvert = !etat.ouvert;
+      box._rendre?.();
+    });
+  }
+  if (pied) {
+    pied.hidden = !long || Boolean(q);
+    const autres = rows.length - LIGNES_REPLIEES;
+    pied.textContent = etat.ouvert ? "Replier" : `Voir ${autres > 1 ? `les ${autres} autres` : "l'autre"}`;
+  }
+  box._rendre = () => rendRepliable(id, rows, { nom, ...options });
+}
+
 async function loadDebts() {
   const rows = await fetchJSON("/api/debts");
   if (!hasChanged("debts", rows)) return;
 
   const total = rows.reduce((sum, d) => sum + d.owed, 0);
   $("debts-total").textContent = total > 0 ? euro(total) : "";
-  rendListe($("debts-rows"), rows, {
+  rendRepliable("debts-rows", rows, {
+    nom: (d) => d.sender_name,
     cle: (d) => d.sender_name,
     videHtml: vide("check", "Personne ne vous doit rien", "", true),
     html: (d) => `
@@ -37,7 +96,8 @@ async function loadSenders() {
   if (box.contains(document.activeElement)) return;
   if (!hasChanged("settings", rows)) return;
 
-  rendListe(box, rows, {
+  rendRepliable("settings-rows", rows, {
+    nom: (s) => s.name,
     cle: (s) => s.id,
     videHtml: vide("tag", "Aucun expéditeur", "Ajoute le premier ci-dessous."),
     // le nom occupe sa propre ligne : avec trois tarifs editables, tout mettre
@@ -72,7 +132,8 @@ function renderPortails(rows) {
   if (!box) return;
   const actifs = rows.filter((s) => s.portail?.lien).length;
   $("portail-total").textContent = actifs ? pluriel(actifs, "lien actif", "liens actifs") : "";
-  rendListe(box, rows, {
+  rendRepliable("portail-rows", rows, {
+    nom: (s) => s.name,
     cle: (s) => s.id,
     videHtml: vide("tag", "Aucun expéditeur"),
     html: (s) => {
@@ -213,12 +274,13 @@ async function loadMergeCandidates() {
   const rows = await fetchJSON("/api/senders/merge-candidates");
   if (!hasChanged("mergeCandidates", rows)) return;
 
-  rendListe($("merge-rows"), rows, {
+  rendRepliable("merge-rows", rows, {
+    nom: (s) => s.name,
     cle: (s) => s.id,
     videHtml: vide("layers", "Aucun expéditeur pour le moment"),
     html: (s) => `
       <label class="lrow merge-row${s.mergeable ? "" : " is-protected"}" data-key="${s.id}">
-        <input type="checkbox" class="check merge-check" value="${s.id}" ${s.mergeable ? "" : "disabled"} aria-label="${escapeAttr(s.name)}" />
+        <input type="checkbox" class="check merge-check" value="${s.id}" ${s.mergeable ? "" : "disabled"} ${s.mergeable && regroupesChoisis.has(s.id) ? "checked" : ""} aria-label="${escapeAttr(s.name)}" />
         <div class="lrow-main">
           <div class="lrow-title">${escapeHtml(s.name)}</div>
           <div class="lrow-sub">${pluriel(s.colisCount, "colis", "colis")} · ${Math.round(s.pct * 100)} % du CA${s.mergeable ? "" : " · protégé"}</div>
@@ -228,8 +290,16 @@ async function loadMergeCandidates() {
   updateMergeButtonState();
 }
 
+// les expediteurs coches pour « Autre » : gardes quand la liste se redessine
+// (recherche, « voir les autres »), meme ceux qui ne sont plus affiches
+const regroupesChoisis = new Set();
+
 function updateMergeButtonState() {
-  const checked = document.querySelectorAll(".merge-check:checked").length;
+  for (const el of document.querySelectorAll(".merge-check")) {
+    if (el.checked) regroupesChoisis.add(Number(el.value));
+    else regroupesChoisis.delete(Number(el.value));
+  }
+  const checked = regroupesChoisis.size;
   const btn = $("merge-to-other-btn");
   btn.disabled = checked === 0;
   btn.textContent =
@@ -260,7 +330,11 @@ const stockEtat = {
 let stockCharge = false;
 
 async function loadStock() {
-  rendStock(await fetchJSON("/api/stock"));
+  const instant = instantLecture();
+  const stocks = await fetchJSON("/api/stock");
+  // partie avant une ecriture : peut-etre l'etat d'avant (B03)
+  if (!lectureFraiche(instant)) return;
+  rendStock(stocks);
 }
 
 function afficheStock(kind, { premier = false } = {}) {
