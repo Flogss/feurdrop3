@@ -56,6 +56,9 @@ final class AppModel {
     /// le mot de passe vient d'etre accepte : le lancement reprend au coeur
     /// de la meteorite (la ou l'ecran de connexion l'a laissee)
     var vientDeSeConnecter = false
+    /// la sequence de lancement est finie : les travaux de fond lourds (la
+    /// lecture des pages de suivi sur le Mac) attendent ce moment
+    var lancementFini = false
     /// cette session : jusqu'a quand, combien d'appareils (les reglages)
     private(set) var session: InfoSession?
 

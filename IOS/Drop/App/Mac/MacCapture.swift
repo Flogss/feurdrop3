@@ -1,6 +1,8 @@
-#if os(macOS) && DEBUG
+#if os(macOS) && (DEBUG || PERF_HOOKS)
 import AppKit
 import ScreenCaptureKit
+import CoreImage
+import CoreMedia
 import DropKit
 
 /// Verification en developpement : `-DropCapture /chemin.png -DropPageMac stats`
@@ -10,6 +12,9 @@ import DropKit
 enum MacCapture {
     static func planifie() {
         let reglages = UserDefaults.standard
+        if let dossier = reglages.string(forKey: "DropFilm") {
+            Task { @MainActor in await filme(dossier) }
+        }
         guard let chemin = reglages.string(forKey: "DropCapture") else { return }
         if let nom = reglages.string(forKey: "DropPageMac"), let page = MacPage(rawValue: nom) {
             Task { @MainActor in
@@ -44,6 +49,83 @@ enum MacCapture {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(delai > 0 ? delai : 6))
             await photographie(chemin)
+        }
+    }
+
+    /// `-DropFilm /dossier` : filme la fenetre des son apparition, 6 s --
+    /// l'instant de chaque image que macOS compose vraiment (une saccade
+    /// visible = un ecart de plus d'une image), et les images du debut.
+    static func filme(_ dossier: String) async {
+        var fenetre: SCWindow?
+        for _ in 0..<120 {
+            if let principale = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 && $0.frame.height > 400 }),
+               let contenu = try? await SCShareableContent.currentProcess,
+               let f = contenu.windows.first(where: { $0.windowID == CGWindowID(principale.windowNumber) }) {
+                fenetre = f
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        let trace = { (texte: String) in try? texte.write(toFile: dossier + "/film-etape.txt", atomically: true, encoding: .utf8) }
+        guard let fenetre else { trace("pas de fenetre"); return }
+        trace("fenetre \(fenetre.frame)")
+        let config = SCStreamConfiguration()
+        config.width = Int(fenetre.frame.width / 2)
+        config.height = Int(fenetre.frame.height / 2)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+        config.queueDepth = 8
+        config.showsCursor = false
+        let film = Film(dossier: dossier)
+        let flux = SCStream(filter: SCContentFilter(desktopIndependentWindow: fenetre), configuration: config, delegate: nil)
+        do {
+            try flux.addStreamOutput(film, type: .screen, sampleHandlerQueue: film.file)
+            try await flux.startCapture()
+            trace("capture en cours")
+            try? await Task.sleep(for: .seconds(6))
+            try await flux.stopCapture()
+        } catch {
+            try? "erreur: \(error)".write(toFile: dossier + "/film-erreur.txt", atomically: true, encoding: .utf8)
+        }
+        film.ecrit()
+    }
+
+    nonisolated final class Film: NSObject, SCStreamOutput, @unchecked Sendable {
+        let dossier: String
+        let file = DispatchQueue(label: "drop.film")
+        var images: [(temps: Double, statut: Int)] = []
+        var photos: [(Int, CGImage)] = []
+        let contexte = CIContext()
+        init(dossier: String) { self.dossier = dossier }
+
+        func stream(_ stream: SCStream, didOutputSampleBuffer tampon: CMSampleBuffer, of type: SCStreamOutputType) {
+            guard let infos = CMSampleBufferGetSampleAttachmentsArray(tampon, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+                  let info = infos.first, let brut = info[.status] as? Int else { return }
+            let temps = CMSampleBufferGetPresentationTimeStamp(tampon).seconds
+            images.append((temps, brut))
+            // les images du debut (1,5 s), puis une sur dix
+            guard brut == SCFrameStatus.complete.rawValue, let pixels = CMSampleBufferGetImageBuffer(tampon) else { return }
+            let i = images.count - 1
+            let debut = images.first?.temps ?? temps
+            guard temps - debut < 1.5 || i % 10 == 0 else { return }
+            let ci = CIImage(cvPixelBuffer: pixels)
+            if let cg = contexte.createCGImage(ci, from: ci.extent) { photos.append((i, cg)) }
+        }
+
+        func ecrit() {
+            file.sync {
+                let debut = images.first?.temps ?? 0
+                let completes = images.filter { $0.statut == SCFrameStatus.complete.rawValue }
+                var lignes = images.map { String(format: "%.4f;%d", $0.temps - debut, $0.statut) }
+                let ecarts = zip(completes.dropFirst(), completes).map { ($0.temps - $1.temps) * 1000 }
+                let sauts = zip(completes.dropFirst(), ecarts).filter { $0.1 > 25 }.map { String(format: "%.2fs:%.0fms", $0.0.temps - debut, $0.1) }
+                lignes.insert("# \(completes.count) images composees sur \(images.count) ; ecarts > 25 ms : \(sauts.count) \(sauts.joined(separator: " "))", at: 0)
+                try? lignes.joined(separator: "\n").write(toFile: dossier + "/film.txt", atomically: true, encoding: .utf8)
+                for (i, cg) in photos {
+                    let rep = NSBitmapImageRep(cgImage: cg)
+                    try? rep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])?
+                        .write(to: URL(fileURLWithPath: dossier + String(format: "/f%03d.jpg", i)))
+                }
+            }
         }
     }
 

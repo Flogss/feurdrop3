@@ -80,7 +80,7 @@ struct MacRootView: View {
     @State private var marquePosee = false
     /// l'interface sous la sequence de lancement : rien n'est dessine tant que
     /// la scene opaque la couvre entierement (voir `onPreparation`)
-    @State private var dessinee = false
+    @State private var dessinee = Self.dessineeTot
 
     /// Sans session : l'ecran de connexion, et rien d'autre ne se charge.
     var body: some View {
@@ -111,7 +111,7 @@ struct MacRootView: View {
             .padding(.top, MacTopBar.hauteur)
             // prete sous la sequence de lancement ; l'onde la decouvre et elle
             // se pose (un peu grande et floue, puis nette)
-            .blur(radius: booted ? 0 : 12)
+            .blur(radius: booted || Self.sansFlouEntree ? 0 : 12)
             .scaleEffect(booted ? 1 : 1.03)
             .opacity(dessinee || !lancement ? 1 : 0)
 
@@ -143,6 +143,7 @@ struct MacRootView: View {
                         marquePosee = true
                         lancement = false
                         app.vientDeSeConnecter = false
+                        app.lancementFini = true
                     }
                 )
             }
@@ -253,6 +254,24 @@ struct MacRootView: View {
         print("PERF parcours fini")
     }
     #endif
+
+    /// mesures : `-DropDessineeTot 1` (l'interface dessinee des le debut)
+    private static let dessineeTot: Bool = {
+        #if DEBUG || PERF_HOOKS
+        return UserDefaults.standard.bool(forKey: "DropDessineeTot")
+        #else
+        return false
+        #endif
+    }()
+
+    /// mesures : `-DropSansFlouEntree 1` (l'entree sans le flou, pour comparer)
+    private static let sansFlouEntree: Bool = {
+        #if DEBUG || PERF_HOOKS
+        return UserDefaults.standard.bool(forKey: "DropSansFlouEntree")
+        #else
+        return false
+        #endif
+    }()
 
     /// Les premiers chiffres se chargent pendant la sequence de lancement ;
     /// c'est son onde qui ouvre l'interface (`revele`).

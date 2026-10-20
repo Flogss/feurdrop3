@@ -83,6 +83,15 @@ final class VerificateurPages: NSObject, WKNavigationDelegate {
             reason: "Lecture des pages de suivi officielles pour le contrôle des dépôts"
         )
         veilleTache = Task { [weak self] in
+            // Jamais pendant la sequence de lancement : une lecture charge des
+            // sites entiers (moteur web, reseau, carte graphique) et faisait
+            // hoqueter la meteorite. On attend sa fin, puis 3 s ; au plus 20 s
+            // (app ouverte sans fenetre : pas de sequence).
+            let limite = Date.now.addingTimeInterval(20)
+            while !Task.isCancelled, self?.app.lancementFini == false, Date.now < limite {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            try? await Task.sleep(for: .seconds(3))
             while !Task.isCancelled {
                 await self?.signale()
                 try? await Task.sleep(for: .seconds(10))

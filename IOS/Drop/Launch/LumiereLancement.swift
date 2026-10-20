@@ -102,8 +102,13 @@ nonisolated final class MoteurLancement: @unchecked Sendable {
         var premiere = true
         #if DEBUG
         var instants: [CFTimeInterval] = []
+        /// le temps de la sequence a la premiere image, et la compilation
+        var premierT: Double?
+        var dureePreparation: Double = 0
         let verrouGPU = NSLock()
         var tempsGPU: [Double] = []
+        /// (instant de la sequence, temps GPU) : ou se trouvent les pics
+        var parInstant: [(Double, Double)] = []
         #endif
 
         init(moteur: MoteurLancement, device: MTLDevice) {
@@ -116,6 +121,10 @@ nonisolated final class MoteurLancement: @unchecked Sendable {
         /// compile les shaders (une fois, sur ce fil)
         func prepare() -> Bool {
             if scene != nil { return true }
+            #if DEBUG
+            let debutPreparation = CACurrentMediaTime()
+            defer { dureePreparation = (CACurrentMediaTime() - debutPreparation) * 1000 }
+            #endif
             do {
                 let bibliotheque = try device.makeLibrary(source: MoteurLancement.source, options: nil)
                 let d = MTLRenderPipelineDescriptor()
@@ -194,7 +203,10 @@ nonisolated final class MoteurLancement: @unchecked Sendable {
             commandes.addCompletedHandler { [weak self] c in
                 guard let self else { return }
                 let d = (c.gpuEndTime - c.gpuStartTime) * 1000
-                self.verrouGPU.withLock { self.tempsGPU.append(d) }
+                self.verrouGPU.withLock {
+                    self.tempsGPU.append(d)
+                    self.parInstant.append((t, d))
+                }
             }
             #endif
             if premiere {
@@ -267,16 +279,21 @@ nonisolated final class MoteurLancement: @unchecked Sendable {
         /// mesure en developpement : la regularite des images de la sequence
         private func note(_ t: Double) {
             guard moteur.fige == nil else { return }
+            if premierT == nil { premierT = t }
             instants.append(CACurrentMediaTime())
             guard t > 4.9, instants.count > 2 else { return }
             let ecarts = zip(instants.dropFirst(), instants).map { ($0 - $1) * 1000 }
+            let debutTexte = String(format: "premiere image a t=%.3f s (compilation %.0f ms) ; 12 premiers ecarts : %@\n",
+                                    premierT ?? -1, dureePreparation, ecarts.prefix(12).map { String(format: "%.0f", $0) }.joined(separator: " "))
             let tries = ecarts.sorted()
             let gpu = verrouGPU.withLock { tempsGPU }.sorted()
             let texte = String(format: "lancement : %d images en %.2f s, moyenne %.1f ms, p95 %.1f ms, pire %.1f ms, >20 ms : %d | GPU de la sequence : moyenne %.2f ms, p95 %.2f ms, pire %.2f ms",
                                instants.count, instants.last! - instants.first!, ecarts.reduce(0, +) / Double(ecarts.count),
                                tries[Int(Double(tries.count - 1) * 0.95)], tries.last!, ecarts.filter { $0 > 20 }.count,
                                gpu.isEmpty ? 0 : gpu.reduce(0, +) / Double(gpu.count), gpu.isEmpty ? 0 : gpu[Int(Double(gpu.count - 1) * 0.95)], gpu.last ?? 0)
-            try? texte.write(toFile: NSTemporaryDirectory() + "intro-perf.txt", atomically: true, encoding: .utf8)
+            try? (debutTexte + texte).write(toFile: NSTemporaryDirectory() + "intro-perf.txt", atomically: true, encoding: .utf8)
+            let serie = verrouGPU.withLock { parInstant }.map { String(format: "%.3f;%.2f", $0.0, $0.1) }.joined(separator: "\n")
+            try? serie.write(toFile: NSTemporaryDirectory() + "intro-gpu.csv", atomically: true, encoding: .utf8)
         }
         #endif
     }

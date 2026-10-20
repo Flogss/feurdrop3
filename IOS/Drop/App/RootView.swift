@@ -80,6 +80,7 @@ struct RootView: View {
                 LaunchSequence(cible: nil, apresConnexion: app.vientDeSeConnecter, onRevelation: revele, onPreparation: { dessinee = true }, onFin: {
                     lancement = false
                     app.vientDeSeConnecter = false
+                    app.lancementFini = true
                 })
             }
         }

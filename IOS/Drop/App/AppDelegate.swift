@@ -45,8 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         AppModel.shared.verificateur.veille()
         // la molette d'une souris glisse au lieu de sauter, comme dans un navigateur
         DefilementDoux.shared.demarre()
-        #if DEBUG
+        #if DEBUG || PERF_HOOKS
         MacCapture.planifie()
+        #endif
+        #if DEBUG
         TestSouris.planifie()
         if let chemin = UserDefaults.standard.string(forKey: "DropTestDefilement") {
             Task { @MainActor in
