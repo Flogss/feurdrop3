@@ -15,6 +15,15 @@ struct DepotsView: View {
     private var large: Bool { largeur >= 700 }
 
     var body: some View {
+        #if os(macOS)
+        // sur le Mac : un poste de travail (tableau + detail a droite)
+        DepotsMacView()
+        #else
+        pageTelephone
+        #endif
+    }
+
+    private var pageTelephone: some View {
         ScrollView {
             VStack(spacing: 14) {
                 if let erreur = model.loadError, !model.loaded {

@@ -196,10 +196,10 @@ struct MacRootView: View {
                     .frame(maxWidth: .infinity)
             }
         case .depots:
+            // (son propre en-tete, fixe : le tableau defile dessous sans le recouvrir)
             NavigationStack {
                 DepotsView()
-                    .safeAreaInset(edge: .top, spacing: 0) { enTete("Contrôle des dépôts", largeur: 1100) }
-                    .frame(maxWidth: 1100)
+                    .frame(maxWidth: 1700)
                     .frame(maxWidth: .infinity)
             }
         case .historique:

@@ -245,6 +245,14 @@ final class DepotsModel {
 
     var numerosAConstater: [String] { campagne?.numerosAConstater ?? [] }
 
+    /// la campagne a montrer : en cours, ou finie depuis moins de 6 h (et pas masquee)
+    var campagneVisible: Bool {
+        guard let etat = campagne, let c = etat.campagne else { return false }
+        if etat.active { return true }
+        guard campagneMasquee != c.id, let fin = ServerDate.parse(c.finLe ?? c.creeLe) else { return false }
+        return Date.now.timeIntervalSince(fin) < 6 * 3600
+    }
+
     func demandeSerieAConstater() {
         let numeros = Set(numerosAConstater)
         // un numero, une page : un meme numero sur deux colis ne s'ouvre qu'une fois
