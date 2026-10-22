@@ -459,9 +459,9 @@ test("colis simultanes : chaque resultat sur le bon numero, une page d'un autre 
 // Les faux positifs corriges
 // =====================================================================================
 
-test("faux positif corrigé : un numero reutilise ne montre qu'un ancien parcours -> non confirmé, reste actif", async () => {
-  // l'ancien colis de ce numero, livre il y a 8 jours ; l'etiquette du nouveau est arrivee il y a 14 h
-  faux.suivi("6A13000000001", [ev(190, "DI1", "Votre colis est livré."), ev(200, "ET1"), ev(210, "PC1")]);
+test("faux positif corrigé : un numero reutilise (parcours livre, puis nouvelle etiquette) -> non confirmé, reste actif", async () => {
+  // l'ancien colis de ce numero, livre il y a 8 jours, puis la nouvelle etiquette
+  faux.suivi("6A13000000001", [ev(20, "DR1", "Votre Colissimo va bientôt nous être confié !"), ev(190, "DI1", "Votre colis est livré."), ev(200, "ET1"), ev(210, "PC1")]);
   const id = drope("6A13000000001");
   await depots.synchronise();
   const c = ligne(id).controle;
@@ -472,7 +472,7 @@ test("faux positif corrigé : un numero reutilise ne montre qu'un ancien parcour
   assert.equal(actif(id), true);
   // meme chose sur une page Mondial Relay
   const mr = drope("4278870060", { carrier: "MR", heures: 3 });
-  depots.recoitResultats([resultatMR("4278870060", [[150, "Colis livré au destinataire"], [170, "Colis pris en charge en Point Relais"]])]);
+  depots.recoitResultats([resultatMR("4278870060", [[2, "Colis en préparation chez l'expéditeur"], [150, "Colis livré au destinataire"], [170, "Colis pris en charge en Point Relais"]])]);
   assert.equal(ligne(mr).controle.categorie, "non_confirme");
   assert.equal(actif(mr), true);
 });
@@ -497,19 +497,19 @@ test("apres la mise a jour : un ancien « confirmé » de l'ancienne regle est r
   assert.equal(actif(vrai), false, "il reste hors de la liste active");
 });
 
-test("faux positif corrigé : boite jaune -- un passage en point relais avant l'etiquette n'est pas la preuve, le scan d'apres l'est", async () => {
+test("boite jaune enregistree apres son passage en point relais : le meme parcours prouve le depot", async () => {
   const c = db.addColis("Alice", { fileId: "F-BJ", fileKind: "pdf", type: "bj", fileName: "BOITEJAUNE6Y11147788515.pdf" });
   db.dropColis(c.id);
   db.db.prepare("UPDATE colis SET created_at = datetime('now', '-10 hours'), dropped_at = datetime('now', '-8 hours') WHERE id = ?").run(c.id);
   faux.suivi("6Y11147788515", [ev(22, "AG1", "Votre Colissimo vous attend dans votre point de retrait."), ev(34, "DR1")]);
   await depots.synchronise();
-  assert.equal(ligne(c.id).controle.categorie, "non_confirme");
+  assert.equal(ligne(c.id).controle.categorie, "confirme");
+  assert.equal(ligne(c.id).controle.avantEnregistrement, true);
   faux.suivi("6Y11147788515", [ev(1, "ET1", "Votre colis est en transit"), ev(22, "AG1", "Votre Colissimo vous attend dans votre point de retrait."), ev(34, "DR1")]);
   rendDu();
   await depots.synchronise();
   const l = ligne(c.id);
   assert.equal(l.controle.categorie, "confirme");
-  assert.equal(l.controle.preuve.code, "ET1");
 });
 
 // =====================================================================================

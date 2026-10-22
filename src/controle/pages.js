@@ -276,15 +276,20 @@ function evenementsLignes(code, section) {
   let jour = null;
   let heure = null;
   let ordre = 10_000;
+  let depuisDate = 99;
   for (const l of section) {
     const d = litDate(l);
-    if (d) jour = d;
+    if (d) {
+      jour = d;
+      depuisDate = 0;
+    } else depuisDate += 1;
     const h = litHeure(l);
     if (h) heure = h;
     if (estDate(l) || estHeure(l)) continue;
-    // avant toute date : un resume en tete de page (« Livré »), pas un
-    // evenement -- un evenement reel est date
-    if (!jour) continue;
+    // avant toute date, ou loin de toute date : un resume en tete de page
+    // (« Livré ») ou un autre bloc, pas un evenement -- un evenement reel est
+    // date, sur sa ligne ou juste au-dessus
+    if (!jour || depuisDate > 3) continue;
     // une ligne trop longue est un paragraphe d'aide, pas un evenement
     if (l.length > 160) continue;
     const libelle = l.replace(/\b\d{1,2}[/.]\d{1,2}[/.]\d{4}\b/, "").replace(/\b([01]?\d|2[0-3])[:h][0-5]\d\s*([ap]\.?m\.?)?/i, "").replace(/\s+/g, " ").trim() || l;
@@ -335,7 +340,10 @@ const LECTEURS = {
     introuvable: /tentative de suivi a [ée]chou[ée]|tracking attempt (was )?(not successful|failed|unsuccessful)|aucun r[ée]sultat|no result/i,
     numeroAffiche: (lignes, numero) => (lignes.some((l) => l.replace(/\s/g, "").toUpperCase().includes(numero)) ? numero : null),
     concerne: (affiche, numero) => affiche === numero,
-    section: (lignes) => entre(lignes, /^(saisissez votre|enter your) .*(num[ée]ro|tracking)|^suivre$|^track$/i, /questions fr[ée]quemment pos[ée]es|frequently asked questions/i),
+    // (le pied de page parle du magazine « Delivered » : jamais lu, vu sur la
+    // page d'un numero inconnu)
+    section: (lignes) =>
+      entre(lignes, /^(saisissez votre|enter your) .*(num[ée]ro|tracking)|^suivre$|^track$/i, /questions fr[ée]quemment pos[ée]es|frequently asked questions|^pied de page$|^footer$|liens d.acc[eè]s rapides|quick links|informations sur la soci[ée]t[ée]|company information/i),
     evenements: (section) => evenementsLignes("DHL", section),
   },
   GLS: {

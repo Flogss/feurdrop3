@@ -107,10 +107,12 @@ test("FAUX POSITIF corrige : des scans ANTERIEURS a la reception de l'etiquette 
   assert.equal(nouveau.preuve.code, "ET1");
 });
 
-test("FAUX POSITIF corrige, cas reel : 6B00017912600 en point de retrait la veille de la reception de son etiquette -> non confirme", () => {
-  // etiquette recue par FeurDrop le 09/10 a 17:20 UTC ; La Poste l'avait en
-  // transit le 08/10 et en point de retrait le 09/10 au matin : ce n'est pas
-  // un depot de FeurDrop (il etait « Posté confirmé » avant la correction)
+test("etiquette enregistree APRES le passage du colis (cas reels d'octobre) : le meme parcours prouve le depot", () => {
+  // etiquette enregistree dans FeurDrop le 09/10 a 17:20 UTC ; La Poste avait
+  // le colis en transit le 08/10 et en point de retrait le 09/10 au matin.
+  // Des colis de @boxingmaestro (livre le 13/10, dropé le 15/10) montrent que
+  // l'enregistrement arrive parfois apres le passage : sans parcours termine
+  // puis recommence, c'est le meme colis -- « Posté confirmé »
   const r = analyseDepot({
     colis: { status: "dropped", created_at: "2026-10-09 17:20:59", dropped_at: "2026-10-09 18:44:15" },
     suivi: { trouve: 1 },
@@ -124,11 +126,12 @@ test("FAUX POSITIF corrige, cas reel : 6B00017912600 en point de retrait la veil
     transporteur: LP,
     maintenant: Date.parse("2026-10-10T08:00:00Z"),
   });
-  assert.equal(r.categorie, "non_confirme");
-  assert.match(r.raison, /ancien parcours/);
+  assert.equal(r.categorie, "confirme");
+  assert.equal(r.avantEnregistrement, true);
+  assert.match(r.raison, /antérieur à l'enregistrement de l'étiquette/);
 });
 
-test("boite jaune : ancien passage en point relais, puis un vrai scan apres la reception -> confirme par le nouveau scan", () => {
+test("boite jaune : passage en point relais avant l'enregistrement, puis un scan apres -> confirme (meme parcours)", () => {
   const r = analyseDepot({
     colis: { type: "bj", status: "dropped", created_at: "2026-10-09 12:50:15", dropped_at: "2026-10-09 14:47:15" },
     suivi: { trouve: 1 },
@@ -142,7 +145,7 @@ test("boite jaune : ancien passage en point relais, puis un vrai scan apres la r
     maintenant: Date.parse("2026-10-09T20:00:00Z"),
   });
   assert.equal(r.categorie, "confirme");
-  assert.equal(r.preuve.code, "ET1");
+  assert.equal(r.preuve.code, "MD1", "la premiere prise en charge du parcours");
 });
 
 test("un code physique dont le libelle dit le contraire n'est pas une preuve", () => {

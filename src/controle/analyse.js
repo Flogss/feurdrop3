@@ -62,10 +62,18 @@ const ETAPES_FR = {
 };
 
 const HEURE = 3600 * 1000;
-// "Avant la reception de l'etiquette" : les dates portent leur fuseau ; la
-// marge couvre les ecarts d'horloge et un bot qui aurait traite l'etiquette
-// en retard. Un ancien parcours date, lui, de jours ou de semaines.
+// "Avant l'enregistrement de l'etiquette" : les dates portent leur fuseau ;
+// la marge couvre les ecarts d'horloge.
 const MARGE_ANCIEN = 6 * HEURE;
+// Au-dela, un scan anterieur a l'enregistrement est d'un autre envoi.
+const FENETRE_ANCIEN = 30 * 24 * HEURE;
+
+// La fin d'un parcours : livre, ou rendu a l'expediteur / au vendeur.
+const finDeParcours = (e) => {
+  if (e.etape === "delivered") return true;
+  const texte = `${e.incident || ""} ${e.libelle || ""}`;
+  return e.etape === "exception" && /exp[ée]diteur|vendeur/i.test(texte) && /distribu|livr|disposition/i.test(texte);
+};
 
 const PREUVE_FR = {
   in_transit: "Pris en charge",
@@ -137,23 +145,46 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
   const tous = evenements
     .map((e) => ({ ...e, ms: versMs(e.survenuLe) }))
     .sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity) || (b.ordre ?? 0) - (a.ordre ?? 0));
-  // un evenement donne au jour seulement (sans heure) se compare au jour :
-  // « 09/10 · Colis pris en charge » le jour de la reception de l'etiquette
-  // n'est pas un ancien parcours
-  const ancien = (e) => {
+  // un evenement donne au jour seulement (sans heure) se compare au jour
+  const passe = (e) => (e.jourSeul ? jourParis(e.ms) <= jourParis(maintenant) : e.ms <= maintenant + HEURE);
+  const avantEnregistrement = (e) => {
     if (seuilAncien == null || e.ms == null) return false;
     if (e.jourSeul) return jourParis(e.ms) < jourParis(recuMs);
     return e.ms < seuilAncien;
   };
-  const passe = (e) => (e.jourSeul ? jourParis(e.ms) <= jourParis(maintenant) : e.ms <= maintenant + HEURE);
+
+  // Les parcours du numero. FeurDrop enregistre parfois l'etiquette APRES le
+  // passage du colis chez le transporteur (PDF envoye en retard, vu sur de
+  // vrais colis : pris en charge le 01/10, enregistre et dropé le 02/10 ;
+  // livré le 13/10, dropé le 15/10) : un scan anterieur a l'enregistrement
+  // reste une preuve. Un numero peut aussi servir deux fois (etiquette
+  // reutilisee) : apres la FIN d'un parcours (livre, rendu a l'expediteur),
+  // une nouvelle etiquette ou un nouveau scan ouvre un nouveau parcours ; seul
+  // le dernier parle de ce colis. Et rien de plus de 30 jours avant
+  // l'enregistrement.
+  const chrono = tous.filter((e) => e.source !== "manuel" && e.ms != null && passe(e)).sort((a, b) => a.ms - b.ms || (a.ordre ?? 0) - (b.ordre ?? 0));
+  let debutDernierParcours = -Infinity;
+  let fini = false;
+  for (const e of chrono) {
+    if (fini && (e.etape === "info_received" || (e.physique && !finDeParcours(e)))) {
+      debutDernierParcours = e.ms;
+      fini = false;
+    }
+    if (e.physique && finDeParcours(e)) fini = true;
+  }
+  const ancien = (e) => {
+    if (e.ms == null || e.source === "manuel") return false;
+    if (e.ms < debutDernierParcours) return true;
+    return recuMs != null && e.ms < recuMs - FENETRE_ANCIEN;
+  };
   // le constat manuel le plus recent fait foi parmi les constats
   const dernierConstat = tous.find((e) => e.source === "manuel") || null;
   const lusTransporteur = tous.filter((e) => e.source !== "manuel");
   const retenus = [...lusTransporteur, ...(dernierConstat ? [dernierConstat] : [])].sort((a, b) => (b.ms ?? -Infinity) - (a.ms ?? -Infinity));
 
   const dernier = decrit(lusTransporteur[0] || null);
-  // (une livraison d'un ancien parcours ne dit rien de ce colis)
-  const livre = lusTransporteur.some((e) => e.etape === "delivered" && !e.incident && !ancien(e));
+  // (une livraison d'un ancien parcours, ou datee dans le futur, ne dit rien de ce colis)
+  const livre = lusTransporteur.some((e) => e.etape === "delivered" && !e.incident && e.ms != null && !ancien(e) && passe(e));
   const commun = {
     dernierEvenement: dernier,
     dernierStatut: dernier ? { etape: dernier.etape, libelle: ETAPES_FR[dernier.etape] || "Statut non reconnu" } : null,
@@ -183,10 +214,12 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     }
     const seulementLivre = preuves.every((e) => e.etape === "delivered");
     const ou = p.source && p.source !== "laposte" ? ` — ${SOURCES_FR[p.source] || p.source}` : "";
+    // le colis est passe chez le transporteur avant l'enregistrement de son etiquette
+    const tot = avantEnregistrement(p) ? ` Scan antérieur à l'enregistrement de l'étiquette dans FeurDrop (${heureLisible(recuMs)}) : même parcours.` : "";
     const raison = seulementLivre
-      ? `Livré le ${quandLisible(preuve)} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé${ou}.`
-      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${quandLisible(preuve)} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}${ou}.`;
-    return resultat("confirme", raison, { preuve, suite });
+      ? `Livré le ${quandLisible(preuve)} : aucun scan de prise en charge n'est remonté avant la livraison, mais le colis a bien circulé${ou}.${tot}`
+      : `${PREUVE_FR[preuve.etape] || "Scan"} le ${quandLisible(preuve)} : « ${preuve.statut} »${preuve.lieu ? ` (${preuve.lieu})` : ""}${ou}.${tot}`;
+    return resultat("confirme", raison, { preuve, suite, avantEnregistrement: Boolean(tot) });
   }
 
   // --- constats a la main sans preuve -------------------------------------------------
@@ -232,9 +265,18 @@ function analyseDepot({ colis, suivi = null, evenements = [], transporteur, paus
     const dernierAncien = anciens.reduce((a, b) => (b.ms > a.ms ? b : a));
     return resultat(
       "non_confirme",
-      `Aucune prise en charge depuis la réception de l'étiquette (${heureLisible(recuMs)}) : le suivi ne montre qu'un ancien parcours de ce numéro (dernier scan le ${quandLisible(dernierAncien)}, « ${dernierAncien.libelle || ETAPES_FR[dernierAncien.etape]} »).`,
+      `Aucune prise en charge sur le parcours actuel de ce numéro : le suivi ne montre qu'un ancien parcours, terminé ou de plus de 30 jours avant l'enregistrement de l'étiquette (${heureLisible(recuMs)}) — dernier scan le ${quandLisible(dernierAncien)}, « ${dernierAncien.libelle || ETAPES_FR[dernierAncien.etape]} ». Étiquette réutilisée ?`,
       { enRetard: retard, ancienParcours: true }
     );
+  }
+
+  // --- etiquette annulee et remboursee : ce numero ne sera jamais scanne ------------
+  const annulation = lusTransporteur.find((e) => !ancien(e) && /annulation de (votre|l.)affranchissement|rembourse/i.test(e.libelle || ""));
+  if (annulation) {
+    return resultat("a_verifier", `Étiquette annulée et remboursée (« ${annulation.libelle} », le ${quandLisible(annulation)}) : ce numéro ne sera jamais scanné. Si le colis est parti, c'est avec une autre étiquette.`, {
+      enRetard: true,
+      annulee: true,
+    });
   }
 
   // --- etiquette seulement ---------------------------------------------------------------

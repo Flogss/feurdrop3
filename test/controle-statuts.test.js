@@ -171,10 +171,65 @@ test("une absence de resultat n'est jamais une confirmation ; un evenement ambig
   assert.equal(ambigu.categorie, "a_verifier");
 });
 
-test("statut ancien : un scan d'avant la reception de l'etiquette ne prouve pas ce depot", () => {
-  const r = analyse("LP", { colis: colis(10, 12), evenements: [lp(200, "DI1", "Votre colis est livré"), lp(210, "PC1", "Déposé")] });
-  assert.equal(r.categorie, "non_confirme");
-  assert.equal(r.ancienParcours, true);
+test("statut ancien : un parcours termine puis une nouvelle etiquette, ou un parcours de plus de 30 jours, ne prouve pas ce depot", () => {
+  // livre il y a 8 jours, puis une nouvelle etiquette : numero reutilise
+  const reutilise = analyse("LP", { colis: colis(10, 12), evenements: [lp(20, "DR1", "Votre Colissimo va bientôt nous être confié"), lp(200, "DI1", "Votre colis est livré"), lp(210, "PC1", "Déposé")] });
+  assert.equal(reutilise.categorie, "non_confirme");
+  assert.equal(reutilise.ancienParcours, true);
+  // un parcours de plus de 30 jours avant l'enregistrement
+  const vieux = analyse("LP", { colis: colis(10, 12), evenements: [lp(1000, "DI1", "Votre colis est livré"), lp(1010, "PC1", "Déposé")] });
+  assert.equal(vieux.categorie, "non_confirme");
+  // livre 2 jours AVANT l'enregistrement, sans rien apres (cas reels) : le colis a bien circule
+  const tard = analyse("LP", { colis: colis(10, 12), evenements: [lp(60, "DI1", "Votre colis est livré"), lp(80, "PC1", "Déposé")] });
+  assert.equal(tard.categorie, "confirme");
+  assert.equal(tard.livre, true);
+});
+
+test("cas reels @boxingmaestro : pris en charge ou livre avant l'enregistrement dans FeurDrop -> Posté confirmé", () => {
+  // MR 4278185095 : pris en charge le 01/10 14:39, enregistre et dropé le 02/10
+  const pris = analyseDepot({
+    colis: { status: "dropped", created_at: "2026-10-02 17:00:00", dropped_at: "2026-10-02 17:51:00" },
+    suivi: { trouve: 1 },
+    evenements: [{ survenuLe: "2026-10-01T14:39:00+02:00", etape: "in_transit", physique: true, libelle: "Colis pris en charge en Point Relais", source: "navigateur" }],
+    transporteur: transporteur("MR"),
+    maintenant: MAINTENANT,
+  });
+  assert.equal(pris.categorie, "confirme");
+  // MR 3473600217 : livré le 13/10, dropé le 15/10
+  const livre = analyseDepot({
+    colis: { status: "dropped", created_at: "2026-10-15 18:00:00", dropped_at: "2026-10-15 18:34:00" },
+    suivi: { trouve: 1 },
+    evenements: [{ survenuLe: "2026-10-13T14:46:00+02:00", etape: "delivered", physique: true, libelle: "Colis livré au destinataire", source: "navigateur" }],
+    transporteur: transporteur("MR"),
+    maintenant: Date.parse("2026-10-20T19:00:00Z"),
+  });
+  assert.equal(livre.categorie, "confirme");
+  // une livraison datee dans le futur (page mal lue) ne compte jamais
+  const futur = analyseDepot({
+    colis: { status: "dropped", created_at: "2026-10-08 14:00:00", dropped_at: "2026-10-08 14:39:00" },
+    suivi: { trouve: 1 },
+    evenements: [{ survenuLe: "2026-10-22T13:07:00+02:00", etape: "delivered", physique: true, libelle: "Delivered", source: "navigateur" }],
+    transporteur: transporteur("DHL"),
+    maintenant: Date.parse("2026-10-20T19:00:00Z"),
+  });
+  assert.notEqual(futur.categorie, "confirme");
+  assert.equal(futur.livre, false);
+});
+
+test("La Poste : une etiquette annulee et remboursee est dite (jamais « pas encore scanné » sans fin)", () => {
+  const r = analyse("LP", { colis: colis(100), evenements: [lp(20, "ZZ1", "Vous avez fait une demande d'annulation de votre affranchissement auprès de notre service clients. Nous procédons au remboursement de votre envoi."), lp(120, "DR1")] });
+  assert.equal(r.categorie, "a_verifier");
+  assert.equal(r.annulee, true);
+  assert.match(r.raison, /annulée et remboursée/);
+});
+
+test("DHL : la page d'un numero inconnu (pied de page « Delivered ») n'est jamais une livraison", () => {
+  const texte = "Service de suivi\nSaisissez votre/vos numéro(s) de suivi\nSuivre\nJJD014600012864921699\nDésolé, votre tentative de suivi a échoué. Veuillez vérifier votre numéro de suivi et réessayer.\nQuestions fréquemment posées\nPied de page\nInformations sur la société\nÀ propos de DHL\nDelivered\nCarrières";
+  assert.equal(lisPage("DHL", { texte }, "JJD014600012864921699").etat, "introuvable");
+  // la meme page sans le message d'echec (chargement partiel) : pas de livraison non plus
+  const partielle = "Saisissez votre/vos numéro(s) de suivi\nSuivre\nJJD014600012864921699\n22.10.2026\nPied de page\nInformations sur la société\nDelivered";
+  const r = lisPage("DHL", { texte: partielle }, "JJD014600012864921699");
+  assert.ok(!r.evenements.some((e) => e.etape === "delivered"));
 });
 
 // --- Releves sur 60 vrais colis Mondial Relay (20/10/2026, numeros factices ici) -------
@@ -261,11 +316,7 @@ Je m'informe`;
   const colis = { status: "dropped", created_at: "2026-10-08 23:42:03", dropped_at: "2026-10-09 13:42:49" };
   const r = analyseDepot({ colis, suivi: { trouve: 1 }, evenements, transporteur: transporteur("MR"), maintenant: Date.parse("2026-10-20T19:00:00Z") });
   assert.equal(r.categorie, "confirme");
-  assert.match(r.preuve.statut, /site logistique de Wissous/);
-  // sans cette derniere ligne : l'ancien parcours seul n'est pas ce depot
-  const ancien = analyseDepot({ colis, suivi: { trouve: 1 }, evenements: evenements.slice(1), transporteur: transporteur("MR"), maintenant: Date.parse("2026-10-20T19:00:00Z") });
-  assert.equal(ancien.categorie, "non_confirme");
-  assert.equal(ancien.ancienParcours, true);
+  assert.match(r.preuve.statut, /site logistique de Wissous/, "la preuve est celle du nouveau parcours");
 });
 
 test("une formule inconnue apres la reception de l'etiquette : a verifier (jamais « pas encore scanné »)", () => {
