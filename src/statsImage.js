@@ -4,6 +4,8 @@ const { Resvg } = require("@resvg/resvg-js");
 const FONT_DIR = path.join(__dirname, "fonts");
 
 const euro = (n) => `${Number(n || 0).toFixed(2)} EUR`;
+// (un seul formateur : chacun garde des objets ICU natifs jusqu'au ramasse-miettes)
+const FORMAT_MAJ = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", dateStyle: "short", timeStyle: "medium" });
 
 function buildStatsSVG({ pendingCount, pendingValue, addedCount }) {
   const W = 900, H = 500;
@@ -53,7 +55,7 @@ function buildStatsSVG({ pendingCount, pendingValue, addedCount }) {
   <text x="66" y="365" font-family="JetBrains Mono" font-size="16" letter-spacing="2" fill="#7a819c">DERNIER AJOUT</text>
   <text x="66" y="430" font-family="JetBrains Mono" font-size="52" font-weight="700" fill="#b6ff3e">+${addedCount} colis</text>
 
-  <text x="${W / 2}" y="${H - 20}" font-family="JetBrains Mono" font-size="13" fill="#4a5068" text-anchor="middle">Mis a jour le ${new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}</text>
+  <text x="${W / 2}" y="${H - 20}" font-family="JetBrains Mono" font-size="13" fill="#4a5068" text-anchor="middle">Mis a jour le ${FORMAT_MAJ.format(new Date())}</text>
 </svg>`;
 }
 

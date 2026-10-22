@@ -215,19 +215,18 @@ function compte(donnees) {
   return comptes;
 }
 
+// (un seul formateur : chacun garde des objets ICU natifs jusqu'au ramasse-miettes)
+const FORMAT_NOM = new Intl.DateTimeFormat("fr-FR", {
+  timeZone: "Europe/Paris",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 function nomDeFichier(date) {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("fr-FR", {
-      timeZone: "Europe/Paris",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-      .formatToParts(date)
-      .map((x) => [x.type, x.value])
-  );
+  const p = Object.fromEntries(FORMAT_NOM.formatToParts(date).map((x) => [x.type, x.value]));
   return {
     fichier: `feurdrop-backup-${p.year}-${p.month}-${p.day}-${p.hour}h${p.minute}.json`,
     lisible: `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`,

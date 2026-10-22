@@ -5,6 +5,8 @@ const { mergeLabels } = require("../printer");
 const { AUTO_GROUP_CHAT_ID } = require("./config");
 const { batchKey, replyEphemeral, threadOpts, queueReaction } = require("./outils");
 const { downloadLabels, startProgress } = require("./impression");
+// (un seul formateur : chacun garde des objets ICU natifs jusqu'au ramasse-miettes)
+const FORMAT_NOM_FUSION = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 // --- Mode fusion ---------------------------------------------------------------
 // /fusion : les fichiers envoyes ensuite dans ce chat (ou ce topic) ne sont pas
@@ -155,11 +157,7 @@ async function handleStopFusion(bot, msg) {
     (missing.length > 0 ? `\n⚠️ ${fichiers(missing.length)} introuvable${missing.length > 1 ? "s" : ""} sur Telegram.` : "") +
     (failed.length > 0 ? `\n⚠️ ${fichiers(failed.length)} illisible${failed.length > 1 ? "s" : ""}.` : "");
   // l'heure de Paris dans le nom (le serveur est en UTC) : fusion-2026-10-05-16h31.pdf
-  const morceaux = Object.fromEntries(
-    new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-      .formatToParts(new Date())
-      .map((m) => [m.type, m.value])
-  );
+  const morceaux = Object.fromEntries(FORMAT_NOM_FUSION.formatToParts(new Date()).map((m) => [m.type, m.value]));
   const jour = `${morceaux.year}-${morceaux.month}-${morceaux.day}-${morceaux.hour}h${morceaux.minute}`;
   await bot
     .sendDocument(msg.chat.id, pdf, { caption, ...threadOpts(msg) }, { filename: `fusion-${jour}.pdf`, contentType: "application/pdf" })

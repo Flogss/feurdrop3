@@ -151,12 +151,17 @@ function colisDuNumero(numero) {
 }
 
 // (une page qui ne donne que le jour d'un evenement, sans heure -- Mondial
-// Relay pour les jours passes : `jourSeul`, compare au jour, pas a l'heure)
+// Relay pour les jours passes : `jourSeul`, compare au jour, pas a l'heure.
+// Calcule par SQLite (colonne jour_seul) : le JSON brut de chaque evenement
+// n'est plus charge ni relu a chaque affichage.)
 const jourSeulDe = (e) => {
+  if (e.jour_seul !== undefined) return Boolean(e.jour_seul);
   if (e.source !== "navigateur") return false;
   const b = safeJson(e.brut);
   return Boolean(b?.jour) && !b.heure;
 };
+const COLONNES_EVENEMENT = `id, numero, survenu_le, ordre, code, libelle, lieu, etape, physique, incident, resolu, source, par,
+  CASE WHEN source = 'navigateur' AND json_valid(brut) AND json_extract(brut, '$.jour') IS NOT NULL AND json_extract(brut, '$.heure') IS NULL THEN 1 ELSE 0 END AS jour_seul`;
 const versEvenement = (e) => ({
   id: e.id,
   survenuLe: e.survenu_le,
@@ -173,18 +178,16 @@ const versEvenement = (e) => ({
   par: e.par,
 });
 
+// Les suivis et evenements de ces numeros, en deux requetes (toujours les
+// memes : la liste passe en JSON), sans le JSON brut des evenements.
 function lignesSuivis(numeros) {
   const suivis = new Map();
   const evenements = new Map();
-  const liste = [...numeros];
-  for (let i = 0; i < liste.length; i += 400) {
-    const tranche = liste.slice(i, i + 400);
-    const marques = tranche.map(() => "?").join(",");
-    for (const s of db.prepare(`SELECT * FROM controle_suivis WHERE numero IN (${marques})`).all(...tranche)) suivis.set(s.numero, s);
-    for (const e of db.prepare(`SELECT * FROM controle_evenements WHERE numero IN (${marques})`).all(...tranche)) {
-      if (!evenements.has(e.numero)) evenements.set(e.numero, []);
-      evenements.get(e.numero).push(versEvenement(e));
-    }
+  const liste = JSON.stringify([...numeros]);
+  for (const s of db.prepare("SELECT * FROM controle_suivis WHERE numero IN (SELECT value FROM json_each(?))").all(liste)) suivis.set(s.numero, s);
+  for (const e of db.prepare(`SELECT ${COLONNES_EVENEMENT} FROM controle_evenements WHERE numero IN (SELECT value FROM json_each(?))`).all(liste)) {
+    if (!evenements.has(e.numero)) evenements.set(e.numero, []);
+    evenements.get(e.numero).push(versEvenement(e));
   }
   return { suivis, evenements };
 }

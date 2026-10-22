@@ -136,3 +136,14 @@ Vérifications faites : 222 tests serveur, 25 tests Swift ; site (navigateur int
 Limites : aucun vrai numéro Mondial Relay pris en charge n'était disponible pour relire une page « trouvée » aujourd'hui (structure relevée le 09/10) ; UPS reste à la main sans son API officielle (lecture automatisée interdite par UPS, et ups.com refuse les accès automatisés) ; au premier passage après le déploiement, la règle « hors délai » retire d'un coup les anciens « pas encore scannés » sans nouvelle depuis 2 jours (base de démo : 37) — rien n'est supprimé, « Vérifier » les remet.
 
 Essai réel du 20/10 (soir) : 60 vrais numéros Mondial Relay de ton serveur (relevé du 9/10), lus par l'app Mac sur le site officiel au rythme normal, contre une base locale ; puis 44 vrais numéros Colissimo / Chronopost relus par l'API officielle La Poste. Cas rencontrés : pris en charge en Point Relais, expédié / en traitement sur un site, en route vers le point de livraison, livré, à retirer en Locker, enquête et réclamation en cours, numéro réutilisé (ancien parcours puis nouvelle prise en charge), numéro inconnu de MR, numéro affiché sur 7 chiffres ; côté Colissimo : déposé, en transit, point de retrait, en livraison, livré, retour, refus, incident. Résultat après corrections : 59/60 MR confirmés (le 60e est inconnu de MR → « Numéro incorrect » à la 2e lecture), 44/44 La Poste confirmés. Pas de vrai numéro DPD ni UPS dans le relevé.
+
+## Mémoire Railway (22/10/2026)
+
+| ID | Gravité | Plateforme | Fonction | Résumé | Statut |
+|---|---|---|---|---|---|
+| M01 | Élevée (coût) | Serveur | Contrôle des dépôts | Un `Intl.DateTimeFormat` (objet ICU natif) créé à chaque date affichée : des milliers par lecture de la page, libérés seulement au ramasse-miettes. 20 lectures : 606 Mo de processus pour 62 Mo de tas JS (381 Mo de mémoire native libérée mais gardée). Explique les paliers 190 → 590 Mo vus sur Railway | corrigé (mesure locale : 224 Mo, et la page passe de 88 à 54 ms) |
+| M02 | Moyenne (coût) | Serveur | Node dans un conteneur de 8 Go | Tas réglé sur 8 Go, ménage rare : la mémoire grimpe par paliers et ne redescend pas | corrigé (Dockerfile : jeune génération 4 Mo, tas plafonné à 384 Mo, `MALLOC_ARENA_MAX=2` ; mesure locale ~110–200 Mo au lieu de 365–600) |
+| M03 | Mineure | Serveur | Bot de suivi | Chaque vérification de suivi restait en mémoire jusqu'au redémarrage | corrigé (sortie au bout de 30 min, reconstruite depuis la base) |
+| M04 | Mineure | Serveur | Impression | Le PDF d'une fournée restait en mémoire jusqu'à la fournée suivante | corrigé (expire au bout de 15 min) |
+
+Facturation de la période (API Railway, 27/09 → 22/10) : feurdrop3 8 378 GB-min (1,94 $), Bot_tlg_stats 5 046 (1,17 $, autre dépôt), discord-nitro 3 847 (0,89 $), snap-fm 1 705 (0,39 $), presence-discord 1 444 (0,33 $), suivi-colis 1 261 (0,29 $), boxerais 646 (0,15 $). Effet réel à mesurer après déploiement (déploiements Railway en pause au 22/10).

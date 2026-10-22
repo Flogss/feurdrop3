@@ -57,6 +57,12 @@ function purge() {
   for (const [id, job] of jobs) if (job.at < limite) jobs.delete(id);
 }
 
+// Le PDF d'une fournee (plusieurs Mo) ne reste pas en memoire jusqu'a la
+// suivante : il part a l'expiration, meme si plus rien ne s'imprime.
+function planifiePurge() {
+  setTimeout(purge, JOB_TTL_MS + 1000).unref();
+}
+
 function fail(res, err, status = 400) {
   res.status(status).json({ error: err.message || String(err) });
 }
@@ -176,6 +182,7 @@ router.post("/build", routeAsync(async (req, res) => {
     const nom = Array.isArray(categories) && categories.length ? categories.join("-").toLowerCase() : categorie === "*" ? "toutes" : String(categorie).toLowerCase();
     // rien n'est marque ici : voir l'en-tete du fichier
     jobs.set(id, { pdf: built.pdf, name: `etiquettes-${nom}.pdf`, at: Date.now(), ids: built.printedIds, marque: false });
+    planifiePurge();
 
     res.json({
       jobId: id,

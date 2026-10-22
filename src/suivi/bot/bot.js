@@ -15,6 +15,9 @@ import {
 } from './views.js';
 import { MILESTONE_FR } from './status.js';
 
+// un job termine reste en memoire 30 min (navigation dans ses boutons), puis seulement en base
+const JOB_GARDE_MS = 30 * 60 * 1000;
+
 const REFRESH_MS = 3000; // Telegram n'aime pas les éditions trop fréquentes
 const MAX_NUMBERS = 50_000;
 
@@ -221,6 +224,12 @@ export class Bot {
         this.activeByChat.delete(chatId);
         this.refresh(job, { force: true });
         this.startNextQueued(chatId);
+        // Un job fini quitte la memoire au bout de 30 min : ses boutons le
+        // reconstruisent depuis la base (hydrate). Avant, chaque verification
+        // y restait jusqu'au redemarrage du serveur.
+        setTimeout(() => {
+          if (this.jobs.get(id) === job && job.state !== 'running') this.jobs.delete(id);
+        }, JOB_GARDE_MS).unref();
       });
   }
 

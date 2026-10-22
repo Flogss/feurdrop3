@@ -113,9 +113,35 @@ function ouvreBase({ chemin: force } = {}) {
 
 function fermeBase() {
   if (!connexion) return;
+  requetes.clear();
   connexion.close();
   connexion = null;
   cheminOuvert = null;
+}
+
+// Les requetes preparees sont reutilisees. Preparer une requete reserve de la
+// memoire native (SQLite) que seul le ramasse-miettes rend, et il passe
+// rarement : la page du controle, relue toutes les 15 s, en preparait des
+// centaines a chaque fois -- mesure : 20 lectures faisaient monter le
+// processus de 58 a 567 Mo (le tas JavaScript n'en utilisant que 62), comme
+// les paliers vus sur Railway. Une meme requete (meme texte SQL) sert donc
+// toujours le meme objet ; les plus anciennes sortent du cache au-dela de 500.
+// (node:sqlite est synchrone et remet une requete a zero apres get/all/run :
+// la partager est sans risque.)
+const MAX_REQUETES = 500;
+const requetes = new Map(); // texte SQL -> requete preparee (du plus ancien au plus recent)
+
+function prepareEnCache(base, sql) {
+  const deja = requetes.get(sql);
+  if (deja) {
+    requetes.delete(sql);
+    requetes.set(sql, deja);
+    return deja;
+  }
+  const requete = base.prepare(sql);
+  requetes.set(sql, requete);
+  if (requetes.size > MAX_REQUETES) requetes.delete(requetes.keys().next().value);
+  return requete;
 }
 
 // `db` s'utilise comme la connexion elle-meme (db.prepare, db.exec...) mais
@@ -125,6 +151,7 @@ const db = new Proxy(
   {
     get(_, propriete) {
       const base = ouvreBase();
+      if (propriete === "prepare") return (sql) => prepareEnCache(base, sql);
       const valeur = base[propriete];
       return typeof valeur === "function" ? valeur.bind(base) : valeur;
     },

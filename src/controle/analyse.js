@@ -105,10 +105,13 @@ function enRetard(depuisMs, maintenantMs, delaiHeures) {
   return maintenantMs - depuisMs - dimanches * 24 * HEURE > delaiHeures * HEURE;
 }
 
-const heureLisible = (ms) =>
-  ms == null
-    ? "?"
-    : new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(ms);
+// Un seul formateur pour tout le module : en creer un a chaque date (des
+// milliers par lecture de la page du controle) allouait autant d'objets ICU
+// natifs, rendus seulement au passage du ramasse-miettes -- c'etait la
+// principale source des paliers de memoire du serveur (mesure : 567 Mo apres
+// 20 lectures de la page, dont 381 Mo de memoire native liberee mais gardee).
+const FORMAT_HEURE = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const heureLisible = (ms) => (ms == null ? "?" : FORMAT_HEURE.format(ms));
 
 // un evenement donne au jour seulement : sa date, sans heure inventee
 const quandLisible = (e) => (e?.jourSeul ? heureLisible(e.ms).slice(0, 5) : heureLisible(e?.ms));

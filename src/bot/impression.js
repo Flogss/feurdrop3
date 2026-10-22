@@ -19,6 +19,8 @@ const { jourParis, heureParis, aujourdhuiParis, ajouteJours } = require("../date
 const { AUTO_GROUP_CHAT_ID, acces } = require("./config");
 const { replyEphemeral, escapeHtml, CARRIER_LIST_HINT } = require("./outils");
 const { markButtonsPrinted } = require("./boutons");
+// (un seul formateur : chacun garde des objets ICU natifs jusqu'au ramasse-miettes)
+const FORMAT_JOUR_COURT = new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", timeZone: "UTC" });
 
 // --- Impression ------------------------------------------------------------
 // Fusionne les etiquettes en attente d'un transporteur en un seul PDF au
@@ -208,7 +210,7 @@ function jobWhen(sqlDate) {
   if (jour === aujourdhui) return heure;
   if (jour === ajouteJours(aujourdhui, -1)) return `hier ${heure}`;
   const date = new Date(`${jour}T12:00:00Z`);
-  return `${date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", timeZone: "UTC" })} ${heure}`;
+  return `${FORMAT_JOUR_COURT.format(date)} ${heure}`;
 }
 
 function handlePrintCallback(bot, query) {
