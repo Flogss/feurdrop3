@@ -11,51 +11,34 @@ import DropKit
 struct DepotsMacView: View {
     @Environment(AppModel.self) private var app
     @State private var ouvert: DepotOuvert?
-    @State private var largeur: CGFloat = 1200
+    /// la largeur de toute la page (tableau + panneau du detail)
+    @State private var largeurTotale: CGFloat = 1200
+    /// la largeur laissee au tableau : calculee, pas mesuree -- mesuree, elle
+    /// ne retrecissait jamais (le contenu large la gardait large, et la page
+    /// debordait de la fenetre a l'ouverture du detail)
+    private var largeur: CGFloat { largeurTotale - (ouvert == nil ? 0 : Self.largeurPanneau + 16) }
+    private static let largeurPanneau: CGFloat = 430
+    @State private var campagneDepliee = false
     @FocusState private var tableauActif: Bool
 
     private var model: DepotsModel { app.depots }
 
     var body: some View {
-        VStack(spacing: 0) {
-            enTete
-            if let vue = model.vue {
-                VStack(spacing: 12) {
-                    if model.campagneVisible { CampagneCard() }
-                    bandeaux(vue.etat)
-                    tableau(vue)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
-            } else if let erreur = model.loadError {
-                EmptyStateView(symbol: "exclamationmark.triangle", title: "Contrôle indisponible", subtitle: erreur)
-                    .frame(maxHeight: .infinity)
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        HStack(spacing: 0) {
+            principal
+                .frame(width: max(largeur, 0))
+            // le detail du colis choisi : un panneau de la page (le panneau
+            // natif « inspector » reorganisait toute la fenetre et faisait
+            // disparaitre la barre du haut)
+            if let o = ouvert {
+                panneauDetail(o)
+                    .frame(width: Self.largeurPanneau)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { largeur = $0 }
-        .inspector(isPresented: Binding(get: { ouvert != nil }, set: { if !$0 { ouvert = nil } })) {
-            Group {
-                if let o = ouvert {
-                    DepotDetailSheet(ouvert: o, suivant: { suivant(apres: o) })
-                        .id(o)
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                ouvert = nil
-                            } label: {
-                                Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 28, height: 28)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Theme.text3)
-                            .padding(14)
-                            .keyboardShortcut(.cancelAction)
-                            .accessibilityLabel("Fermer le détail")
-                        }
-                }
-            }
-            .inspectorColumnWidth(min: 380, ideal: 440, max: 600)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { largeurTotale = $0 }
+        .animation(.snappy(duration: 0.25), value: ouvert == nil)
         .task { await model.refresh() }
         .task { await model.surveille() }
         .sensoryFeedback(.success, trigger: model.celebration)
@@ -69,6 +52,137 @@ struct DepotsMacView: View {
             guard let serie, let premier = serie.ids.first else { return }
             ouvert = DepotOuvert(colisID: premier, serie: serie.ids, position: 0, ouvreLaPage: true)
         }
+    }
+
+    private func panneauDetail(_ o: DepotOuvert) -> some View {
+        DepotDetailSheet(ouvert: o, suivant: { suivant(apres: o) })
+            .id(o)
+            .background(Theme.surface.opacity(0.94), in: .rect(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 0.7))
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    ouvert = nil
+                } label: {
+                    Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.text3)
+                .padding(14)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Fermer le détail")
+            }
+            .shadow(color: .black.opacity(0.35), radius: 24, x: -6)
+            .padding(.trailing, 16)
+            .padding(.bottom, 16)
+            .padding(.top, 8)
+    }
+
+    private var principal: some View {
+        VStack(spacing: 0) {
+            enTete
+            if let vue = model.vue {
+                VStack(spacing: 12) {
+                    if model.campagneVisible {
+                        if campagneDepliee { CampagneCard() }
+                        campagneCompacte
+                    }
+                    bandeaux(vue.etat)
+                    tableau(vue)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+            } else if let erreur = model.loadError {
+                EmptyStateView(symbol: "exclamationmark.triangle", title: "Contrôle indisponible", subtitle: erreur)
+                    .frame(maxHeight: .infinity)
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    // MARK: « Tout vérifier » en une ligne
+
+    /// la campagne en cours (ou la derniere) : ou elle en est, ce qu'elle a
+    /// trouve, et ses actions -- le detail complet se deplie a la demande
+    @ViewBuilder
+    private var campagneCompacte: some View {
+        if let etat = model.campagne, let c = etat.campagne, let n = etat.compteurs {
+            let active = etat.active
+            HStack(spacing: 14) {
+                Circle()
+                    .fill(active ? Theme.teal : Theme.violetLight)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: (active ? Theme.teal : Theme.violet).opacity(0.8), radius: 5)
+                    .symbolEffect(.pulse, isActive: active)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(active ? "Vérification en cours…" : c.statut == "annulee" ? "Vérification annulée" : "Vérification terminée")
+                        .font(.subheadline.weight(.semibold))
+                    Text(active ? "\(n.total - n.restants) / \(n.total) colis" : "\(c.statut == "annulee" ? "arrêtée" : "finie") \(ilYa(c.finLe ?? c.creeLe)) · \(Format.count(n.verifies, "colis vérifié", "colis vérifiés"))")
+                        .font(.caption)
+                        .foregroundStyle(Theme.text3)
+                }
+                .fixedSize()
+                ProgressView(value: n.avancee)
+                    .tint(active ? Theme.teal : Theme.violet)
+                    .frame(minWidth: 80, maxWidth: 200)
+                HStack(spacing: 10) {
+                    resultat(n.confirmes, "confirmés", DepotCategorie.confirme.couleur)
+                    resultat(n.nonConfirmes, "pas scannés", DepotCategorie.nonConfirme.couleur)
+                    if (n.incorrects ?? 0) > 0 { resultat(n.incorrects ?? 0, "incorrects", DepotCategorie.incorrect.couleur) }
+                    if n.bloques > 0 { resultat(n.bloques, "bloqués", DepotCategorie.bloque.couleur) }
+                    if n.erreurs > 0 { resultat(n.erreurs, "erreurs", DepotCategorie.aVerifier.couleur) }
+                }
+                .font(.caption)
+                Spacer(minLength: 8)
+                if !model.numerosAConstater.isEmpty {
+                    Button {
+                        model.demandeSerieAConstater()
+                    } label: {
+                        Label("Constater \(model.numerosAConstater.count) UPS", systemImage: "pencil")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .frame(height: 28)
+                    }
+                    .boutonVerre()
+                    .fixedSize()
+                    .help("Ouvrir un à un les colis UPS sur leur page officielle")
+                }
+                Button(campagneDepliee ? "Moins" : "Détails") {
+                    withAnimation(Theme.spring) { campagneDepliee.toggle() }
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.violetLight)
+                if active {
+                    Button("Annuler") { Task { await model.annuleCampagne() } }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.text2)
+                } else {
+                    Button {
+                        withAnimation(Theme.spring) { model.campagneMasquee = c.id }
+                    } label: {
+                        Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.text3)
+                    .help("Masquer")
+                }
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .background(Theme.surface.opacity(0.82), in: .rect(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder((active ? Theme.teal : .white).opacity(active ? 0.3 : 0.07), lineWidth: 0.8))
+        }
+    }
+
+    private func resultat(_ n: Int, _ libelle: String, _ couleur: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(Format.integer(n)).font(.caption.weight(.bold).monospacedDigit()).foregroundStyle(n > 0 ? couleur : Theme.text3)
+            Text(libelle).foregroundStyle(Theme.text3)
+        }
+        .fixedSize()
     }
 
     // MARK: En-tete fixe
@@ -178,7 +292,9 @@ struct DepotsMacView: View {
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(Format.integer(c.nombre(cat)))
-                    .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: etroit ? 21 : 24, weight: .bold, design: .rounded).monospacedDigit())
+                    .lineLimit(1)
+                    .fixedSize()
                     .foregroundStyle(couleur)
                     .shadow(color: couleur.opacity(0.35), radius: 10)
                     .contentTransition(.numericText(value: Double(c.nombre(cat))))
@@ -724,8 +840,12 @@ private struct LigneDepotMac: View {
         .onTapGesture(perform: choisis)
         .onHover { survol = $0 }
         .animation(.easeOut(duration: 0.15), value: survol)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(choisie ? [.isSelected, .isButton] : .isButton)
+        // la ligne contient ses boutons (↻, ↗) : elle reste un conteneur ;
+        // l'action par defaut ouvre le detail (avant, « activer » la ligne
+        // declenchait son premier bouton, « Vérifier »)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(choisie ? .isSelected : [])
+        .accessibilityAction(.default, choisis)
         .accessibilityAction(named: "Détail", choisis)
     }
 
@@ -857,8 +977,12 @@ private struct LigneHistoriqueMac: View {
         .onTapGesture(perform: choisis)
         .onHover { survol = $0 }
         .animation(.easeOut(duration: 0.15), value: survol)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(choisie ? [.isSelected, .isButton] : .isButton)
+        // la ligne contient ses boutons (↻, ↗) : elle reste un conteneur ;
+        // l'action par defaut ouvre le detail (avant, « activer » la ligne
+        // declenchait son premier bouton, « Vérifier »)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(choisie ? .isSelected : [])
+        .accessibilityAction(.default, choisis)
         .accessibilityAction(named: "Détail", choisis)
     }
 
