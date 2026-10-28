@@ -132,6 +132,26 @@ public enum ServerDate {
         return f.string(from: date)
     }
 
+    /// "2026-10" -> "oct." ; avec l'annee : "oct. 26"
+    public static func monthShort(_ mois: String, avecAnnee: Bool = false) -> String {
+        guard let date = day("\(mois)-15") else { return mois }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = avecAnnee ? "MMM yy" : "MMM"
+        return f.string(from: date)
+    }
+
+    /// "2026-10" -> "octobre 2026"
+    public static func monthLong(_ mois: String) -> String {
+        guard let date = day("\(mois)-15") else { return mois }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "LLLL yyyy"
+        return f.string(from: date)
+    }
+
     /// "Mercredi 2 septembre"
     public static func longDay(_ jour: String) -> String {
         guard let date = day(jour) else { return jour }

@@ -317,6 +317,11 @@ public struct DropAPI: Sendable {
         return serie.weeks
     }
 
+    public func monthlySeries() async throws -> [MonthRevenue] {
+        let serie: MonthlySeries = try await client.send(.get, "/api/stats/revenue/monthly-series")
+        return serie.months
+    }
+
     // MARK: - Espaces expediteurs
 
     /// Cree le lien prive d'un expediteur, ou le regenere (l'ancien cesse de

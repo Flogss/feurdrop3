@@ -12,6 +12,7 @@ const {
   quickRemoveColis,
   getDailySeries,
   getWeeklySeries,
+  getMonthlySeries,
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
@@ -491,6 +492,10 @@ router.get("/stats/revenue/daily-series", (req, res) => {
 
 router.get("/stats/revenue/weekly-series", (req, res) => {
   res.json(getWeeklySeries());
+});
+
+router.get("/stats/revenue/monthly-series", (req, res) => {
+  res.json(getMonthlySeries());
 });
 
 // Un expediteur tel que le dashboard le voit : son jeton brut reste en base,

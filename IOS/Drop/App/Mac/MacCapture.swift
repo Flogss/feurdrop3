@@ -33,6 +33,12 @@ enum MacCapture {
             }
         }
         let delai = reglages.double(forKey: "DropCaptureDelai")
+        if reglages.bool(forKey: "DropCaptureBas") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(max((delai > 0 ? delai : 6) - 2.5, 1)))
+                DefilementDoux.shared.descendEnBas()
+            }
+        }
         // `-DropArbre 1` : la hierarchie des vues AppKit de la fenetre, a cote de la photo
         if reglages.bool(forKey: "DropArbre") {
             Task { @MainActor in

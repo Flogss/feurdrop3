@@ -157,6 +157,7 @@ const {
 const {
   getDailySeries,
   getWeeklySeries,
+  getMonthlySeries,
   getBestDay,
 } = require("./stats");
 const {
@@ -289,6 +290,7 @@ module.exports = {
   dropColis,
   getDailySeries,
   getWeeklySeries,
+  getMonthlySeries,
   getBestDay,
   markPushSeen,
   setPushAnnounced,

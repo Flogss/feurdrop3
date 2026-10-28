@@ -114,6 +114,16 @@ final class DefilementDoux: NSObject {
         return nil
     }
 
+    #if DEBUG || PERF_HOOKS
+    /// `-DropCaptureBas 1` : la page descend tout en bas avant la photo
+    func descendEnBas() {
+        guard let fenetre = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }),
+              let cadre = fenetre.contentView?.superview,
+              let sv = defilable(sous: cadre.hitTest(CGPoint(x: fenetre.frame.width / 2, y: fenetre.frame.height / 2)), vertical: true) else { return }
+        pousse(sv, de: CGPoint(x: 0, y: 100_000))
+    }
+    #endif
+
     #if DEBUG
     /// Mesure en developpement (`-DropTestDefilement 1`) : des crans de
     /// molette vers le bas puis vers le haut sur la page, et la regularite

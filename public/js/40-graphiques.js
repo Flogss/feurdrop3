@@ -591,6 +591,48 @@ async function loadWeekScrollChart(animate, force, riche) {
   attachRangeFollower(container, items, rangeEl, (a, b) => `${frenchDateShort(a.start)} – ${frenchDateShort(b.end)}`);
 }
 
+// « oct. », et l'annee quand elle change (« janv. 27 ») ; « octobre 2026 »
+// dans la plage et l'infobulle
+const moisDe = (cle) => new Date(`${cle}-15T12:00:00Z`);
+function moisCourt(cle, avecAnnee) {
+  const d = moisDe(cle);
+  const mois = d.toLocaleDateString("fr-FR", { month: "short", timeZone: "UTC" });
+  return avecAnnee ? `${mois} ${String(d.getUTCFullYear()).slice(2)}` : mois;
+}
+const moisLong = (cle) => moisDe(cle).toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
+
+async function loadMonthScrollChart(animate, force, riche) {
+  const r = await fetchJSON("/api/stats/revenue/monthly-series");
+  if (!hasChanged("monthlySeries", r.months) && !force) return;
+
+  const container = $("chart-mois");
+  const rangeEl = $("mois-range");
+  if (!r.months || r.months.length === 0) {
+    container.querySelector(".chart-track").innerHTML = `<div class="chart-empty">Pas encore de données</div>`;
+    rangeEl.textContent = "—";
+    return;
+  }
+
+  const items = r.months.map((m, i) => ({
+    label: moisCourt(m.month, i === 0 || m.month.endsWith("-01")),
+    value: m.value,
+    count: m.count,
+    month: m.month,
+  }));
+  container._items = items;
+  container._spacing = espacement(container, items.length);
+  const track = container.querySelector(".chart-track");
+  const geo = scrollBarChartSVG(items, { highlightBest: true, animate, spacing: container._spacing });
+  track.innerHTML = geo.html;
+  if (container.dataset.userScrolled !== "1") container.scrollLeft = container.scrollWidth;
+  if (animate) revealOnVisible(container.closest(".card"), () => runBarReveal(track, geo, riche ? {} : { duree: 700, ecart: 40 }));
+
+  const plage = (a, b) => (a.month === b.month ? moisLong(a.month) : `${moisLong(a.month)} – ${moisLong(b.month)}`);
+  const [first, last] = visibleRange(container, items.length);
+  rangeEl.textContent = plage(items[first], items[last]);
+  attachRangeFollower(container, items, rangeEl, plage);
+}
+
 // "Cette semaine" : la semaine en cours, comparee a la precedente.
 function renderSemaine(items, animate) {
   const en = items[items.length - 1];
@@ -617,7 +659,11 @@ let revenusCharges = { signature: null, le: 0 };
 async function loadRevenueStats(animate, force, riche) {
   if (!animate && !force && revenusCharges.signature === signatureRevenus && Date.now() - revenusCharges.le < 60000) return;
   revenusCharges = { signature: signatureRevenus, le: Date.now() };
-  await Promise.all([loadDayScrollChart(animate, force, riche), loadWeekScrollChart(animate, force, riche)]);
+  await Promise.all([
+    loadDayScrollChart(animate, force, riche),
+    loadWeekScrollChart(animate, force, riche),
+    loadMonthScrollChart(animate, force, riche),
+  ]);
 
   const r = await fetchJSON("/api/stats/revenue");
   const bestDayEl = $("stat-bestday-value");

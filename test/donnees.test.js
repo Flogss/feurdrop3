@@ -327,3 +327,29 @@ test("« aujourd'hui » du dashboard : le jour de Paris", async () => {
   const r2 = await app.appel("/api/stats");
   assert.equal(r2.json.todayCount, 0);
 });
+
+// --- revenus par mois --------------------------------------------------------
+
+test("revenus par mois : un point par mois, mois vides compris ; le drop du dimanche 31 compte le lundi 1er", async () => {
+  const drope = (quand, prix) => {
+    const id = colis("A");
+    db.db.prepare("UPDATE colis SET status = 'dropped', dropped_at = ?, price = ? WHERE id = ?").run(quand, prix, id);
+  };
+  drope("2026-05-12 10:00:00", 4);
+  drope("2026-05-31 10:00:00", 5.5); // dimanche : jour ouvre du lundi 1er juin
+  drope("2026-08-03 10:00:00", 6);
+  drope("2026-08-04 10:00:00", 2.25);
+
+  const r = await app.appel("/api/stats/revenue/monthly-series");
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.months.slice(0, 4), [
+    { month: "2026-05", value: 4, count: 1 },
+    { month: "2026-06", value: 5.5, count: 1 },
+    { month: "2026-07", value: 0, count: 0 },
+    { month: "2026-08", value: 8.25, count: 2 },
+  ]);
+  // jusqu'au mois en cours, sans trou
+  const mois = r.json.months.map((m) => m.month);
+  assert.equal(mois.at(-1), new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" }).slice(0, 7));
+  assert.equal(new Set(mois).size, mois.length);
+});

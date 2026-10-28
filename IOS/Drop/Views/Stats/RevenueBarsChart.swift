@@ -1,12 +1,37 @@
 import SwiftUI
 import DropKit
 
-/// Les revenus par semaine : les barres montent l'une apres l'autre avec de
-/// l'inertie (elles depassent un peu, puis se posent), leur valeur compte en
-/// meme temps. La meilleure semaine brille ; la semaine en cours est en
-/// pointilles, puisqu'elle n'est pas finie.
-struct WeeklyBarsChart: View {
-    let weeks: [WeekRevenue]
+/// Une barre du graphique : une semaine ou un mois.
+struct BarreRevenu: Identifiable, Equatable {
+    let id: String
+    let value: Double
+    /// sous la barre : « 7 sept. », « oct. »
+    let etiquette: String
+    /// la plage affichee en tete de carte : « 7 sept. – 12 sept. »
+    let debut: String
+    let fin: String
+
+    static func semaines(_ weeks: [WeekRevenue]) -> [BarreRevenu] {
+        weeks.map { w in
+            BarreRevenu(id: w.start, value: w.value, etiquette: ServerDate.dayMonth(w.start), debut: ServerDate.dayMonth(w.start), fin: ServerDate.dayMonth(w.end))
+        }
+    }
+
+    /// l'annee sous le premier mois et sous chaque janvier : « janv. 27 »
+    static func mois(_ months: [MonthRevenue]) -> [BarreRevenu] {
+        months.enumerated().map { i, m in
+            let long = ServerDate.monthLong(m.month)
+            return BarreRevenu(id: m.month, value: m.value, etiquette: ServerDate.monthShort(m.month, avecAnnee: i == 0 || m.month.hasSuffix("-01")), debut: long, fin: long)
+        }
+    }
+}
+
+/// Les revenus par semaine ou par mois : les barres montent l'une apres
+/// l'autre avec de l'inertie (elles depassent un peu, puis se posent), leur
+/// valeur compte en meme temps. La meilleure brille ; la periode en cours est
+/// en pointilles, puisqu'elle n'est pas finie.
+struct RevenueBarsChart: View {
+    let items: [BarreRevenu]
     let reveal: Int
     @Binding var range: String
 
@@ -22,23 +47,23 @@ struct WeeklyBarsChart: View {
 
     var body: some View {
         GeometryReader { geo in
-            let largeur = max(geo.size.width, CGFloat(weeks.count) * Self.spacing)
-            let plafond = max(weeks.map(\.value).max() ?? 0, 1) * 1.1
-            let meilleure = weeks.max(by: { $0.value < $1.value })?.id
+            let largeur = max(geo.size.width, CGFloat(items.count) * Self.spacing)
+            let plafond = max(items.map(\.value).max() ?? 0, 1) * 1.1
+            let meilleure = items.max(by: { $0.value < $1.value })?.id
             ScrollView(.horizontal) {
                 HStack(alignment: .bottom, spacing: 0) {
-                    ForEach(Array(weeks.enumerated()), id: \.element.id) { i, w in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, w in
                         Barre(
-                            week: w,
+                            item: w,
                             fraction: w.value / plafond,
                             hauteurUtile: Self.height - padTop - padBottom,
                             montee: montee,
-                            retard: Double(max(0, i - (weeks.count - 8))) * 0.075,
+                            retard: Double(max(0, i - (items.count - 8))) * 0.075,
                             record: w.id == meilleure && w.value > 0,
-                            enCours: i == weeks.count - 1,
+                            enCours: i == items.count - 1,
                             choisie: selection == w.id
                         )
-                        .frame(width: largeur / CGFloat(max(weeks.count, 1)))
+                        .frame(width: largeur / CGFloat(max(items.count, 1)))
                         .onTapGesture {
                             Haptics.selection()
                             withAnimation(Theme.bouncy) { selection = selection == w.id ? nil : w.id }
@@ -103,21 +128,23 @@ struct WeeklyBarsChart: View {
     }
 
     private func visibles(offset: CGFloat, largeur: CGFloat, total: CGFloat) -> ClosedRange<Int> {
-        guard !weeks.isEmpty else { return 0...0 }
-        let pas = total / CGFloat(weeks.count)
-        let a = min(max(Int((offset / pas).rounded(.down)), 0), weeks.count - 1)
-        let b = min(max(Int(((offset + largeur) / pas).rounded(.up)) - 1, a), weeks.count - 1)
+        guard !items.isEmpty else { return 0...0 }
+        let pas = total / CGFloat(items.count)
+        let a = min(max(Int((offset / pas).rounded(.down)), 0), items.count - 1)
+        let b = min(max(Int(((offset + largeur) / pas).rounded(.up)) - 1, a), items.count - 1)
         return a...b
     }
 
     private func texte(_ r: ClosedRange<Int>) -> String {
-        guard !weeks.isEmpty else { return "—" }
-        return "\(ServerDate.dayMonth(weeks[r.lowerBound].start)) – \(ServerDate.dayMonth(weeks[r.upperBound].end))"
+        guard !items.isEmpty else { return "—" }
+        let debut = items[r.lowerBound].debut
+        let fin = items[r.upperBound].fin
+        return debut == fin ? debut : "\(debut) – \(fin)"
     }
 }
 
 private struct Barre: View {
-    let week: WeekRevenue
+    let item: BarreRevenu
     let fraction: Double
     let hauteurUtile: CGFloat
     let montee: Bool
@@ -157,7 +184,7 @@ private struct Barre: View {
                 .frame(width: 30, height: max(4, hauteurUtile * fraction))
                 .scaleEffect(x: 1, y: montee ? 1 : 0.001, anchor: .bottom)
 
-            Text(ServerDate.dayMonth(week.start))
+            Text(item.etiquette)
                 .font(.system(size: 10, weight: enCours ? .bold : .medium))
                 .foregroundStyle(enCours ? Theme.violetLight : Theme.text3)
                 .lineLimit(1)
@@ -169,15 +196,15 @@ private struct Barre: View {
         .contentShape(.rect)
         .onChange(of: montee, initial: true) {
             if montee {
-                withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 1.1).delay(retard)) { valeur = week.value }
+                withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 1.1).delay(retard)) { valeur = item.value }
             } else {
                 var t = Transaction()
                 t.disablesAnimations = true
                 withTransaction(t) { valeur = 0 }
             }
         }
-        .onChange(of: week.value) {
-            withAnimation(.smooth(duration: 0.8)) { valeur = week.value }
+        .onChange(of: item.value) {
+            withAnimation(.smooth(duration: 0.8)) { valeur = item.value }
         }
     }
 

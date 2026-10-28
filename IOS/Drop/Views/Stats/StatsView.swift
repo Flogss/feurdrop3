@@ -2,11 +2,12 @@ import SwiftUI
 import DropKit
 
 /// L'onglet Stats : les chiffres cles, puis les revenus par jour, par
-/// semaine, et par expediteur. Arriver sur l'onglet rejoue la revelation.
+/// semaine, par expediteur et par mois. Arriver sur l'onglet rejoue la revelation.
 struct StatsView: View {
     @Environment(AppModel.self) private var app
     @State private var plageJours = "—"
     @State private var plageSemaines = "—"
+    @State private var plageMois = "—"
     /// au-dela d'un seuil (Mac, grande fenetre), chiffres sur une ligne et
     /// graphiques cote a cote
     @State private var largeur: CGFloat = 0
@@ -31,6 +32,7 @@ struct StatsView: View {
                             grapheSemaines
                             grapheExpediteurs
                         }
+                        grapheMois
                     } else if let erreur = model.loadError {
                         ChargementImpossible(message: erreur) { await model.refresh(animated: true) }
                             .surfaceCard()
@@ -105,7 +107,17 @@ struct StatsView: View {
             if model.weeks.isEmpty {
                 EmptyStateView(symbol: "chart.bar", title: "Pas encore de données")
             } else {
-                WeeklyBarsChart(weeks: model.weeks, reveal: model.reveal, range: $plageSemaines)
+                RevenueBarsChart(items: BarreRevenu.semaines(model.weeks), reveal: model.reveal, range: $plageSemaines)
+            }
+        }
+    }
+
+    private var grapheMois: some View {
+        carteGraphe("Revenus par mois", plage: plageMois) {
+            if model.months.isEmpty {
+                EmptyStateView(symbol: "chart.bar", title: "Pas encore de données")
+            } else {
+                RevenueBarsChart(items: BarreRevenu.mois(model.months), reveal: model.reveal, range: $plageMois)
             }
         }
     }

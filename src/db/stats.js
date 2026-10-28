@@ -1,4 +1,5 @@
-// Statistiques de revenus : series par jour et par semaine (jours de Paris).
+// Statistiques de revenus : series par jour, par semaine et par mois (jours de
+// Paris).
 const { db } = require("./connexion");
 const { BUSINESS_DAY_SQL } = require("./sql");
 const { arrondiCentimes } = require("./montants");
@@ -77,6 +78,40 @@ function getWeeklySeries() {
   return { weeks };
 }
 
+// « 2026-10 » -> « 2026-11 »
+function moisSuivant(mois) {
+  const [a, m] = mois.split("-").map(Number);
+  return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, "0")}`;
+}
+
+// Serie continue mois par mois depuis le mois du premier colis drope jusqu'au
+// mois en cours (jours ouvres comme les autres series : un drop du dimanche
+// compte le lundi).
+function getMonthlySeries() {
+  const earliest = getEarliestDroppedDate();
+  const today = aujourdhuiParis();
+  const fin = today.slice(0, 7);
+  const debut = earliest && earliest.slice(0, 7) < fin ? earliest.slice(0, 7) : fin;
+
+  const cles = [];
+  for (let m = debut; m <= fin; m = moisSuivant(m)) cles.push(m);
+  const capped = cles.slice(-60); // 5 ans, garde-fou
+
+  const rows = db
+    .prepare(
+      `SELECT substr(${BUSINESS_DAY_SQL}, 1, 7) AS m, ROUND(SUM(price), 2) AS value, COUNT(*) AS count
+       FROM colis WHERE status = 'dropped' AND ${BUSINESS_DAY_SQL} >= ?
+       GROUP BY m`
+    )
+    .all(`${capped[0]}-01`);
+  const parMois = new Map(rows.map((r) => [r.m, r]));
+  const months = capped.map((month) => {
+    const row = parMois.get(month);
+    return { month, value: row ? row.value : 0, count: row ? row.count : 0 };
+  });
+  return { months };
+}
+
 function getBestDay() {
   return db
     .prepare(
@@ -90,5 +125,6 @@ module.exports = {
   getEarliestDroppedDate,
   getDailySeries,
   getWeeklySeries,
+  getMonthlySeries,
   getBestDay,
 };

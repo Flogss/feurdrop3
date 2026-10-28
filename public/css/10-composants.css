@@ -47,7 +47,8 @@
 }
 .view > .card + .card,
 .view > .stats-top + .card,
-.view > .card + .stats-duo { margin-top: var(--gap); }
+.view > .card + .stats-duo,
+.view > .stats-duo + .card { margin-top: var(--gap); }
 
 .card-head {
   display: flex;

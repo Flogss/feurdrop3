@@ -35,3 +35,15 @@ public struct WeekRevenue: Codable, Sendable, Equatable, Identifiable {
     public var count: Int
     public var id: String { start }
 }
+
+/// `GET /api/stats/revenue/monthly-series` : un point par mois (« 2026-10 »).
+public struct MonthlySeries: Codable, Sendable, Equatable {
+    public var months: [MonthRevenue]
+}
+
+public struct MonthRevenue: Codable, Sendable, Equatable, Identifiable {
+    public var month: String
+    public var value: Double
+    public var count: Int
+    public var id: String { month }
+}

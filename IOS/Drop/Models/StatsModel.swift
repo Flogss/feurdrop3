@@ -1,7 +1,8 @@
 import SwiftUI
 import DropKit
 
-/// Les statistiques de revenus : par jour, par semaine, par expediteur.
+/// Les statistiques de revenus : par jour, par semaine, par mois, par
+/// expediteur.
 @Observable
 final class StatsModel {
     @ObservationIgnored private unowned let app: AppModel
@@ -9,6 +10,7 @@ final class StatsModel {
     private(set) var revenue: RevenueSummary?
     private(set) var days: [DayRevenue] = []
     private(set) var weeks: [WeekRevenue] = []
+    private(set) var months: [MonthRevenue] = []
     private(set) var loaded = false
     private(set) var loadError: String?
     /// chaque arrivee sur l'onglet rejoue la revelation des graphiques
@@ -65,11 +67,15 @@ final class StatsModel {
             async let r = app.api.revenue()
             async let d = app.api.dailySeries()
             async let w = app.api.weeklySeries()
+            async let m = app.api.monthlySeries()
             let (rev, jours, semaines) = try await (r, d, w)
+            // un serveur pas encore a jour n'a pas les mois : le reste s'affiche
+            let mois = (try? await m) ?? months
             app.reachedServer()
             if rev != revenue { revenue = rev }
             if jours != days { days = jours }
             if semaines != weeks { weeks = semaines }
+            if mois != months { months = mois }
             if !loaded { withAnimation(Theme.spring) { loaded = true } }
             loadError = nil
             if animated { reveal += 1 }
