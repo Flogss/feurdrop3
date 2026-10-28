@@ -96,6 +96,9 @@ before(async () => {
   process.env.REPLY_LECTURE_MS = "20";
   process.env.BATCH_DEBOUNCE_MS = "50";
   process.env.GROUP_WRITE_INTERVAL_MS = "5";
+  // plus de 20 etiquettes publiees dans ce fichier : le plafond de Telegram
+  // (20 envois par minute dans le groupe) ferait attendre la minute suivante
+  process.env.GROUP_SENDS_PER_MIN = "1000";
   db = require("../src/db");
   bot = require("../src/bot").startBot();
 });
@@ -142,7 +145,7 @@ test("lecture des deux messages", () => {
 
 test("la liste puis le PDF de 4 pages : 4 etiquettes, chacune sous son numero, son transporteur et son poids", async () => {
   faux.livre(texte(LISTE));
-  assert.ok(await faux.attends(() => reponses(/Liste PARIS94 notée : 4 étiquettes à déposer \(La Poste ×3, Mondial Relay ×1\)/).length === 1), "liste comprise");
+  assert.ok(await faux.attends(() => reponses(/Liste PARIS94 notée : 4 étiquettes pas encore reçues : 8R50345899012 \(La Poste · 1kg\), 8R49597374149 \(La Poste\), 8R49597373395 \(La Poste\), 8571271394 \(Mondial Relay\)\.\nEnvoie-moi le PDF/).length === 1), "liste comprise");
 
   faux.fichier("PDF4", await pdfDe(4));
   const avant = envoisGroupe().length;
@@ -197,7 +200,7 @@ test("jamais deux fois le meme numero : le meme PDF renvoye ne recompte rien", a
 
 test("un bordereau pas encore pret n'a pas de page : l'ordre saute la ligne « 🆕 »", async () => {
   faux.livre(texte("📋 Mes drops du jour — PARIS94 (3 colis)\n  📄 8R50345899099\n  🆕 8R49597374100\n  📄 8571271300"));
-  await faux.attends(() => reponses(/2 étiquettes à déposer.*1 bordereau pas encore prêt/).length === 1);
+  await faux.attends(() => reponses(/3 étiquettes pas encore reçues/).length === 1);
   faux.fichier("PDF2", await pdfDe(2));
   faux.livre(pdf("PDF2", "PARIS94_2026-10-21.pdf"));
   assert.ok(await faux.attends(() => colisTous().length === 2, 8000));
@@ -209,7 +212,7 @@ test("un nombre de pages qui ne colle pas : rien n'est decoupe au hasard", async
   await faux.attends(() => reponses(/Liste PARIS94/).length >= 1);
   faux.fichier("PDF3", await pdfDe(3));
   faux.livre(pdf("PDF3", "PARIS94_2026-10-20.pdf"));
-  assert.ok(await faux.attends(() => reponses(/a 3 pages, mais la liste PARIS94 annonce 4 étiquettes/).length === 1, 8000));
+  assert.ok(await faux.attends(() => reponses(/a 3 pages, mais la liste PARIS94 annonce 4 étiquettes pas encore reçues/).length === 1, 8000));
   assert.equal(colisTous().length, 0);
 });
 
@@ -240,6 +243,7 @@ test("un poids dans la description se paie, /poids le corrige", async () => {
   const c = colisTous()[0];
   assert.equal(c.poids_g, 5000);
   assert.equal(c.price, 9, "4 € + 5 kg × 1 €");
+  assert.equal(c.note, "5kg", "le poids en note");
 
   // /poids 2 en reponse au fichier
   faux.livre({
@@ -254,5 +258,105 @@ test("un poids dans la description se paie, /poids le corrige", async () => {
   });
   assert.ok(await faux.attends(() => colisTous()[0].poids_g === 2000));
   assert.equal(colisTous()[0].price, 6);
+  assert.equal(colisTous()[0].note, "2kg", "la note suit le poids corrige");
   assert.ok(await faux.attends(() => reponses(/2 kg · 6\.00 EUR/).length === 1));
+});
+
+test("« DPD 2 KG » ou « DPD 2560G » en description : poids en note, kilos payes", async () => {
+  faux.fichier("PDFD", await pdfDe(1));
+  faux.livre(pdf("PDFD", "etiquette-dpd.pdf", "DPD 2 KG"));
+  assert.ok(await faux.attends(() => colisTous().length === 1, 8000));
+  let c = colisTous()[0];
+  assert.deepEqual([c.carrier, c.poids_g, c.note, c.price], ["DPD", 2000, "2kg", 6], "4 € + 2 kg × 1 €");
+
+  faux.fichier("PDFG", await pdfDe(1));
+  faux.livre(pdf("PDFG", "etiquette-dpd-2.pdf", "DPD 2560G"));
+  assert.ok(await faux.attends(() => colisTous().length === 2, 8000));
+  c = colisTous()[1];
+  assert.deepEqual([c.carrier, c.poids_g, c.note], ["DPD", 2560, "2,56kg"]);
+  assert.ok(c.price > 6 && c.price <= 7, `2,56 kg payes : ${c.price}`);
+
+  // une note ecrite a la main n'est jamais remplacee par le poids
+  faux.fichier("PDFS", await pdfDe(1));
+  faux.livre(pdf("PDFS", "sans-poids.pdf", "DPD"));
+  assert.ok(await faux.attends(() => colisTous().length === 3, 8000));
+  assert.equal(colisTous()[2].note, null, "pas de poids, pas de note");
+});
+
+// numeros factices, de la forme de ceux du fournisseur
+const LISTE_HIER = `📋 Mes drops du jour — PARIS94 (3 colis)
+
+📅 27/10/2026 — 3 colis
+  📄 8R50000000001
+  📄 CZ200000001FR
+  📄 8570000001
+
+🆕 Bordereau pas encore prêt · 📄 À déposer maintenant`;
+
+const LISTE_DU_JOUR = `📋 Mes drops du jour — PARIS94 (5 colis)
+
+Ta liste du jour : ce qu'il te reste à déposer.
+
+📅 28/10/2026 — 2 colis
+  🆕 XX100000001JB (2560g)
+  🆕 8R50000000002
+
+📅 27/10/2026 — 3 colis
+  📄 8R50000000001
+  📄 CZ200000001FR
+  📄 8570000001
+
+🆕 Bordereau pas encore prêt · 📄 À déposer maintenant
+
+📊 Total : 5 colis`;
+
+const ANNONCE_DU_JOUR = `📄 Nouveau PDF !
+
+📍 PARIS94 - 28/10/2026
+
+📦 Total : 2 bordereaux
+🆕 Nouveaux : 2
+
+━━━━━━━━━━━━━━━━━━━━━━
+🎯 SUIVIS SPÉCIAUX :
+
+⚖️ Avec poids (1) :
+  • XX100000001JB → 2.6kg
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+⏰ Tu as 48h pour déposer !`;
+
+test("la liste du jour avec les anciens deja recus : le PDF des 2 nouveaux, coupe en 2, le poids au gramme en note", async () => {
+  // la veille : 3 etiquettes deja recues
+  faux.livre(texte(LISTE_HIER));
+  await faux.attends(() => reponses(/Liste PARIS94 notée : 3 étiquettes/).length === 1);
+  faux.fichier("PDFH", await pdfDe(3));
+  faux.livre(pdf("PDFH", "PARIS94_2026-10-27.pdf"));
+  assert.ok(await faux.attends(() => colisTous().length === 3, 8000));
+
+  // la liste du jour reprend les anciens : seuls les 2 nouveaux sont attendus
+  faux.livre(texte(LISTE_DU_JOUR));
+  assert.ok(
+    await faux.attends(
+      () => reponses(/2 étiquettes pas encore reçues : XX100000001JB \(Chronopost · 2,56kg\), 8R50000000002 \(La Poste\) · 3 déjà reçues, pas recomptées/).length === 1
+    ),
+    "seuls les nouveaux sont attendus"
+  );
+
+  faux.fichier("PDFJ", await pdfDe(2));
+  const avant = envoisGroupe().length;
+  faux.livre(pdf("PDFJ", "PARIS94_2026-10-28.pdf", ANNONCE_DU_JOUR));
+  assert.ok(await faux.attends(() => colisTous().length === 5, 8000), "2 colis de plus");
+
+  const nouveaux = colisTous().slice(3);
+  assert.deepEqual(nouveaux.map((c) => c.file_name), ["XX100000001JB.pdf", "8R50000000002.pdf"]);
+  assert.deepEqual(nouveaux.map((c) => c.carrier), ["CHRONO", "LP"]);
+  // le poids de la liste (2560g) l'emporte sur l'arrondi de l'annonce (2.6kg)
+  assert.deepEqual(nouveaux.map((c) => c.poids_g), [2560, null]);
+  assert.deepEqual(nouveaux.map((c) => c.note), ["2,56kg", null]);
+
+  const envois = envoisGroupe().slice(avant);
+  assert.equal(envois.length, 2, "une page par etiquette, les anciens pas republies");
+  for (const [i, e] of envois.entries()) assert.deepEqual(await largeurs(e.params._fichiers.document.octets), [200 + i], `page ${i + 1}`);
 });

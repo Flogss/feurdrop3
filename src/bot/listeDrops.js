@@ -2,16 +2,20 @@
 //
 // Le fournisseur envoie deux messages, transferes tels quels au bot :
 //
-//   📋 Mes drops du jour — PARIS94 (4 colis)
-//     📄 8R50345899012 (1000g)
-//     📄 8R49597374149
-//     🆕 8R49597373395        <- bordereau pas encore pret : pas dans le PDF
-//     📄 8571271394
+//   📋 Mes drops du jour — PARIS94 (7 colis)
+//     📅 28/10/2026 — 2 colis
+//       🆕 XX118806506JB (2560g)   <- nouveau : son bordereau arrive dans le PDF
+//       🆕 8R50362619068
+//     📅 27/10/2026 — 5 colis
+//       📄 8R50357987028           <- deja envoye (souvent deja recu)
+//       ...
 //
-// puis un PDF d'une page par etiquette « 📄 », dans l'ordre de la liste
-// (l'annonce « 📄 Nouveau PDF ! » qui l'accompagne redonne les poids). Les
+// puis l'annonce « 📄 Nouveau PDF ! » (« Total : 2 bordereaux · Nouveaux : 2 »,
+// les poids) et un PDF d'une page par etiquette, dans l'ordre de la liste. Les
 // pages sont des images : aucun numero ne s'y lit, c'est l'ordre de la liste
-// qui dit quelle page porte quel numero.
+// qui dit quelle page porte quel numero. Les pages sont celles des numeros
+// PAS ENCORE RECUS : un numero deja recu n'est jamais recompte (voir
+// pagesDuPdf).
 //
 // Un numero = une etiquette : jamais deux fois le meme numero.
 const { getSetting, setSetting } = require("../db");
@@ -47,7 +51,7 @@ function lisListeDrops(texte) {
     const numero = m[2].toUpperCase();
     if (!NUMERO.test(numero) || vus.has(numero)) continue;
     vus.add(numero);
-    entrees.push({ numero, pret: m[1] === "📄", grammes: m[3] ? grammesDe(m[3], m[4]) : null });
+    entrees.push({ numero, pret: m[1] === "📄", nouveau: m[1] === "🆕", grammes: m[3] ? grammesDe(m[3], m[4]) : null });
   }
   return entrees.length ? { nom, entrees } : null;
 }
@@ -81,7 +85,8 @@ function listeEnAttente(chatId) {
 }
 
 function retiensListe(chatId, liste) {
-  // les poids deja annonces restent si la liste est renvoyee
+  // les poids deja annonces restent si la liste est renvoyee (ceux de la
+  // liste, au gramme pres, l'emportent)
   const avant = listeEnAttente(chatId);
   const poids = { ...(avant?.poids || {}) };
   for (const e of liste.entrees) if (e.grammes) poids[e.numero] = e.grammes;
@@ -90,10 +95,22 @@ function retiensListe(chatId, liste) {
   return l;
 }
 
+// (le poids de la liste, au gramme pres -- « 2560g » --, l'emporte sur
+// l'arrondi de l'annonce -- « 2.6kg » -- quand ils disent la meme chose)
+function fusionnePoids(avant, nouveaux) {
+  const poids = { ...(avant || {}) };
+  for (const [numero, g] of Object.entries(nouveaux || {})) {
+    const deja = poids[numero];
+    if (deja && Math.abs(deja - g) <= Math.max(60, deja * 0.03)) continue;
+    poids[numero] = g;
+  }
+  return poids;
+}
+
 function ajoutePoids(chatId, poids) {
   const l = listeEnAttente(chatId);
   if (!l) return null;
-  l.poids = { ...(l.poids || {}), ...poids };
+  l.poids = fusionnePoids(l.poids, poids);
   setSetting(cle(chatId), JSON.stringify(l));
   return l;
 }
@@ -102,12 +119,27 @@ function oublieListe(chatId) {
   setSetting(cle(chatId), "null");
 }
 
+/**
+ * Les numeros dont les pages sont dans ce PDF, dans l'ordre de la liste : le
+ * premier groupe dont le nombre egale celui des pages, parmi
+ *   1. les numeros pas encore recus (les anciens deja recus sont sautes) ;
+ *   2. les nouveaux « 🆕 » pas encore recus ;
+ *   3. les « 📄 » pas encore recus (forme d'avant : tout le PDF en « 📄 ») ;
+ *   4. toute la liste (le meme PDF renvoye : les recus ne sont pas recomptes).
+ * null quand aucun ne colle : decouper au hasard donnerait de faux numeros.
+ */
+function pagesDuPdf(liste, pages, dejaRecu = () => false) {
+  const pasRecus = liste.entrees.filter((e) => !dejaRecu(e.numero));
+  const groupes = [pasRecus, pasRecus.filter((e) => e.nouveau), pasRecus.filter((e) => e.pret), liste.entrees];
+  return groupes.find((g) => g.length > 0 && g.length === pages) || null;
+}
+
 // Ce PDF est-il celui de la liste ? Son nom (« PARIS94_2026-10-20.pdf ») ou
-// son nombre de pages, egal au nombre d'etiquettes « 📄 ».
-function pdfDeLaListe(liste, { fileName, pages }) {
-  const prets = liste.entrees.filter((e) => e.pret);
+// son nombre de pages, qui colle a la liste.
+function pdfDeLaListe(liste, { fileName, pages }, dejaRecu = () => false) {
   const nomOk = Boolean(liste.nom) && String(fileName || "").toUpperCase().startsWith(`${liste.nom.toUpperCase()}_`);
-  return { concerne: nomOk || (pages > 1 && pages === prets.length), complet: pages === prets.length, prets };
+  const entrees = pagesDuPdf(liste, pages, dejaRecu);
+  return { concerne: nomOk || (pages > 1 && Boolean(entrees)), complet: Boolean(entrees), entrees: entrees || [], attendues: liste.entrees.filter((e) => !dejaRecu(e.numero)) };
 }
 
 module.exports = {
@@ -119,4 +151,6 @@ module.exports = {
   ajoutePoids,
   oublieListe,
   pdfDeLaListe,
+  pagesDuPdf,
+  fusionnePoids,
 };

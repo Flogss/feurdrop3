@@ -121,6 +121,7 @@ const {
   ajoutePoids,
   oublieListe,
   pdfDeLaListe,
+  fusionnePoids,
 } = require("./bot/listeDrops");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8957997002:AAEzvJXgMZ9Qn7E4ERirZHTrTfseF8WDKm4";
@@ -298,7 +299,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/poids 5 en reponse a un colis : 5 kg, payes en plus au prix du kilo de l'expediteur (/poids seul efface). Un poids ecrit dans la description (\"📦 mondial relay 5kg\") est compte tout seul\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/poids 5 en reponse a un colis : 5 kg, payes en plus au prix du kilo de l'expediteur (/poids seul efface). Un poids ecrit dans la description (\"📦 mondial relay 5kg\", \"DPD 2 KG\", \"2560g\") est compte tout seul et note sur l'etiquette\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
         {},
         30000
       );
@@ -948,7 +949,10 @@ async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
   // numero de message n'est connu qu'une fois la copie faite.
   const { batch, key } = lotCourant(batches, AUTO_GROUP_CHAT_ID, type);
   if (msg.media_group_id && msg.caption) batch.groupCaptions.set(msg.media_group_id, msg.caption);
-  const colis = addColis(senderName, {
+  // « 📦 mondial relay 5kg », « DPD 2 KG », « DPD 2560G » : le poids se paie
+  // au kilo (prix de l'expediteur) et se note sur l'etiquette
+  const poidsG = lisPoids(msg.caption);
+  let colis = addColis(senderName, {
     chatId: AUTO_GROUP_CHAT_ID,
     messageId: null,
     batchId: batch.batchId,
@@ -961,9 +965,9 @@ async function routeToTopic(bot, msg, attachment, batches, arrivee = null) {
     // le fichier d'origine en prive : y repondre /lit ou /normal doit marcher
     sourceChatId: direct ? null : msg.chat.id,
     sourceMessageId: direct ? null : msg.message_id,
-    // « 📦 mondial relay 5kg » : le poids se paie au kilo (prix de l'expediteur)
-    poidsG: lisPoids(msg.caption),
+    poidsG,
   });
+  if (poidsG) colis = setColisNote(colis.id, notePoids(poidsG)) || colis;
   // aussitot lie a son inscription : une reprise ne le recreera pas
   if (arrivee) arriveeLiee(arrivee.id, { colisId: colis.id });
 
@@ -1037,20 +1041,29 @@ function appliquePoids(bot, poids, chatId) {
   return notes;
 }
 
+const dejaRecu = (numero) => Boolean(colisAvecNumero(numero));
+
 function recoitTexteDrops(bot, msg, texte) {
   const liste = lisListeDrops(texte);
   if (liste) {
     const l = retiensListe(msg.chat.id, liste);
-    const prets = l.entrees.filter((e) => e.pret).map((e) => e.numero);
-    const pasPrets = l.entrees.length - prets.length;
+    // ce que le PDF a venir apporte : les numeros pas encore recus ; les
+    // anciens deja recus (les jours d'avant) ne comptent pas
+    const attendues = l.entrees.filter((e) => !dejaRecu(e.numero));
+    const recus = l.entrees.length - attendues.length;
+    const detail = attendues
+      .map((e) => `${e.numero} (${carrierLabel(transporteurDuNumero(e.numero) || "?").replace(/^\?$/, "inconnu")}${l.poids?.[e.numero] ? ` · ${notePoids(l.poids[e.numero])}` : ""})`)
+      .join(", ");
     queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
     replyEphemeral(
       bot,
       msg,
-      `📋 Liste${l.nom ? ` ${l.nom}` : ""} notée : ${prets.length} étiquette${prets.length > 1 ? "s" : ""} à déposer` +
-        (prets.length ? ` (${resumeTransporteurs(prets)})` : "") +
-        (pasPrets ? ` · ${pasPrets} bordereau${pasPrets > 1 ? "x" : ""} pas encore prêt${pasPrets > 1 ? "s" : ""}` : "") +
-        `.\nEnvoie-moi le PDF : je le découpe page par page, dans cet ordre.`,
+      `📋 Liste${l.nom ? ` ${l.nom}` : ""} notée : ` +
+        (attendues.length
+          ? `${attendues.length} étiquette${attendues.length > 1 ? "s" : ""} pas encore reçue${attendues.length > 1 ? "s" : ""} : ${detail}`
+          : "toutes ses étiquettes sont déjà reçues") +
+        (recus ? ` · ${recus} déjà reçue${recus > 1 ? "s" : ""}, pas recomptée${recus > 1 ? "s" : ""}` : "") +
+        (attendues.length ? `.\nEnvoie-moi le PDF : je le découpe page par page, dans cet ordre.` : "."),
       {},
       LECTURE_MS
     );
@@ -1089,7 +1102,7 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
     return null; // illisible : le chemin habituel le garde tel quel
   }
   const pages = source.getPageCount();
-  const { concerne, complet, prets } = pdfDeLaListe(liste, { fileName: attachment.fileName, pages });
+  const { concerne, complet, entrees, attendues } = pdfDeLaListe(liste, { fileName: attachment.fileName, pages }, dejaRecu);
   if (!concerne) return null;
   if (!complet) {
     // l'ordre ne colle plus : decouper au hasard donnerait de faux numeros
@@ -1097,7 +1110,7 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
       bot,
       msg,
       `⚠️ ${attachment.fileName || "Ce PDF"} a ${pages} page${pages > 1 ? "s" : ""}, mais la liste${liste.nom ? ` ${liste.nom}` : ""} annonce ` +
-        `${prets.length} étiquette${prets.length > 1 ? "s" : ""} à déposer : je ne le découpe pas. Renvoie la liste à jour, puis le PDF.`,
+        `${attendues.length} étiquette${attendues.length > 1 ? "s" : ""} pas encore reçue${attendues.length > 1 ? "s" : ""} : je ne le découpe pas. Renvoie la liste à jour, puis le PDF.`,
       {},
       2 * LECTURE_MS
     );
@@ -1105,13 +1118,13 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
   }
 
   // les poids de l'annonce, quand elle est la legende du PDF
-  const poids = { ...(liste.poids || {}), ...(lisAnnoncePdf(msg.caption)?.poids || {}) };
+  const poids = fusionnePoids(liste.poids, lisAnnoncePdf(msg.caption)?.poids);
   const senderName = extractSenderName(msg);
   const crees = [];
   const doublons = [];
   const notes = [];
   for (let i = 0; i < pages; i += 1) {
-    const { numero } = prets[i];
+    const { numero } = entrees[i];
     if (colisAvecNumero(numero)) {
       doublons.push(numero);
       continue;
@@ -1807,7 +1820,10 @@ function handlePoids(bot, msg, texte) {
     replyEphemeral(bot, msg, `Poids illisible : « ${brut} ». Exemple : /poids 5 ou /poids 750g.`);
     return;
   }
-  const maj = setColisPoids(colis.id, grammes);
+  let maj = setColisPoids(colis.id, grammes);
+  // la note du poids suit le poids corrige (une note ecrite a la main reste)
+  if (!colis.note || colis.note === notePoids(colis.poids_g)) maj = setColisNote(colis.id, notePoids(grammes)) || maj;
+  if (maj.note !== colis.note) refreshFileButtons(bot, maj);
   replyEphemeral(
     bot,
     msg,
