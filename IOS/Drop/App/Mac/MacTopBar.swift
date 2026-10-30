@@ -15,6 +15,10 @@ struct MacTopBar: View {
     var marquePosee = true
     var surCadreMarque: (CGRect) -> Void = { _ in }
     @Environment(AppModel.self) private var app
+    /// la largeur de la barre : en dessous d'un seuil, l'heure de drop se
+    /// resserre (l'horloge et l'heure seules) pour ne pas mordre sur le menu
+    /// du centre
+    @State private var largeur: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -32,7 +36,7 @@ struct MacTopBar: View {
                 GlassEffectContainer(spacing: 0) {
                     HStack(spacing: 10) {
                         LivePill(online: app.isOnline)
-                        HeureDropBouton()
+                        HeureDropBouton(compact: largeur < 1440)
                         outil(.tracking, aide: "Suivi des colis (⌘4)")
                         outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
                         outil(.historique, aide: "Historique (⌘8)")
@@ -44,6 +48,7 @@ struct MacTopBar: View {
             }
         }
         .frame(height: Self.hauteur)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { largeur = $0 }
         .padding(.top, 4)
         .background(alignment: .top) {
             // un voile tres leger : la barre reste lisible quand la page defile dessous

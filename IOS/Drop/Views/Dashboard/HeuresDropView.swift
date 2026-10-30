@@ -6,7 +6,8 @@ import DropKit
 /// s'il y en a d'autres). Le toucher ouvre les heures : en poser, les
 /// modifier, les retirer.
 struct HeureDropBouton: View {
-    /// l'horloge seule tant que rien n'est prevu (en-tete serre de l'iPhone)
+    /// l'horloge seule tant que rien n'est prevu, l'heure seule sinon (en-tete
+    /// serre de l'iPhone, fenetre etroite sur Mac)
     var compact = false
     @Environment(AppModel.self) private var app
     @State private var ouvert = false
@@ -64,7 +65,7 @@ struct HeureDropBouton: View {
         #if DEBUG
         // verification : `-DropOuvreHeuresDrop 1` ouvre les heures au lancement
         .task {
-            guard !compact || !Platform.isMac, UserDefaults.standard.bool(forKey: "DropOuvreHeuresDrop") else { return }
+            guard UserDefaults.standard.bool(forKey: "DropOuvreHeuresDrop") else { return }
             try? await Task.sleep(for: .seconds(4))
             ouvert = true
         }
@@ -199,7 +200,8 @@ struct HeuresDropSheet: View {
                         .foregroundStyle(Theme.violetLight)
                 }
             }
-            .frame(minWidth: 52, alignment: .leading)
+            // une colonne fixe : « 2h » et « 17h15 » alignent leurs transporteurs
+            .frame(width: 66, alignment: .leading)
             FlowLayout(spacing: 5, lineSpacing: 5) {
                 ForEach(h.transporteurs) { t in pastille(t) }
             }
@@ -276,6 +278,8 @@ struct HeuresDropSheet: View {
                 .labelsHidden()
                 #if os(macOS)
                 .datePickerStyle(.stepperField)
+                .controlSize(.large)
+                .font(.title3.weight(.semibold).monospacedDigit())
                 #endif
                 .environment(\.timeZone, Self.paris)
                 .environment(\.locale, Locale(identifier: "fr_FR"))
