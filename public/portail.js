@@ -280,7 +280,35 @@
         ? "Aucun colis pour l'instant."
         : `${pluriel(d.total, "colis", "colis")} · ${enCours ? `${nf.format(enCours)} en cours` : "aucun en cours"}${pris ? ` · ${pluriel(pris, "pris en charge", "pris en charge")}` : ""}`;
     $("actualiser").hidden = !laPosteChez(d);
+    rendHeuresDrop(d.heuresDrop);
     rend({ anime: Boolean(avant), signale: Boolean(avant) });
+  }
+
+  // --- Heures de drop ---------------------------------------------------------------
+  // Quand mes colis en attente partent : « 16h · La Poste · 2 colis ».
+  const heureCourte = (hhmm) => {
+    const [h, m] = String(hhmm || "").split(":");
+    return h ? `${Number(h)}h${m && m !== "00" ? m : ""}` : "";
+  };
+  const quandDrop = (h) => `${h.demain ? "demain " : ""}${h.passee ? "vers " : "à "}${heureCourte(h.heure)}`;
+  function rendHeuresDrop(heures) {
+    const liste = Array.isArray(heures) ? heures : [];
+    $("heures-drop").hidden = liste.length === 0;
+    $("heures-drop-liste").replaceChildren(
+      ...liste.map((h) => {
+        const li = el("li", "p-drop");
+        const quand = el("b", "p-drop-heure", `${h.demain ? "Demain " : ""}${heureCourte(h.heure)}`);
+        const qui = el("span", "p-drop-tr");
+        for (const t of h.transporteurs || []) {
+          const puce = el("span", "p-drop-puce carrier");
+          puce.dataset.carrier = couleur(t.code);
+          puce.append(el("i", "carrier-dot"), document.createTextNode(`${t.nom} · ${pluriel(t.colis, "colis", "colis")}`));
+          qui.append(puce);
+        }
+        li.append(quand, qui);
+        return li;
+      })
+    );
   }
 
   // --- « Actualiser statuts La Poste » ------------------------------------------------
@@ -726,7 +754,9 @@
       badge.title = depot.constate ? "Vérifié sur la page officielle du transporteur" : "D'après le suivi officiel du transporteur";
     }
     // la derniere etape franchie, et quand
-    const moment = etape === "drope" && c.dropeLe ? `dropé ${quand(date(c.dropeLe))}` : c.recuLe ? `reçu ${quand(date(c.recuLe))}` : "";
+    // pas encore poste, et une heure de drop est prevue : c'est elle qui compte
+    const prevu = etape !== "drope" && c.depotPrevu ? `dépôt prévu ${quandDrop(c.depotPrevu)}` : "";
+    const moment = prevu || (etape === "drope" && c.dropeLe ? `dropé ${quand(date(c.dropeLe))}` : c.recuLe ? `reçu ${quand(date(c.recuLe))}` : "");
     ligne.querySelector(".p-quand").textContent = moment;
 
     const rang = ETAPES.indexOf(etape);

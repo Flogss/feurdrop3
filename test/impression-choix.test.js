@@ -45,3 +45,16 @@ test("la route refuse les LIT dans une selection, et une selection sans etiquett
   assert.equal(r.status, 400);
   assert.match(r.json.error, /aucune etiquette/);
 });
+
+test("une quantite par transporteur : les n premieres de sa file (annotees d'abord, puis par arrivee) ; toutes par defaut", () => {
+  const lp = [1, 2, 3, 4, 5].map((i) => etiquette(`lp${i}`, "LP"));
+  const mr = [1, 2].map((i) => etiquette(`mr${i}`, "MR"));
+  db.setColisNote(lp[3].id, "fragile");
+
+  const ids = (q) => rowsFor({ categories: ["LP", "MR"], scope: "new", quantites: q }).map((r) => r.id);
+  // 2 La Poste : l'annotee, puis la premiere arrivee ; Mondial Relay entier
+  assert.deepEqual(ids({ LP: 2 }), [lp[3].id, lp[0].id, mr[0].id, mr[1].id]);
+  assert.deepEqual(ids({ LP: 1, MR: 1 }), [lp[3].id, mr[0].id]);
+  // sans quantite, nulle, illisible ou trop grande : toutes
+  for (const q of [null, {}, { LP: 0 }, { LP: "abc" }, { LP: 99 }]) assert.equal(ids(q).length, 7, JSON.stringify(q));
+});

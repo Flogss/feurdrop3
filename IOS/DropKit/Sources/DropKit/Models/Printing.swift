@@ -113,6 +113,9 @@ public struct PrintRequest: Encodable, Sendable {
     public var categories: [String]? = nil
     public var ids: [Int]?
     public var scope: PrintScope
+    /// « Choisir » : combien d'un transporteur (les n premieres de sa file) ;
+    /// absent : toutes
+    public var quantites: [String: Int]? = nil
 
     public static func category(_ code: String, scope: PrintScope) -> PrintRequest {
         PrintRequest(categorie: code, ids: nil, scope: scope)
@@ -122,8 +125,8 @@ public struct PrintRequest: Encodable, Sendable {
     public static let allNew = PrintRequest(categorie: "*", ids: nil, scope: .new)
 
     /// les transporteurs choisis, jamais encore imprimes (thermique : sans les LIT)
-    public static func carriers(_ codes: [String]) -> PrintRequest {
-        PrintRequest(categorie: nil, categories: codes, ids: nil, scope: .new)
+    public static func carriers(_ codes: [String], quantites: [String: Int] = [:]) -> PrintRequest {
+        PrintRequest(categorie: nil, categories: codes, ids: nil, scope: .new, quantites: quantites.isEmpty ? nil : quantites)
     }
 
     public static func parcels(_ ids: [Int], scope: PrintScope) -> PrintRequest {

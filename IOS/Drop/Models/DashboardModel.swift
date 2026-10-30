@@ -264,6 +264,33 @@ final class DashboardModel {
         try? await app.api.dismissTourSummary()
     }
 
+    // MARK: Heures de drop
+
+    /// quand on compte poster (le bouton a cote de « En direct »)
+    var heuresDrop: HeuresDrop { stats?.heuresDrop ?? HeuresDrop() }
+
+    /// Pose une heure (`id` nil) ou la modifie ; true si c'est fait.
+    func enregistreHeureDrop(id: String?, heure: String, transporteurs: [String]) async -> Bool {
+        guard !busy.contains("heure") else { return false }
+        busy.insert("heure")
+        defer { busy.remove("heure") }
+        let r = await app.perform {
+            if let id { try await app.api.modifieHeureDrop(id: id, heure: heure, transporteurs: transporteurs) }
+            else { try await app.api.ajouteHeureDrop(heure: heure, transporteurs: transporteurs) }
+        }
+        guard let r else { return false }
+        withAnimation(Theme.spring) { stats?.heuresDrop = r }
+        let noms = transporteurs.map { code in r.transporteurs.first { $0.code == code }?.label ?? Carrier.label(code) }.joined(separator: ", ")
+        app.toasts.show("🕓 \(noms) à \(HeureDrop.courte(heure))\(id == nil ? "" : " : modifié")")
+        return true
+    }
+
+    func retireHeureDrop(_ h: HeureDrop) async {
+        guard let r = await app.perform({ try await app.api.retireHeureDrop(id: h.id) }) else { return }
+        withAnimation(Theme.spring) { stats?.heuresDrop = r }
+        app.toasts.show("Heure de \(h.heureCourte) supprimée", style: .info)
+    }
+
     // MARK: Drops
 
     // Un drop groupe ne solde que les colis deja imprimes : le message dit

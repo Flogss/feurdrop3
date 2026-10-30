@@ -161,6 +161,13 @@ const {
   getBestDay,
 } = require("./stats");
 const {
+  getHeuresDrop,
+  ajouteHeureDrop,
+  modifieHeureDrop,
+  retireHeureDrop,
+  heuresPourGroupes,
+} = require("./heuresDrop");
+const {
   markPushSeen,
   setPushAnnounced,
   saveSubscription,
@@ -292,6 +299,11 @@ module.exports = {
   getWeeklySeries,
   getMonthlySeries,
   getBestDay,
+  getHeuresDrop,
+  ajouteHeureDrop,
+  modifieHeureDrop,
+  retireHeureDrop,
+  heuresPourGroupes,
   markPushSeen,
   setPushAnnounced,
   saveSubscription,

@@ -128,7 +128,15 @@ router.get("/colis", (req, res) => {
 // de leur transporteur : ce sont eux qu'on veut sur le dessus.
 const annotesDevant = (rows) => [...rows.filter((r) => r.note), ...rows.filter((r) => !r.note)];
 
-function rowsFor({ categorie, categories, ids, scope }) {
+// « Choisir » peut ne prendre qu'une partie d'un transporteur : les `n`
+// premieres de sa file (les annotees d'abord, puis par ordre d'arrivee).
+// Absent, nul ou au-dela du nombre en attente : toutes.
+function quantiteDe(quantites, code) {
+  const n = Math.floor(Number(quantites?.[code]));
+  return Number.isFinite(n) && n > 0 ? n : Infinity;
+}
+
+function rowsFor({ categorie, categories, ids, scope, quantites = null }) {
   if (Array.isArray(ids) && ids.length > 0) {
     return ids.map((id) => getColisById(Number(id))).filter((row) => row && row.file_id);
   }
@@ -140,7 +148,7 @@ function rowsFor({ categorie, categories, ids, scope }) {
     return annotesDevant(
       getPrintableSummary({ scope })
         .filter((row) => voulues.has(row.carrier))
-        .flatMap((row) => getPrintableColis(row.carrier, { scope }))
+        .flatMap((row) => getPrintableColis(row.carrier, { scope }).slice(0, quantiteDe(quantites, row.carrier)))
     );
   }
   if (categorie === "LIT") return getLitPrintable({ scope });
@@ -151,10 +159,10 @@ function rowsFor({ categorie, categories, ids, scope }) {
 }
 
 router.post("/build", routeAsync(async (req, res) => {
-  const { categorie = "*", categories = null, ids = null, scope = "new" } = req.body || {};
+  const { categorie = "*", categories = null, ids = null, scope = "new", quantites = null } = req.body || {};
   let rows;
   try {
-    rows = rowsFor({ categorie, categories, ids, scope });
+    rows = rowsFor({ categorie, categories, ids, scope, quantites: quantites && typeof quantites === "object" ? quantites : null });
   } catch (err) {
     return fail(res, err);
   }

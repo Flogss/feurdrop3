@@ -26,6 +26,7 @@ const PAQUETS = {
       "js/50-actions.js", // rafraichissement, gestes, notifications
       "js/60-suivi.js",
       "js/70-impression.js", // onglet Imprime, edition d'un colis
+      "js/72-heures-drop.js", // heures de drop (a cote de « En direct »)
       "js/75-depots.js", // controle des depots
       "js/80-locker.js",
       "js/90-demarrage.js",

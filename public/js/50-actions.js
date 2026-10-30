@@ -66,6 +66,7 @@ const CHARGEMENTS_PAR_VUE = {
 async function verifieCommandes() {
   const s = await fetchJSON("/api/stats", {}, { essais: 1 });
   majPastilleImprime(s.aImprimer);
+  rendHeuresDrop(s.heuresDrop, s.byCarrier);
   // de nouvelles etiquettes : l'onglet Imprime les montre tout de suite
   if (noteEnAttente(s.pendingCount) && currentView === "imprime") loadImprime().catch(() => {});
 }

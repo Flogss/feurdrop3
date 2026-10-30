@@ -529,8 +529,13 @@ $("imp-all").addEventListener("click", (e) => lancerImpression(e.currentTarget, 
 // --- « Choisir » : les transporteurs a imprimer ----------------------------------
 // Une seule liasse avec les transporteurs coches (thermique 4x6 : les LIT
 // gardent leur categorie, ils sortent sur le rouleau). Le choix est retenu
-// d'une fois sur l'autre.
-const impChoix = { categories: [], selection: new Set() };
+// d'une fois sur l'autre. Chaque transporteur coche peut ne sortir qu'en
+// partie (« Combien ? ») : toutes ses etiquettes par defaut, et les n
+// premieres de sa file sinon (les annotees d'abord).
+const impChoix = { categories: [], selection: new Set(), quantites: new Map() };
+
+// combien d'un transporteur partent : sa quantite, bornee a ce qui attend
+const impQuantite = (c) => Math.min(c.count, Math.max(1, impChoix.quantites.get(c.code) ?? c.count));
 
 function impChoixRetenu() {
   try {
@@ -546,6 +551,8 @@ function ouvreChoixImpression() {
   const codes = impChoix.categories.map((c) => c.code);
   const retenu = [...impChoixRetenu()].filter((c) => codes.includes(c));
   impChoix.selection = new Set(retenu.length ? retenu : codes);
+  // chaque fois : toutes (la file a pu changer depuis)
+  impChoix.quantites = new Map();
   rendChoixImpression();
   const couche = $("imp-choix-sheet");
   couche.classList.remove("closing");
@@ -575,14 +582,81 @@ function rendChoixImpression() {
     )
     .join("");
   const pris = impChoix.categories.filter((c) => sel.has(c.code));
-  const count = pris.reduce((n, c) => n + c.count, 0);
-  const notees = pris.reduce((n, c) => n + (c.noted || 0), 0);
+  rendQuantites(pris);
+  const count = pris.reduce((n, c) => n + impQuantite(c), 0);
+  // les annotees sortent les premieres de leur file
+  const notees = pris.reduce((n, c) => n + Math.min(c.noted || 0, impQuantite(c)), 0);
   $("imp-choix-tout").textContent = pris.length === impChoix.categories.length ? "Aucun" : "Tout";
   $("imp-choix-resume").innerHTML = pris.length
     ? `<b>${pluriel(count, "étiquette", "étiquettes")}</b> à imprimer${notees ? ` · ${pluriel(notees, "annotée", "annotées")} sur le dessus` : ""}`
     : "Choisis au moins un transporteur.";
   $("imp-choix-imprimer").disabled = pris.length === 0;
 }
+
+// Une ligne par transporteur coche : − [n] + sur son total ; toucher « sur
+// N » revient a toutes. Rendue seulement quand la selection change : la saisie au
+// clavier dans un champ n'est pas interrompue.
+let impQtesRendues = "";
+function rendQuantites(pris) {
+  const bloc = $("imp-choix-quantites-bloc");
+  bloc.hidden = pris.length === 0;
+  const cle = pris.map((c) => `${c.code}:${c.count}`).join(",");
+  if (cle !== impQtesRendues) {
+    impQtesRendues = cle;
+    $("imp-choix-quantites").innerHTML = pris
+      .map(
+        (c) => `
+      <div class="imp-qte carrier" data-code="${escapeAttr(c.code)}" data-carrier="${escapeAttr(c.code)}">
+        <span class="imp-qte-nom"><i class="carrier-dot"></i>${escapeHtml(c.label)}</span>
+        <div class="imp-qte-pas">
+          <button class="imp-qte-btn" type="button" data-pas="-1" aria-label="Une ${escapeAttr(c.label)} de moins">−</button>
+          <input class="imp-qte-champ" type="number" inputmode="numeric" min="1" max="${c.count}" step="1" aria-label="Combien de ${escapeAttr(c.label)} imprimer">
+          <button class="imp-qte-btn" type="button" data-pas="1" aria-label="Une ${escapeAttr(c.label)} de plus">+</button>
+        </div>
+        <button class="imp-qte-sur" type="button" data-tout aria-label="Toutes les ${entier(c.count)}">sur ${entier(c.count)}</button>
+      </div>`
+      )
+      .join("");
+  }
+  for (const ligne of $("imp-choix-quantites").querySelectorAll(".imp-qte")) {
+    const c = pris.find((x) => x.code === ligne.dataset.code);
+    if (!c) continue;
+    const n = impQuantite(c);
+    const champ = ligne.querySelector(".imp-qte-champ");
+    if (document.activeElement !== champ) champ.value = String(n);
+    ligne.querySelector('[data-pas="-1"]').disabled = n <= 1;
+    ligne.querySelector('[data-pas="1"]').disabled = n >= c.count;
+    ligne.querySelector("[data-tout]").disabled = n >= c.count;
+    ligne.classList.toggle("is-partiel", n < c.count);
+  }
+}
+
+function changeQuantite(code, n) {
+  const c = impChoix.categories.find((x) => x.code === code);
+  if (!c || !Number.isFinite(n)) return;
+  impChoix.quantites.set(code, Math.min(c.count, Math.max(1, Math.round(n))));
+  rendChoixImpression();
+}
+
+$("imp-choix-quantites").addEventListener("click", (e) => {
+  const ligne = e.target.closest(".imp-qte");
+  if (!ligne) return;
+  const c = impChoix.categories.find((x) => x.code === ligne.dataset.code);
+  if (!c) return;
+  if (e.target.closest("[data-tout]")) changeQuantite(c.code, c.count);
+  else if (e.target.closest("[data-pas]")) changeQuantite(c.code, impQuantite(c) + Number(e.target.closest("[data-pas]").dataset.pas));
+  else return;
+  haptique();
+});
+$("imp-choix-quantites").addEventListener("input", (e) => {
+  const champ = e.target.closest(".imp-qte-champ");
+  if (!champ || champ.value === "") return;
+  changeQuantite(champ.closest(".imp-qte").dataset.code, Number(champ.value));
+});
+$("imp-choix-quantites").addEventListener("focusout", (e) => {
+  // un champ laisse vide reprend sa valeur
+  if (e.target.closest(".imp-qte-champ")) rendChoixImpression();
+});
 
 $("imp-choisir").addEventListener("click", ouvreChoixImpression);
 $("imp-choix-puces").addEventListener("click", (e) => {
@@ -609,6 +683,10 @@ document.addEventListener("keydown", (e) => {
 $("imp-choix-imprimer").addEventListener("click", () => {
   const categories = impChoix.categories.map((c) => c.code).filter((c) => impChoix.selection.has(c));
   if (!categories.length) return;
+  // seulement les transporteurs pris en partie : les autres sortent en entier
+  const quantites = Object.fromEntries(
+    impChoix.categories.filter((c) => impChoix.selection.has(c.code) && impQuantite(c) < c.count).map((c) => [c.code, impQuantite(c)])
+  );
   try {
     localStorage.setItem("imp-choix", JSON.stringify(categories));
   } catch {
@@ -616,6 +694,6 @@ $("imp-choix-imprimer").addEventListener("click", () => {
   }
   fermeChoixImpression();
   // (dans le meme geste que le clic : l'onglet du PDF n'est pas bloque)
-  lancerImpression($("imp-choisir"), { categories, scope: "new" });
+  lancerImpression($("imp-choisir"), { categories, scope: "new", ...(Object.keys(quantites).length ? { quantites } : {}) });
 });
 

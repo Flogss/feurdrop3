@@ -322,6 +322,30 @@ public struct DropAPI: Sendable {
         return serie.months
     }
 
+    // MARK: - Heures de drop
+
+    private struct CorpsHeureDrop: Encodable, Sendable {
+        let heure: String
+        let transporteurs: [String]
+    }
+
+    public func heuresDrop() async throws -> HeuresDrop {
+        try await client.send(.get, "/api/heures-drop")
+    }
+
+    /// « 16:00 » et les transporteurs postes a cette heure
+    public func ajouteHeureDrop(heure: String, transporteurs: [String]) async throws -> HeuresDrop {
+        try await client.send(.post, "/api/heures-drop", body: CorpsHeureDrop(heure: heure, transporteurs: transporteurs))
+    }
+
+    public func modifieHeureDrop(id: String, heure: String, transporteurs: [String]) async throws -> HeuresDrop {
+        try await client.send(.patch, "/api/heures-drop/\(segment(id))", body: CorpsHeureDrop(heure: heure, transporteurs: transporteurs))
+    }
+
+    public func retireHeureDrop(id: String) async throws -> HeuresDrop {
+        try await client.send(.delete, "/api/heures-drop/\(segment(id))")
+    }
+
     // MARK: - Espaces expediteurs
 
     /// Cree le lien prive d'un expediteur, ou le regenere (l'ancien cesse de

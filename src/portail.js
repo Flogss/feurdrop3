@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { db, getSetting, setSetting, tourScope, journalise } = require("./db");
+const { db, getSetting, setSetting, tourScope, journalise, heuresPourGroupes } = require("./db");
 const { suiviDuColis, transporteurDuColis } = require("./suiviColis");
 const { carrierLabel } = require("./carrier");
 const { FORME_JETON } = require("./portailCommun");
@@ -183,7 +183,25 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
   // les dropes se comptent sur tout l'historique, pas seulement la page
   compte.drope = total - (compte.a_imprimer + compte.imprime + compte.en_drop);
 
-  return { expediteur: sender.name, compte, colis, total, suite: lignes.length < total };
+  // quand ses colis en attente partent : les heures de drop de leurs
+  // transporteurs (« BJ » pour la boite jaune, comme sur le dashboard)
+  const groupes = new Map();
+  for (const l of lignes) {
+    if (l.status !== "pending") continue;
+    const g = l.type === "bj" ? "BJ" : l.carrier;
+    if (g) groupes.set(g, (groupes.get(g) || 0) + 1);
+  }
+  const heuresDrop = groupes.size ? heuresPourGroupes(groupes) : [];
+  if (heuresDrop.length) {
+    lignes.forEach((l, i) => {
+      if (l.status !== "pending") return;
+      const g = l.type === "bj" ? "BJ" : l.carrier;
+      const h = heuresDrop.find((x) => x.transporteurs.some((t) => t.code === g));
+      if (h) colis[i].depotPrevu = { a: h.a, heure: h.heure, demain: h.demain };
+    });
+  }
+
+  return { expediteur: sender.name, compte, colis, total, suite: lignes.length < total, heuresDrop };
 }
 
 // « Actualiser statuts La Poste » : les colis de l'expediteur designe par le

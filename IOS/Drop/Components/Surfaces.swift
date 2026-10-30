@@ -63,12 +63,18 @@ struct PageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide).locale(Locale(identifier: "fr_FR"))).uppercased())
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.text3)
+                // « VENDREDI 30 OCTOBRE », ou « VEN. 30 OCT. » quand la droite est pleine
+                ViewThatFits(in: .horizontal) {
+                    Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide).locale(Locale(identifier: "fr_FR"))).uppercased())
+                    Text(Date.now.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).locale(Locale(identifier: "fr_FR"))).uppercased())
+                }
+                .font(.caption.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(Theme.text3)
+                .lineLimit(1)
                 Text(title)
                     .font(.system(size: 38, weight: .bold, design: .rounded))
+                    .lineLimit(1)
                     .foregroundStyle(Theme.numberGradient)
                     .shadow(color: Theme.violet.opacity(0.45), radius: 16)
                     .accessibilityAddTraits(.isHeader)

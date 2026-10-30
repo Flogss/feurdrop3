@@ -8,6 +8,7 @@
   .metric-value { font-size: 23px; }
   .live-text { display: none; }
   .live { padding: 0 10px; }
+  .heure-drop { padding: 0 10px; }
   .mini-stepper .step { width: 30px; }
   .sender .btn-drop { min-width: 0; }
 }

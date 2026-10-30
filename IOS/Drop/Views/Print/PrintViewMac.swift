@@ -62,8 +62,8 @@ struct PrintViewMac: View {
                 .frame(minWidth: 480, minHeight: 540)
         }
         .sheet(isPresented: $choix) {
-            PrintChoixSheet(categories: model.choixPossibles, retenu: model.choixRetenu) { codes in
-                Task { await model.printCarriers(codes) }
+            PrintChoixSheet(categories: model.choixPossibles, retenu: model.choixRetenu) { codes, quantites in
+                Task { await model.printCarriers(codes, quantites: quantites) }
             }
             .frame(minWidth: 480, minHeight: 420)
         }

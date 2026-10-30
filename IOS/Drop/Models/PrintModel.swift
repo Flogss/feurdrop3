@@ -57,11 +57,13 @@ final class PrintModel {
         Set(UserDefaults.standard.stringArray(forKey: "drop.impression.choix") ?? [])
     }
 
-    /// « Choisir » : les transporteurs coches, dans une seule liasse
-    func printCarriers(_ codes: [String]) async {
+    /// « Choisir » : les transporteurs coches, dans une seule liasse ;
+    /// `quantites` : ceux qu'on ne prend qu'en partie (les n premieres de
+    /// leur file). Les quantites ne sont pas retenues : la file change.
+    func printCarriers(_ codes: [String], quantites: [String: Int] = [:]) async {
         guard !codes.isEmpty else { return }
         UserDefaults.standard.set(codes, forKey: "drop.impression.choix")
-        await print(.carriers(codes), key: "choix")
+        await print(.carriers(codes, quantites: quantites), key: "choix")
     }
 
     // MARK: Chargement

@@ -13,6 +13,10 @@ const {
   getDailySeries,
   getWeeklySeries,
   getMonthlySeries,
+  getHeuresDrop,
+  ajouteHeureDrop,
+  modifieHeureDrop,
+  retireHeureDrop,
   getBestDay,
   getDebtsBySender,
   markSenderPaid,
@@ -164,6 +168,8 @@ router.get("/stats", (req, res) => {
     bjPendingValue: bjPending.value,
     bySender,
     byCarrier: getCarrierSummary(),
+    // quand on compte poster (le bouton a cote de « En direct »)
+    heuresDrop: getHeuresDrop(),
     autoPrint: { enabled: isAutoPrintEnabled(), pending: isAutoPrintEnabled() ? compteFileAuto() : countUnprintedLabels() },
     // etiquettes jamais imprimees, LIT compris : la pastille de l'onglet Imprime
     aImprimer: countUnprintedLabels() + countLitPrintable({ scope: "new" }),
@@ -497,6 +503,14 @@ router.get("/stats/revenue/weekly-series", (req, res) => {
 router.get("/stats/revenue/monthly-series", (req, res) => {
   res.json(getMonthlySeries());
 });
+
+// Les heures de drop : quand on compte poster, par transporteurs (voir
+// db/heuresDrop.js). Chaque changement renvoie la liste a jour.
+const repondHeures = (res, r) => (r.erreur ? res.status(r.status || 400).json({ error: r.erreur }) : res.json(r));
+router.get("/heures-drop", (req, res) => res.json(getHeuresDrop()));
+router.post("/heures-drop", (req, res) => repondHeures(res, ajouteHeureDrop(req.body || {})));
+router.patch("/heures-drop/:id", (req, res) => repondHeures(res, modifieHeureDrop(String(req.params.id), req.body || {})));
+router.delete("/heures-drop/:id", (req, res) => repondHeures(res, retireHeureDrop(String(req.params.id))));
 
 // Un expediteur tel que le dashboard le voit : son jeton brut reste en base,
 // le dashboard recoit le chemin de son espace prive (portail.chemin).

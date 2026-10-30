@@ -174,6 +174,7 @@ private struct DashboardHeader: View {
             GlassEffectContainer(spacing: 0) {
             HStack(spacing: 10) {
                 LivePill(online: app.isOnline)
+                HeureDropBouton(compact: true)
                 Group {
                 #if os(macOS)
                 SettingsLink {
@@ -194,6 +195,8 @@ private struct DashboardHeader: View {
                 .boutonVerre(.rond)
                 .accessibilityLabel("Réglages")
             }
+            // jamais « En direct » coupe lettre par lettre : la date se resserre
+            .fixedSize()
             }
         }
     }

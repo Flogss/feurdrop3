@@ -81,6 +81,8 @@ async function loadStats(animate, force, riche) {
   renderTour(s.tour || {});
   renderAutoPrint(s.autoPrint || {});
 
+  rendHeuresDrop(s.heuresDrop, s.byCarrier);
+
   if (hasChanged("carriers", s.byCarrier) || force) {
     renderCarriers(s.byCarrier || []);
     renderMix(s.byCarrier || [], premier);

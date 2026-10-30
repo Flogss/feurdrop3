@@ -154,6 +154,75 @@ a.toast-lien { color: inherit; text-decoration: none; cursor: pointer; }
   background: rgb(var(--k)); border-color: rgb(var(--k)); color: #120e1c; transform: scale(1.05);
 }
 
+/* « Choisir » : combien de chaque transporteur coche (toutes par defaut) */
+.imp-qtes { display: flex; flex-direction: column; gap: 6px; }
+.imp-qte {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; padding: 6px 6px 6px 14px;
+  border-radius: 16px; border: 1px solid var(--line); background: rgb(255 255 255 / 0.03);
+  transition: border-color var(--t-3), background-color var(--t-3);
+}
+.imp-qte.is-partiel { border-color: rgb(var(--c) / 0.45); background: rgb(var(--c) / 0.08); }
+.imp-qte-nom { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.imp-qte-pas { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--r-pill); background: rgb(255 255 255 / 0.05); border: 1px solid var(--line); }
+.imp-qte-btn {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  font: 600 18px/1 var(--font-sans); color: var(--text);
+  transition: background-color var(--t-2), transform var(--t-3) var(--ease-spring), opacity var(--t-2);
+}
+.imp-qte-btn:hover:not(:disabled) { background: rgb(255 255 255 / 0.08); }
+.imp-qte-btn:active:not(:disabled) { transform: scale(0.88); }
+.imp-qte-btn:disabled { opacity: 0.3; cursor: default; }
+.imp-qte-champ {
+  width: 3.4em; height: 32px; border: 0; background: transparent; text-align: center;
+  font: 700 15px/1 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--text);
+  -moz-appearance: textfield; appearance: textfield;
+}
+.imp-qte-champ::-webkit-outer-spin-button, .imp-qte-champ::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.imp-qte-champ:focus-visible { outline: 2px solid rgb(var(--violet-300) / 0.7); outline-offset: 2px; border-radius: 8px; }
+.imp-qte-sur {
+  min-width: 52px; height: 32px; padding: 0 8px; border-radius: var(--r-pill);
+  font-size: 13px; font-weight: 600; color: rgb(var(--violet-300)); font-variant-numeric: tabular-nums; white-space: nowrap;
+  transition: background-color var(--t-2), color var(--t-2);
+}
+.imp-qte-sur:hover:not(:disabled) { background: rgb(var(--accent-rgb) / 0.14); }
+.imp-qte-sur:disabled { color: var(--text-3); cursor: default; }
+
+/* Heures de drop : les heures prevues, puis le formulaire (nouvelle heure
+   ou modification de celle qu'on a touchee). */
+.hd-liste { display: flex; flex-direction: column; gap: 6px; }
+.hd-liste[hidden] { display: none; }
+.hd-ligne {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+  padding: 8px 6px 8px 14px; border-radius: 16px; border: 1px solid var(--line); background: rgb(255 255 255 / 0.03);
+  cursor: pointer; transition: border-color var(--t-3), background-color var(--t-3);
+}
+.hd-ligne:hover { border-color: var(--line-2); }
+.hd-ligne.is-edition { border-color: rgb(var(--violet-300) / 0.55); background: rgb(var(--accent-rgb) / 0.12); }
+.hd-ligne-heure { display: flex; flex-direction: column; min-width: 3.2em; font: 700 19px/1.05 var(--font-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text); }
+.hd-ligne-heure small { font: 600 11px/1.2 var(--font-sans); letter-spacing: 0.02em; color: rgb(var(--violet-300)); }
+.hd-ligne.is-passee .hd-ligne-heure { color: var(--warn); }
+.hd-ligne-puces { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.hd-puce {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: var(--r-pill);
+  border: 1px solid rgb(var(--c) / 0.45); background: rgb(var(--c) / 0.12); font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap;
+}
+.hd-action { width: 36px; height: 36px; }
+.hd-action .icon { width: 17px; height: 17px; }
+.hd-retirer:hover { color: var(--danger); }
+.hd-form { margin-top: 4px; }
+.hd-heure-champ {
+  display: flex; align-items: center; gap: 10px; align-self: flex-start; height: 48px; padding: 0 16px 0 14px;
+  border-radius: 16px; border: 1px solid var(--line-2); background: rgb(255 255 255 / 0.04);
+}
+.hd-heure-champ:focus-within { border-color: rgb(var(--violet-300) / 0.6); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.18); }
+.hd-heure-champ input::-webkit-calendar-picker-indicator { filter: invert(72%) sepia(40%) saturate(900%) hue-rotate(215deg); cursor: pointer; }
+.hd-heure-champ input {
+  border: 0; background: transparent; color: var(--text); color-scheme: dark;
+  font: 700 22px/1 var(--font-display); letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+}
+.hd-heure-champ input:focus { outline: none; }
+.tour-resume-note.hd-note { color: var(--text-3); font-size: 12.5px; }
+
 .tour-resume { margin: 16px 0 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 15px; color: var(--text-2); }
 .tour-resume b { color: var(--text); }
 .tour-resume-note { display: block; margin-top: 3px; font-size: 13px; color: var(--warn); }

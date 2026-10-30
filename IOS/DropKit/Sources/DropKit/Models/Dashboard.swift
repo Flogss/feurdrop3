@@ -21,6 +21,9 @@ public struct Stats: Codable, Sendable, Equatable {
     /// etiquettes jamais imprimees, LIT compris (pastille de l'onglet Imprime)
     public var aImprimer: Int?
     public var tour: Tour
+    /// quand on compte poster (le bouton a cote de « En direct ») ; nil : un
+    /// serveur qui ne les connait pas encore
+    public var heuresDrop: HeuresDrop?
 
     public init(
         pendingCount: Int = 0, pendingValue: Double = 0, droppedCount: Int = 0, droppedValue: Double = 0,
@@ -43,6 +46,7 @@ public struct Stats: Codable, Sendable, Equatable {
         self.autoPrint = autoPrint
         self.aImprimer = aImprimer
         self.tour = tour
+        self.heuresDrop = nil
     }
 }
 
@@ -208,4 +212,40 @@ public struct NewParcels: Codable, Sendable, Equatable {
 public struct NewParcelsSender: Codable, Sendable, Equatable {
     public var name: String
     public var count: Int
+}
+
+/// `GET /api/heures-drop` (et `heuresDrop` dans /api/stats) : les heures ou
+/// l'on compte poster, chacune avec ses transporteurs. Une heure s'efface
+/// toute seule une fois ses colis postes.
+public struct HeuresDrop: Codable, Sendable, Equatable {
+    public var heures: [HeureDrop]
+    /// ce qu'on peut prevoir : les transporteurs, boite jaune comprise
+    public var transporteurs: [CarrierOption]
+
+    public init(heures: [HeureDrop] = [], transporteurs: [CarrierOption] = []) {
+        self.heures = heures
+        self.transporteurs = transporteurs
+    }
+}
+
+public struct HeureDrop: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    /// l'instant (ISO 8601, UTC)
+    public var a: String
+    /// « 16:00 », a l'heure de Paris
+    public var heure: String
+    public var jour: String
+    public var demain: Bool
+    public var passee: Bool
+    public var transporteurs: [CarrierOption]
+
+    /// « 16h », « 19h30 »
+    public var heureCourte: String { Self.courte(heure) }
+
+    public static func courte(_ hhmm: String) -> String {
+        let morceaux = hhmm.split(separator: ":")
+        guard let h = morceaux.first.flatMap({ Int($0) }) else { return hhmm }
+        let m = morceaux.count > 1 ? String(morceaux[1]) : "00"
+        return m == "00" ? "\(h)h" : "\(h)h\(m)"
+    }
 }

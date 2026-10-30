@@ -32,6 +32,7 @@ struct MacTopBar: View {
                 GlassEffectContainer(spacing: 0) {
                     HStack(spacing: 10) {
                         LivePill(online: app.isOnline)
+                        HeureDropBouton()
                         outil(.tracking, aide: "Suivi des colis (⌘4)")
                         outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
                         outil(.historique, aide: "Historique (⌘8)")

@@ -169,8 +169,8 @@ private struct PrintHeader: View {
             .overlay { SparkBurst(trigger: model.celebration, count: 12).allowsHitTesting(false) }
             }
             .sheet(isPresented: $choix) {
-                PrintChoixSheet(categories: model.choixPossibles, retenu: model.choixRetenu) { codes in
-                    Task { await model.printCarriers(codes) }
+                PrintChoixSheet(categories: model.choixPossibles, retenu: model.choixRetenu) { codes, quantites in
+                    Task { await model.printCarriers(codes, quantites: quantites) }
                 }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
