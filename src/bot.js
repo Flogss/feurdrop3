@@ -110,6 +110,7 @@ const {
   PROGRESS_MIN_INTERVAL_MS,
 } = require("./bot/impression");
 const { handleFusion, ajouteAFusion, handleStopFusion } = require("./bot/fusion");
+const { handleBj, ajouteABj, handleStopBj } = require("./bot/liensBj");
 const { handleSave } = require("./bot/sauvegarde");
 const { lisPoids } = require("./poids");
 const {
@@ -245,6 +246,9 @@ function startBot() {
   };
 
   const recoitFichier = (msg, attachment) => {
+    // mode BJ (/bj) : seul le numero du fichier est garde, pour son lien La
+    // Poste ; il ne compte pas et n'est pas republie
+    if (ajouteABj(bot, msg, attachment)) return;
     // mode fusion (/fusion) : le fichier est mis de cote pour le PDF fusionne,
     // il ne compte pas et n'est pas republie
     if (ajouteAFusion(bot, msg, attachment)) return;
@@ -299,7 +303,7 @@ function startBot() {
       replyEphemeral(
         bot,
         msg,
-        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/poids 5 en reponse a un colis : 5 kg, payes en plus au prix du kilo de l'expediteur (/poids seul efface). Un poids ecrit dans la description (\"📦 mondial relay 5kg\", \"DPD 2 KG\", \"2560g\") est compte tout seul et note sur l'etiquette\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
+        "Envoie-moi tes fichiers ici : je les classe et je les republie moi-meme dans le bon topic (normaux, LIT, boite jaune), sans toucher au fichier ni a sa legende. Special, c'est a la main avec /special.\n\nTu peux aussi poster directement dans un topic : je republie le fichier a l'identique dans ce meme topic, avec ses boutons, et j'efface le tien.\n\nDans special, chaque colis va avec le code qui ouvre son locker. Le code est hors suivi comme apres /clear, mais numerote avec son colis (meme numero sous les deux, dans l'ordre d'envoi, par client). La legende tranche entre code et colis (\"t'ouvres le locker avec ca\" / \"tu mets lui dedans\"), sinon image = code et PDF = colis.\n/special image 3 en reponse : ce fichier (image ou PDF) ouvre le locker du #3\n/special pdf 3 en reponse : ce fichier est le colis du #3\n/special seul en reponse : ce fichier ouvre un locker mais ne va avec aucun PDF\n/del ou /clear en reponse a un code : le retire de sa paire\n\nSous chaque etiquette republiee : Imprime, Clean, Del. Une fois imprimee, un bouton Drop pour la solder a l'unite.\n\nJe compte les colis a dropper. Le prix depend de l'expediteur d'origine, configurable sur le dashboard.\n\n/lit ou /unlit en reponse a un colis : change son type ET deplace le fichier dans le bon topic\n/litall ou /unlitall pour appliquer au dernier groupe recu\n/normal en reponse a un colis pour le remettre dans normaux (/normalall : tout le dernier groupe)\n/special en reponse a un fichier : l'envoie dans special, comme code du locker ou comme colis selon sa legende\n/prix 7.5 en reponse a un colis pour forcer son montant (sans reponse : applique au dernier groupe)\n/note fragile en reponse a un colis : il passe en premier a l'impression et s'affiche en rouge sur le site (/note seul efface)\n/poids 5 en reponse a un colis : 5 kg, payes en plus au prix du kilo de l'expediteur (/poids seul efface). Un poids ecrit dans la description (\"📦 mondial relay 5kg\", \"DPD 2 KG\", \"2560g\") est compte tout seul et note sur l'etiquette\n/transporteur en reponse a un colis pour choisir sa compagnie dans une liste (ou /transporteur chrono directement)\n/del ou /clear en reponse a un fichier pour le retirer du suivi (avec ou sans effacer le fichier)\n/imprime pour fusionner les etiquettes d'un transporteur en un seul PDF\n/fusion : les fichiers que tu m'envoies ensuite ne comptent pas, je les garde de cote ; /stopfusion pour les recevoir fusionnes en un seul PDF\n/bj : les fichiers BOITEJAUNE6N00034692547.pdf que tu m'envoies ensuite ne comptent pas, j'en garde le numero ; /stopbj pour recevoir d'un bloc leurs liens de suivi La Poste\n/save : sauvegarde des donnees en JSON, envoyee en prive (administrateurs)",
         {},
         30000
       );
@@ -374,6 +378,8 @@ function startBot() {
 
   bot.onText(/^\/fusion(@\w+)?$/i, command((msg) => handleFusion(bot, msg)));
   bot.onText(/^\/stopfusion(@\w+)?$/i, command((msg) => handleStopFusion(bot, msg)));
+  bot.onText(/^\/bj(@\w+)?$/i, command((msg) => handleBj(bot, msg)));
+  bot.onText(/^\/stopbj(@\w+)?$/i, command((msg) => handleStopBj(bot, msg)));
 
   bot.onText(/^\/regles(@\w+)?$/i, command((msg) => handleRulesCommand(bot, msg)));
   // efface tout ce que le bot a appris : reserve a la liste blanche
@@ -462,6 +468,8 @@ async function registerCommands(bot) {
     { command: "imprime", description: "Fusionner les etiquettes a imprimer" },
     { command: "fusion", description: "Mode fusion : les fichiers envoyes ne comptent pas" },
     { command: "stopfusion", description: "Fin du mode fusion : recevoir le PDF fusionne" },
+    { command: "bj", description: "Mode BJ : les fichiers BOITEJAUNE… donnent leurs liens La Poste" },
+    { command: "stopbj", description: "Fin du mode BJ : recevoir les liens La Poste" },
     { command: "del", description: "Retirer le colis et effacer son fichier (en reponse)" },
     { command: "special", description: "Dans Special (en reponse). /special image 3, /special pdf 3, /special seul" },
     { command: "normal", description: "Remettre le colis dans Normaux (en reponse)" },
