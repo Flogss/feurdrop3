@@ -37,8 +37,9 @@ function entetesSecurite(req, res, next) {
     // l'adresse du dashboard ne part pas chez les transporteurs ou ailleurs
     "Referrer-Policy": "same-origin",
     "X-Frame-Options": "DENY",
-    // le site vibre, copie et partage ; il n'a besoin de rien d'autre
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    // le site vibre, copie et partage ; la position, seulement pour le
+    // depart d'un itineraire (boites jaunes), et seulement le site lui-meme
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(self), payment=(), usb=(), interest-cohort=()",
   });
   // en HTTPS seulement (Railway) : en local, le site reste joignable en http
   if (req.secure) res.set("Strict-Transport-Security", "max-age=15552000");

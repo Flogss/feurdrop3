@@ -64,3 +64,6 @@ startBot();
 startSuiviBot();
 // controle des depots : verifications periodiques aupres des transporteurs
 require("./controle/depots").demarreControleAuto();
+// la copie des boites aux lettres de rue (itineraire boites jaunes) : verifiee
+// un peu apres le demarrage, puis chaque jour
+require("./itineraire/boites").demarreActualisation();

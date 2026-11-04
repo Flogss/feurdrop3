@@ -31,6 +31,7 @@ function creeApp() {
   const suiviRouter = require("./routes/suivi");
   const portail = require("./routes/portail");
   const depots = require("./routes/depots");
+  const itineraireRouter = require("./routes/itineraire");
   const auth = require("./auth");
   const { DOMAINE_PORTAIL } = require("./portail");
   const { gestionErreurs } = require("./http");
@@ -85,6 +86,7 @@ function creeApp() {
   app.use("/api/print", printRouter);
   app.use("/api/special", specialRouter);
   app.use("/api/suivi", suiviRouter);
+  app.use("/api/itineraire", itineraireRouter);
   app.use("/api", (req, res) => res.status(404).json({ error: "Introuvable" }));
 
   // --- 3. les pages et fichiers du dashboard : session obligatoire ------------------

@@ -38,6 +38,7 @@ struct MacTopBar: View {
                         LivePill(online: app.isOnline)
                         HeureDropBouton(compact: largeur < 1440)
                         outil(.tracking, aide: "Suivi des colis (⌘4)")
+                        outil(.itineraire, aide: "Créer un itinéraire — boîtes jaunes (⌘9)")
                         outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
                         outil(.historique, aide: "Historique (⌘8)")
                         outil(.locker, aide: "Mode locker (⌘5)", pastille: app.locker.pairs.count)

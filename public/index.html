@@ -64,6 +64,10 @@
   <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.3 8.3-8.7 8.7z"/><circle cx="8" cy="8" r="1.5"/></symbol>
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3.5h6.5V10M20.5 3.5 11.5 12.5"/><path d="M18.5 14v4.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2H10"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4h12l-2 4 2 4H5"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4.5 3.5 6.5v13L9 17.5l6 2 5.5-2v-13L15 6.5z"/><path d="M9 4.5v13M15 6.5v13"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/></symbol>
+  <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></symbol>
+  <symbol id="i-navigation" viewBox="0 0 24 24"><path d="m3.5 11 17-7.5-7.5 17-2-7.5z"/></symbol>
   <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12z"/></symbol>
   <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5a1.5 1.5 0 0 1 1.4-1h9.2a1.5 1.5 0 0 1 1.4 1l2.5 8"/><path d="M3.5 13.5v5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-5h-5l-1.5 2.5h-4L8.5 13.5z"/></symbol>
   <symbol id="i-party" viewBox="0 0 24 24"><path d="M4 20 8.5 7.5l8 8z"/><path d="M14 4.5c.8 1 .8 2.2 0 3.2M19.5 10c-1-.8-2.2-.8-3.2 0M17.5 3.5v1M20.5 6.5h-1M11 3.5l.5 1"/></symbol>
@@ -313,6 +317,14 @@
             <span class="tool-text">
               <span class="tool-title">Suivi des colis</span>
               <span class="tool-sub" id="suivi-link-count">Vérifier des numéros</span>
+            </span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
+          <button class="tool" id="itineraire-link" type="button">
+            <span class="tool-icon tool-icon-gold"><svg class="icon"><use href="#i-map"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Créer un itinéraire</span>
+              <span class="tool-sub">Boîtes jaunes · tournée la plus rapide</span>
             </span>
             <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
           </button>
@@ -768,6 +780,112 @@
         <div class="journal-liste" id="journal-liste" aria-live="polite"></div>
         <button class="btn btn-sm btn-ghost journal-plus" id="journal-plus" type="button" hidden>Voir plus</button>
       </article>
+    </section>
+
+    <!-- ===================================================== ITINERAIRE BOITES JAUNES -->
+    <!-- Les boites aux lettres de rue (donnees ouvertes La Poste) et la tournee
+         la plus rapide en voiture (OSRM), calculees par le serveur ; la carte
+         charge Leaflet a la premiere ouverture (public/vendor/leaflet). -->
+    <section id="view-itineraire" class="view sub-view" aria-label="Itinéraire boîtes jaunes">
+      <header class="page-head">
+        <button class="back" id="itineraire-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Itinéraire</h1>
+          <p class="page-sub">Boîtes jaunes · la tournée la plus rapide en voiture</p>
+        </div>
+      </header>
+
+      <div class="iti-grid">
+        <div class="iti-col">
+          <article class="card iti-reglages">
+            <section class="iti-champ">
+              <span class="iti-label">Départ</span>
+              <div class="segmented iti-modes" role="radiogroup" aria-label="Départ">
+                <button type="button" role="radio" class="seg is-on" data-depart="gps" aria-checked="true"><svg class="icon"><use href="#i-locate"/></svg>Ma position</button>
+                <button type="button" role="radio" class="seg" data-depart="adresse" aria-checked="false"><svg class="icon"><use href="#i-pin"/></svg>Adresse</button>
+              </div>
+              <div class="iti-position" id="iti-position" aria-live="polite">
+                <span class="iti-position-point" aria-hidden="true"></span>
+                <span class="iti-position-texte" id="iti-position-texte">Ta position sera demandée au navigateur.</span>
+                <button class="btn btn-sm btn-ghost" id="iti-relocaliser" type="button" hidden>Réessayer</button>
+              </div>
+              <div class="iti-adresse" id="iti-adresse-bloc" hidden>
+                <label class="iti-adresse-champ">
+                  <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                  <input id="iti-adresse" type="search" placeholder="12 rue Jean Jaurès, Villejuif" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Adresse de départ" aria-controls="iti-suggestions" aria-autocomplete="list" />
+                </label>
+                <ul class="iti-suggestions" id="iti-suggestions" role="listbox" aria-label="Adresses proposées" hidden></ul>
+              </div>
+            </section>
+
+            <section class="iti-champ">
+              <span class="iti-label">Zone de recherche</span>
+              <div class="iti-puces" id="iti-rayons" role="radiogroup" aria-label="Rayon autour du départ">
+                <button type="button" role="radio" class="iti-puce" data-rayon="1" aria-checked="false">1 km</button>
+                <button type="button" role="radio" class="iti-puce is-on" data-rayon="3" aria-checked="true">3 km</button>
+                <button type="button" role="radio" class="iti-puce" data-rayon="5" aria-checked="false">5 km</button>
+                <button type="button" role="radio" class="iti-puce" data-rayon="10" aria-checked="false">10 km</button>
+              </div>
+            </section>
+
+            <section class="iti-champ">
+              <span class="iti-label">Nombre de boîtes</span>
+              <div class="iti-nombre">
+                <div class="iti-puces" id="iti-nombres" role="radiogroup" aria-label="Nombre de boîtes">
+                  <button type="button" role="radio" class="iti-puce" data-nombre="3" aria-checked="false">3</button>
+                  <button type="button" role="radio" class="iti-puce" data-nombre="5" aria-checked="false">5</button>
+                  <button type="button" role="radio" class="iti-puce is-on" data-nombre="8" aria-checked="true">8</button>
+                  <button type="button" role="radio" class="iti-puce" data-nombre="10" aria-checked="false">10</button>
+                  <button type="button" role="radio" class="iti-puce" data-nombre="15" aria-checked="false">15</button>
+                </div>
+                <div class="stepper iti-stepper">
+                  <button class="step" data-iti-pas="-1" type="button" aria-label="Une boîte de moins"><svg class="icon"><use href="#i-minus"/></svg></button>
+                  <output class="iti-nombre-valeur" id="iti-nombre" aria-live="polite">8</output>
+                  <button class="step" data-iti-pas="1" type="button" aria-label="Une boîte de plus"><svg class="icon"><use href="#i-plus"/></svg></button>
+                </div>
+              </div>
+            </section>
+
+            <label class="iti-option">
+              <input type="checkbox" id="iti-levee" />
+              <span class="iti-option-boite" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+              <span>Seulement les boîtes pas encore levées aujourd'hui</span>
+            </label>
+
+            <button class="btn btn-primary btn-lg iti-creer" id="iti-creer" type="button">
+              <svg class="icon"><use href="#i-map"/></svg><span>Créer l'itinéraire</span>
+            </button>
+          </article>
+
+          <article class="card iti-resultat" id="iti-resultat" hidden>
+            <div class="iti-chiffres">
+              <div class="iti-chiffre"><b id="iti-temps">—</b><span>en voiture</span></div>
+              <div class="iti-chiffre"><b id="iti-distance">—</b><span>au total</span></div>
+              <div class="iti-chiffre"><b id="iti-nb">—</b><span id="iti-nb-unite">boîtes</span></div>
+            </div>
+            <div class="iti-alertes" id="iti-alertes"></div>
+            <div class="iti-actions">
+              <span class="iti-actions-titre"><svg class="icon"><use href="#i-navigation"/></svg>Lancer la navigation</span>
+              <div class="iti-nav" id="iti-nav"></div>
+              <button class="btn btn-secondary iti-recalculer" id="iti-recalculer" type="button">
+                <svg class="icon"><use href="#i-refresh"/></svg><span>Recalculer</span>
+              </button>
+            </div>
+            <ol class="iti-arrets" id="iti-arrets"></ol>
+            <p class="iti-sources" id="iti-sources"></p>
+          </article>
+        </div>
+
+        <article class="card iti-carte-card">
+          <div class="iti-carte" id="iti-carte" aria-label="Carte de l'itinéraire"></div>
+          <div class="iti-carte-vide" id="iti-carte-vide">
+            <span class="iti-carte-icone"><svg class="icon"><use href="#i-map"/></svg></span>
+            <span>Choisis ton départ, la zone et le nombre de boîtes : la tournée s'affiche ici.</span>
+          </div>
+        </article>
+      </div>
     </section>
 
     <!-- ===================================================== CONTROLE DES DEPOTS -->

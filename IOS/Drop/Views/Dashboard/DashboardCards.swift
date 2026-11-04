@@ -697,6 +697,8 @@ struct ToolsCard: View {
             outil(.tracking, symbole: "magnifyingglass", couleur: Theme.info, titre: "Suivi des colis",
                   sous: app.tracking.loaded ? Format.count(app.tracking.totalChecked, "numéro vérifié", "numéros vérifiés") : "Vérifier des numéros")
             Divider().padding(.leading, 62)
+            outil(.itineraire, symbole: "map.fill", couleur: Theme.special, titre: "Créer un itinéraire", sous: "Boîtes jaunes · tournée la plus rapide")
+            Divider().padding(.leading, 62)
             outil(.depots, symbole: "flag.fill", couleur: Theme.teal, titre: "Contrôle des dépôts", sous: sousDepots,
                   pastille: app.depots.resume?.attention ?? 0, teintePastille: Theme.teal)
             Divider().padding(.leading, 62)

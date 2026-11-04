@@ -7,7 +7,7 @@ const js = require("@eslint/js");
 const globals = require("globals");
 
 module.exports = [
-  { ignores: ["node_modules/**", "IOS/**", "data/**"] },
+  { ignores: ["node_modules/**", "IOS/**", "data/**", "public/vendor/**"] },
   js.configs.recommended,
   {
     // serveur, bot, agent d'impression, scripts et tests : CommonJS sur Node

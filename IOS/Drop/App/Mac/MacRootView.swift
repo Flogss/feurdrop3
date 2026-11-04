@@ -11,7 +11,7 @@ enum MacWindow {
 /// ouverts depuis les boutons de droite.
 enum MacPage: String, CaseIterable, Identifiable, Hashable {
     // (les deux derniers : ajoutes apres coup, pour garder les raccourcis)
-    case dashboard, printing, stats, tracking, locker, settings, depots, historique
+    case dashboard, printing, stats, tracking, locker, settings, depots, historique, itineraire
 
     var id: String { rawValue }
 
@@ -27,6 +27,7 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
         case .settings: "Réglages"
         case .depots: "Contrôle des dépôts"
         case .historique: "Historique"
+        case .itineraire: "Itinéraire boîtes jaunes"
         }
     }
 
@@ -40,6 +41,7 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
         case .settings: "gearshape"
         case .depots: "flag"
         case .historique: "clock"
+        case .itineraire: "map"
         }
     }
 
@@ -62,6 +64,7 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
         case .settings: "6"
         case .depots: "7"
         case .historique: "8"
+        case .itineraire: "9"
         }
     }
 }
@@ -209,6 +212,12 @@ struct MacRootView: View {
                     .frame(maxWidth: 820)
                     .frame(maxWidth: .infinity)
             }
+        case .itineraire:
+            // la carte prend toute la place a droite : pas de largeur maximale
+            NavigationStack {
+                ItineraireView()
+                    .safeAreaInset(edge: .top, spacing: 0) { enTete("Itinéraire", largeur: 1700) }
+            }
         case .settings:
             NavigationStack {
                 SettingsView()
@@ -316,7 +325,7 @@ extension MacRootView {
     /// la page a-t-elle deja ses donnees en memoire ?
     func pageChargee(_ page: MacPage) -> Bool {
         switch page {
-        case .dashboard, .settings, .historique, .depots: app.dashboard.loaded
+        case .dashboard, .settings, .historique, .depots, .itineraire: app.dashboard.loaded
         case .printing: app.printing.pending != nil
         case .stats: app.stats.loaded
         case .tracking: app.tracking.loaded

@@ -20,6 +20,11 @@ function environnementDeTest() {
   process.env.OKAPI_KEY = "";
   // jamais les vraies API des transporteurs depuis les tests
   for (const v of ["UPS_CLIENT_ID", "UPS_CLIENT_SECRET", "UPS_API_URL", "DHL_API_KEY", "DHL_API_URL"]) delete process.env[v];
+  // ni les donnees La Poste, ni OSRM, ni le geocodage, ni les tuiles : un
+  // test d'itineraire branche ses faux services (sinon, port ferme)
+  for (const v of ["BOITES_SOURCE_URL", "OSRM_URL", "GEOCODAGE_URL", "TUILES_URL"]) process.env[v] = "http://127.0.0.1:9";
+  delete process.env.LAPOSTE_OPENDATA_KEY;
+  delete process.env.BOITES_DB_PATH;
   // le mot de passe du dashboard, pour les tests seulement (empreinte
   // Argon2id allegee, pour aller vite) ; jamais le vrai
   process.env.DASHBOARD_PASSWORD_HASH = EMPREINTE_TEST;

@@ -82,6 +82,7 @@ final class AppModel {
     @ObservationIgnored lazy var tracking = TrackingModel(app: self)
     @ObservationIgnored lazy var journal = JournalModel(app: self)
     @ObservationIgnored lazy var depots = DepotsModel(app: self)
+    @ObservationIgnored lazy var itineraire = ItineraireModel(app: self)
     #if os(macOS)
     /// Ce Mac lit les pages officielles (Mondial Relay, GLS...) : tout seul,
     /// tant que l'app est ouverte -- sa veille est lancee au demarrage
@@ -199,7 +200,7 @@ final class AppModel {
             async let colis: Void = dashboard.refresh()
             await locker.refresh()
             await colis
-        case .settings, .historique:
+        case .settings, .historique, .itineraire:
             await dashboard.refresh()
         case .depots:
             // la page se relit elle-meme (toutes les 15 s) : ici, les colis seulement

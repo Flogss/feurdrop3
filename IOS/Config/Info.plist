@@ -17,6 +17,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ta position sert de départ à l'itinéraire des boîtes jaunes. Elle n'est utilisée que pour ce calcul.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Ta position sert de départ à l'itinéraire des boîtes jaunes. Elle n'est utilisée que pour ce calcul.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID protège l'accès à Drop sur cet iPhone.</string>
 	<key>NSAppTransportSecurity</key>

@@ -322,6 +322,33 @@ public struct DropAPI: Sendable {
         return serie.months
     }
 
+    // MARK: - Itineraire boites jaunes
+
+    /// La tournee la plus rapide en voiture (le calcul peut prendre quelques
+    /// secondes : matrice et trajet OSRM).
+    public func calculeItineraire(_ demande: ItineraireDemande) async throws -> Itineraire {
+        try await client.send(.post, "/api/itineraire/calcul", body: demande, timeout: 60)
+    }
+
+    /// Adresses proposees pour le depart ; `pres` : les plus proches d'abord.
+    public func itineraireAdresses(_ texte: String, pres: (lat: Double, lon: Double)? = nil) async throws -> [ItineraireLieu] {
+        var query = [URLQueryItem(name: "q", value: texte)]
+        if let pres {
+            query.append(URLQueryItem(name: "lat", value: String(pres.lat)))
+            query.append(URLQueryItem(name: "lon", value: String(pres.lon)))
+        }
+        let r: ItineraireLieux = try await client.send(.get, "/api/itineraire/adresses", query: query)
+        return r.lieux
+    }
+
+    /// L'adresse la plus proche d'une position (nil : rien a moins de 300 m).
+    public func itineraireLieu(lat: Double, lon: Double) async throws -> ItineraireLieu? {
+        let r: ItineraireLieuReponse = try await client.send(.get, "/api/itineraire/lieu", query: [
+            URLQueryItem(name: "lat", value: String(lat)), URLQueryItem(name: "lon", value: String(lon)),
+        ])
+        return r.lieu
+    }
+
     // MARK: - Heures de drop
 
     private struct CorpsHeureDrop: Encodable, Sendable {

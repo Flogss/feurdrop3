@@ -403,10 +403,10 @@ window.addEventListener("resize", () => {
 let currentView = "dashboard";
 
 const ONGLETS = ["dashboard", "imprime", "stats"];
-const VUES = ["dashboard", "imprime", "stats", "colis", "special", "suivi", "depots", "historique"];
+const VUES = ["dashboard", "imprime", "stats", "colis", "special", "suivi", "depots", "historique", "itineraire"];
 // les pages ouvertes depuis le dashboard gardent son onglet allume
-const VUE_PARENT = { colis: "dashboard", special: "dashboard", suivi: "dashboard", "suivi-detail": "dashboard", depots: "dashboard", historique: "dashboard" };
-const PROFONDEUR = { colis: 1, special: 1, suivi: 1, "suivi-detail": 2, depots: 1, historique: 1 };
+const VUE_PARENT = { colis: "dashboard", special: "dashboard", suivi: "dashboard", "suivi-detail": "dashboard", depots: "dashboard", historique: "dashboard", itineraire: "dashboard" };
+const PROFONDEUR = { colis: 1, special: 1, suivi: 1, "suivi-detail": 2, depots: 1, historique: 1, itineraire: 1 };
 const defilement = {};
 // premiere visite d'une page dans la session : grande entree ; ensuite, legere
 const vuesVisitees = new Set();
@@ -574,6 +574,7 @@ function switchView(view) {
   // le controle des depots ne lit que la base du serveur (jamais un transporteur)
   if (view === "depots" && arrivee) loadDepots(true).catch(() => {});
   if (view === "historique" && arrivee) loadJournal().catch(() => {});
+  if (view === "itineraire" && arrivee) arriveeItineraire();
   currentView = view;
   // un ecran qui n'etait pas rafraichi en fond se met a jour en arrivant (les
   // Stats ont deja leur propre chargement anime)
