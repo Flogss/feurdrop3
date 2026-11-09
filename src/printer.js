@@ -1,5 +1,6 @@
 const { PDFDocument, StandardFonts, degrees, rgb } = require("pdf-lib");
 const { contentBoxes } = require("./pdfContent");
+const { chargeImprimable } = require("./pdfLisible");
 
 // Imprimante MUNBYN thermique 4x6 pouces = 101,6 x 152,4 mm.
 // En points PDF (1 pt = 1/72 pouce) : 288 x 432. En generant des pages
@@ -214,7 +215,10 @@ async function tamponneNumero(out, page, numero) {
 }
 
 async function addPdfPages(out, bytes, numero = null) {
-  const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  // un PDF protege ou mal compresse est relu par poppler ; illisible, il
+  // echoue ici, seul (voir pdfLisible.js) -- jamais a l'enregistrement de
+  // la liasse, ou il emportait toutes les autres
+  const { doc: src } = await chargeImprimable(bytes);
   const pageCount = src.getPageCount();
 
   for (let i = 0; i < pageCount; i += 1) {

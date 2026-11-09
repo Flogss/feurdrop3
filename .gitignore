@@ -13,6 +13,8 @@ DerivedData/
 # Etiquettes, liasses et PDF fusionnes : ils portent les noms et adresses des
 # destinataires. Aucun PDF n'a sa place dans ce depot public.
 *.pdf
+# (sauf l'etiquette factice des tests : aucune donnee reelle)
+!test/fixtures/etiquette-protegee.pdf
 # bases SQLite et leurs sauvegardes, ou qu'elles soient
 *.db
 *.db-wal

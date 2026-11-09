@@ -1,5 +1,6 @@
 const { PDFDocument, degrees, rgb } = require("pdf-lib");
 const { labelRegion } = require("./labelRegion");
+const { chargeImprimable } = require("./pdfLisible");
 
 // Impression des LIT sur rouleau continu (papier fax Exacompta, 210 mm de
 // large). Les colis LIT sont trop gros pour l'imprimante thermique 4x6, on les
@@ -45,8 +46,8 @@ async function imageToPdf(bytes) {
 
 // Prepare un bordereau : page source, zone utile, taille une fois recadree.
 async function prepareLabel(out, item) {
-  const bytes = item.kind === "image" ? await imageToPdf(item.bytes) : item.bytes;
-  const source = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  // (un PDF protege ou mal compresse : relu par poppler, voir pdfLisible.js)
+  const { doc: source, bytes } = await chargeImprimable(item.kind === "image" ? await imageToPdf(item.bytes) : item.bytes);
   const prepared = [];
 
   for (let i = 0; i < source.getPageCount(); i += 1) {

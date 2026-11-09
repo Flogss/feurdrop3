@@ -48,3 +48,40 @@ test("un fichier illisible est signale, pas avale", async () => {
   assert.ok(pdf);
   assert.deepEqual(failed.map((f) => f.colisId), [99]);
 });
+
+// Un PDF protege par un mot de passe proprietaire (des transporteurs livrent
+// leurs bordereaux ainsi) : il s'ouvre, mais ses flux restent chiffres.
+// pdf-lib echouait en enregistrant la liasse -- « Unknown compression method
+// in flate stream » -- et TOUTE l'impression tombait avec lui.
+const { popplerDisponible } = require("../src/pdfLisible");
+const PROTEGEE = require("fs").readFileSync(require("path").join(__dirname, "fixtures", "etiquette-protegee.pdf"));
+
+test("une etiquette protegee par mot de passe s'imprime avec les autres", { skip: !popplerDisponible() && "poppler absent" }, async () => {
+  const items = [...(await lot(2)), { bytes: PROTEGEE, kind: "pdf", label: "protegee.pdf", colisId: 50 }];
+  assert.equal((await PDFDocument.load(PROTEGEE, { ignoreEncryption: true })).isEncrypted, true, "le fichier de test est bien chiffre");
+  const { pdf, pages, failed } = await mergeLabels(items);
+  assert.ok(pdf);
+  assert.deepEqual(failed, []);
+  assert.equal(pages, 3);
+  const doc = await PDFDocument.load(pdf);
+  assert.equal(doc.getPageCount(), 3);
+
+  // sur le rouleau des LIT aussi
+  const r = await buildRoll([{ bytes: PROTEGEE, kind: "pdf", label: "protegee.pdf", colisId: 50 }]);
+  assert.ok(r.pdf);
+  assert.deepEqual(r.failed, []);
+});
+
+test("un flux impossible a decompresser : cette etiquette seule echoue, la liasse sort", async () => {
+  const { PDFName } = require("pdf-lib");
+  const casse = await PDFDocument.create();
+  const page = casse.addPage([288, 432]);
+  // un en-tete zlib invalide, comme dans le message vu en production
+  page.node.set(PDFName.of("Contents"), casse.context.register(casse.context.stream(new Uint8Array([252, 35, 1, 2, 3, 4, 5, 6]), { Filter: "FlateDecode" })));
+  const items = [...(await lot(2)), { bytes: await casse.save(), kind: "pdf", label: "casse.pdf", colisId: 77 }];
+  const { pdf, pages, failed } = await mergeLabels(items);
+  assert.ok(pdf, "les autres etiquettes sortent");
+  assert.equal(pages, 2);
+  assert.deepEqual(failed.map((f) => f.colisId), [77]);
+  assert.match(failed[0].reason, /illisible/);
+});
