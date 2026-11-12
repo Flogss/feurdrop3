@@ -1,5 +1,7 @@
 const crypto = require("crypto");
-const { db, getSetting, setSetting, tourScope, journalise, heuresPourGroupes } = require("./db");
+const { db, getSetting, setSetting, tourScope, journalise, heuresPourGroupes, redropColis } = require("./db");
+const { BUSINESS_DAY_SQL } = require("./db/sql");
+const { aujourdhuiParis, ajouteJours, jourDeLaSemaine, lundiDe } = require("./dates");
 const { suiviDuColis, transporteurDuColis } = require("./suiviColis");
 const { carrierLabel } = require("./carrier");
 const { FORME_JETON } = require("./portailCommun");
@@ -127,6 +129,10 @@ function vueColis(colis, dansLeSac, depot = null) {
     imprimeLe: colis.printed_at || null,
     dropeLe: colis.dropped_at || null,
     depot,
+    // un colis remis a poster (redrop) : il repart, gratuitement
+    redrop: Boolean(colis.redrop_de),
+    // depose : l'expediteur peut demander un redrop
+    redropPossible: colis.status === "dropped",
   };
 }
 
@@ -204,6 +210,134 @@ function portailPour(jeton, { nombre = PAR_PAGE } = {}) {
   return { expediteur: sender.name, compte, colis, total, suite: lignes.length < total, heuresDrop };
 }
 
+// L'expediteur designe par le jeton (null si le jeton ne designe aucun espace).
+function expediteurDu(jeton) {
+  if (typeof jeton !== "string" || !FORME_JETON.test(jeton)) return null;
+  const sender = db.prepare("SELECT id, name FROM senders WHERE portail_jeton = ?").get(jeton);
+  return sender && !SANS_PORTAIL.has(sender.name) ? sender : null;
+}
+
+// --- Redrop demande par l'expediteur -------------------------------------------
+// « Redrop » sur un colis depose : il revient « à imprimer » et « à poster »,
+// a 0 € (voir redropColis). Le colis est designe par sa reference opaque, et
+// cherche UNIQUEMENT parmi ceux de l'expediteur du jeton. Un redrop deja en
+// attente est rendu tel quel (jamais deux). Au plus 30 demandes par jour et
+// par expediteur : un doigt qui insiste ne remplit pas la file d'impression.
+const REDROPS_PAR_JOUR = 30;
+const redropsRecents = new Map(); // senderId -> [instants]
+
+function redropPortail(jeton, ref) {
+  const sender = expediteurDu(jeton);
+  if (!sender) return { introuvable: true };
+  if (typeof ref !== "string" || !/^[A-Za-z0-9_-]{8,32}$/.test(ref)) return { erreur: "Colis introuvable.", status: 404 };
+  const ligne = db
+    .prepare(
+      `SELECT c.id FROM colis c JOIN senders s ON s.name = c.sender_name
+       WHERE s.portail_jeton = ? AND c.status = 'dropped' ORDER BY c.id DESC`
+    )
+    .all(jeton)
+    .find((c) => refDe(c.id) === ref);
+  if (!ligne) return { erreur: "Ce colis n'est pas (ou plus) déposé : rien à redropper.", status: 409 };
+
+  const maintenant = Date.now();
+  const recents = (redropsRecents.get(sender.id) || []).filter((t) => maintenant - t < 24 * 3600 * 1000);
+  if (recents.length >= REDROPS_PAR_JOUR) {
+    return { erreur: `${REDROPS_PAR_JOUR} redrops demandés aujourd'hui : demande directement à la personne qui gère tes colis.`, status: 429 };
+  }
+  const r = redropColis(ligne.id, { aImprimer: true, par: `demandé par ${sender.name} (espace expéditeur)` });
+  if (!r || r.pasDrope) return { erreur: "Ce colis n'est pas déposé : rien à redropper.", status: 409 };
+  if (!r.deja) {
+    recents.push(maintenant);
+    redropsRecents.set(sender.id, recents);
+  }
+  const origine = db.prepare("SELECT * FROM colis WHERE id = ?").get(ligne.id);
+  return { deja: r.deja, colis: r.colis, origine, expediteur: sender.name, vue: vueColis(r.colis, new Set()) };
+}
+
+// --- Statistiques de l'expediteur ------------------------------------------------
+// Le nombre de colis postes (jamais l'argent) : par jour, par semaine, par
+// mois, les meilleures journees, les transporteurs. Un colis redropé compte
+// une fois, a son dernier drop. Memes jours que les stats du dashboard (Paris,
+// un drop du dimanche compte le lundi).
+function statsPortail(jeton) {
+  const sender = expediteurDu(jeton);
+  if (!sender) return null;
+  const lignes = db
+    .prepare(
+      `SELECT c.id, c.type, c.carrier, c.file_name, c.caption, c.status, c.file_id, ${BUSINESS_DAY_SQL} AS jour
+       FROM colis c JOIN senders s ON s.name = c.sender_name
+       WHERE s.portail_jeton = ? AND c.status = 'dropped'
+         AND NOT EXISTS (SELECT 1 FROM colis r WHERE COALESCE(r.redrop_de, r.id) = COALESCE(c.redrop_de, c.id)
+                         AND r.id > c.id AND r.status = 'dropped')`
+    )
+    .all(jeton);
+
+  const parJour = new Map();
+  const parTransporteur = new Map();
+  for (const l of lignes) {
+    if (!l.jour) continue;
+    parJour.set(l.jour, (parJour.get(l.jour) || 0) + 1);
+    const suivi = suiviDuColis(l);
+    const code = suivi ? suivi.transporteur : transporteurDuColis(l);
+    const cle = code || "AUTRE";
+    const t = parTransporteur.get(cle) || { code: cle, nom: code ? (suivi ? suivi.nom : carrierLabel(code)) : "Autre", colis: 0 };
+    t.colis += 1;
+    parTransporteur.set(cle, t);
+  }
+
+  const aujourdhui = aujourdhuiParis();
+  const premier = [...parJour.keys()].sort()[0] || aujourdhui;
+  // jour par jour, sans les dimanches (comptes le lundi), 420 jours au plus
+  const jours = [];
+  for (let d = premier < aujourdhui ? premier : aujourdhui; d <= aujourdhui; d = ajouteJours(d, 1)) {
+    if (jourDeLaSemaine(d) !== 0) jours.push({ date: d, colis: parJour.get(d) || 0 });
+  }
+  const jourSerie = jours.slice(-420);
+
+  // semaine par semaine (lundi -> samedi), deux ans au plus
+  const semaines = [];
+  for (let lundi = lundiDe(premier < aujourdhui ? premier : aujourdhui); lundi <= lundiDe(aujourdhui); lundi = ajouteJours(lundi, 7)) {
+    let n = 0;
+    for (let k = 0; k < 6; k += 1) n += parJour.get(ajouteJours(lundi, k)) || 0;
+    semaines.push({ debut: lundi, fin: ajouteJours(lundi, 5), colis: n });
+  }
+
+  // mois par mois
+  const parMois = new Map();
+  for (const [d, n] of parJour) parMois.set(d.slice(0, 7), (parMois.get(d.slice(0, 7)) || 0) + n);
+  const mois = [];
+  for (let m = (premier < aujourdhui ? premier : aujourdhui).slice(0, 7); m <= aujourdhui.slice(0, 7); ) {
+    mois.push({ mois: m, colis: parMois.get(m) || 0 });
+    const [a, mm] = m.split("-").map(Number);
+    m = mm === 12 ? `${a + 1}-01` : `${a}-${String(mm + 1).padStart(2, "0")}`;
+  }
+
+  const meilleursJours = [...parJour]
+    .map(([date, colis]) => ({ date, colis }))
+    .sort((a, b) => b.colis - a.colis || b.date.localeCompare(a.date))
+    .slice(0, 5);
+  const semaine = semaines[semaines.length - 1] || { colis: 0 };
+  const total = lignes.length;
+  return {
+    expediteur: sender.name,
+    total,
+    aujourdhui: parJour.get(aujourdhui) || 0,
+    cetteSemaine: semaine.colis,
+    semainePassee: semaines[semaines.length - 2]?.colis ?? null,
+    ceMois: parMois.get(aujourdhui.slice(0, 7)) || 0,
+    // une journee type : les jours depuis le premier drop (sans les dimanches)
+    moyenneParJour: jours.length ? Math.round((total / jours.length) * 10) / 10 : 0,
+    joursActifs: parJour.size,
+    premierJour: parJour.size ? premier : null,
+    meilleursJours,
+    meilleureSemaine: semaines.reduce((m, w) => (w.colis > (m?.colis || 0) ? w : m), null),
+    jours: jourSerie,
+    semaines: semaines.slice(-104),
+    mois: mois.slice(-60),
+    transporteurs: [...parTransporteur.values()].sort((a, b) => b.colis - a.colis),
+  };
+}
+
 // « Actualiser statuts La Poste » : les colis de l'expediteur designe par le
 // jeton (et seulement eux) sont relus par l'API officielle, en tache de fond.
 function actualisePortail(jeton) {
@@ -227,4 +361,16 @@ function etatActualisationPortail(jeton) {
   return etatActualisation(`portail:${sender.id}`);
 }
 
-module.exports = { actualisePortail, etatActualisationPortail, portailPour, portailExiste, creePortail, retirePortail, infoPortail, DOMAINE_PORTAIL, PAR_PAGE };
+module.exports = {
+  actualisePortail,
+  etatActualisationPortail,
+  portailPour,
+  portailExiste,
+  creePortail,
+  retirePortail,
+  infoPortail,
+  redropPortail,
+  statsPortail,
+  DOMAINE_PORTAIL,
+  PAR_PAGE,
+};

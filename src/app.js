@@ -71,7 +71,7 @@ function creeApp() {
   app.get("/connexion", auth.pageConnexion);
   // ce dont la page de connexion a besoin (et le portail en local) : aucune donnee
   app.use(servirPaquets({ seulement: ["styles.css"] }));
-  for (const fichier of ["connexion.js", "favicon.svg", "icon-192.png", "icon-512.png", "manifest.json", "sw.js", "particules.js", "portail.css", "portail.js"]) {
+  for (const fichier of ["connexion.js", "favicon.svg", "icon-192.png", "icon-512.png", "manifest.json", "sw.js", "particules.js", "portail.css", "portail.js", "portail-stats.js", "portail-recherche.js"]) {
     app.get(`/${fichier}`, (req, res) => res.sendFile(path.join(PUBLIC, fichier), { headers: fichier === "sw.js" ? { "Cache-Control": "no-cache" } : {} }));
   }
   // en local seulement : la page d'un expediteur, faute de domaine de portail

@@ -256,6 +256,8 @@
     clearTimeout(etat.minuteur);
     $("contenu").hidden = true;
     $("live").hidden = true;
+    $("onglets").hidden = true;
+    $("stats").hidden = true;
     if (status === 429) {
       $("message-titre").textContent = "Trop d'essais";
       $("message-texte").textContent = "Réessaie dans un quart d'heure.";
@@ -271,6 +273,7 @@
     if (!avant) {
       $("nom").classList.remove("is-loading");
       $("pied").hidden = false;
+      $("onglets").hidden = false;
     }
     $("nom").textContent = d.expediteur;
     const enCours = d.colis.filter((c) => c.etape !== "drope").length;
@@ -378,22 +381,16 @@
   // --- Recherche --------------------------------------------------------------------
   // Le numero tel qu'on le compare : majuscules, sans espaces ni tirets
   // ("6n 0003 1133-081" -> "6N00031133081").
-  const norme = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // (voir portail-recherche.js : le numero entier, son debut, sa fin,
+  // n'importe ou, puis les numeros proches -- une faute de frappe, une
+  // lettre lue pour un chiffre)
+  const { norme, classe } = window.rechercheNumeros;
 
   function cherche(q) {
     const n = norme(q);
-    if (n.length < 3) return { n, resultats: [], tropCourt: true };
-    const resultats = [];
-    for (const c of etat.donnees.colis) {
-      const num = norme(c.suivi?.numero);
-      if (!num) continue;
-      // le numero entier d'abord, puis son debut, sa fin (on tape souvent les
-      // derniers chiffres), puis n'importe ou
-      const score = num === n ? 4 : num.startsWith(n) ? 3 : num.endsWith(n) ? 2 : num.includes(n) ? 1 : 0;
-      if (score) resultats.push({ c, score });
-    }
-    resultats.sort((a, b) => b.score - a.score || (b.c.recuLe || "").localeCompare(a.c.recuLe || ""));
-    return { n, resultats: resultats.map((r) => r.c), tropCourt: false };
+    if (n.length < 3) return { n, resultats: [], proches: [], tropCourt: true };
+    const tous = classe(etat.donnees.colis, q);
+    return { n, resultats: tous.filter((r) => r.type !== "proche"), proches: tous.filter((r) => r.type === "proche"), tropCourt: false };
   }
 
   // --- Filtres et tri -----------------------------------------------------------------
@@ -537,7 +534,7 @@
     }
     remplace(liste, "resultats", carte);
 
-    const { n, resultats, tropCourt } = cherche(etat.q);
+    const { resultats, proches, tropCourt } = cherche(etat.q);
     const titre = carte.querySelector("h2");
     const meta = carte.querySelector(".card-meta");
     const lignes = carte.querySelector(".p-lignes");
@@ -546,7 +543,7 @@
     plus.hidden = true;
     vide.replaceChildren();
 
-    if (tropCourt || !resultats.length) {
+    if (tropCourt || (!resultats.length && !proches.length)) {
       reconcilie(lignes, [], { cle: () => "", cree: () => el("div") });
       if (tropCourt) {
         titre.textContent = "Recherche";
@@ -561,15 +558,42 @@
       }
       return;
     }
-    titre.textContent = resultats.length > 1 ? "Colis trouvés" : "Colis trouvé";
-    meta.textContent = pluriel(resultats.length, "colis", "colis");
-    $("annonce").textContent = pluriel(resultats.length, "colis trouvé", "colis trouvés");
+    // les correspondances, puis (a part) les numeros proches
+    const total = resultats.length + proches.length;
+    titre.textContent = !resultats.length ? "Numéros proches" : resultats.length > 1 ? "Colis trouvés" : "Colis trouvé";
+    meta.textContent = pluriel(total, "colis", "colis");
+    $("annonce").textContent = resultats.length
+      ? pluriel(resultats.length, "colis trouvé", "colis trouvés")
+      : `Aucun numéro exact : ${pluriel(proches.length, "numéro proche", "numéros proches")}`;
     const montres = resultats.slice(0, MAX_RESULTATS);
-    reconcilie(lignes, montres, { cle: (c) => `c:${c.ref}`, cree: (c) => creeLigne(c, n), maj: (e, c) => majLigne(e, c, n), anime });
-    if (resultats.length > montres.length) {
-      plus.hidden = false;
-      plus.textContent = `${pluriel(resultats.length - montres.length, "autre colis correspond", "autres colis correspondent")} : précise le numéro.`;
+    const prochesMontres = proches.slice(0, Math.max(0, Math.min(12, MAX_RESULTATS - montres.length)));
+    const items = [...montres];
+    if (prochesMontres.length) {
+      if (montres.length) items.push({ separateur: true });
+      items.push(...prochesMontres);
     }
+    reconcilie(lignes, items, {
+      cle: (r) => (r.separateur ? "s:proches" : `c:${r.c.ref}`),
+      cree: (r) => (r.separateur ? separateurProches() : creeLigne(r.c, r)),
+      maj: (e, r) => {
+        if (r.separateur) e.querySelector("span").textContent = texteProches();
+        else majLigne(e, r.c, r);
+      },
+      anime,
+    });
+    if (total > montres.length + prochesMontres.length) {
+      plus.hidden = false;
+      plus.textContent = `${pluriel(total - montres.length - prochesMontres.length, "autre colis correspond", "autres colis correspondent")} : précise le numéro.`;
+    }
+  }
+
+  // « Numéros proches de … » : entre les correspondances et les numeros a une
+  // faute pres.
+  const texteProches = () => `Numéros proches de « ${etat.q.trim()} »`;
+  function separateurProches() {
+    const s = el("div", "p-proches-titre");
+    s.append(icone("search"), el("span", null, texteProches()));
+    return s;
   }
 
   // La liste ne montre qu'une chose (l'etat vide, ou les resultats).
@@ -654,7 +678,7 @@
   }
 
   // --- Une ligne colis -----------------------------------------------------------------
-  function creeLigne(c, recherche = "") {
+  function creeLigne(c, recherche = null) {
     const ligne = el("article", "p-colis");
     const statut = el("span", "p-colis-statut");
     statut.append(el("span", "p-ico"));
@@ -677,7 +701,9 @@
     const l2 = el("div", "p-colis-l2");
     const tr = el("span", "p-colis-tr carrier");
     tr.append(el("i", "carrier-dot"), el("span"));
-    l2.append(el("span", "p-etat-nom"), el("span", "p-depot"), tr, el("span", "p-bj", "Boîte jaune"), el("span", "p-quand"));
+    const badgeRedrop = el("span", "p-redrop-badge");
+    badgeRedrop.append(icone("redrop"), document.createTextNode("Redrop"));
+    l2.append(el("span", "p-etat-nom"), badgeRedrop, el("span", "p-depot"), tr, el("span", "p-bj", "Boîte jaune"), el("span", "p-quand"));
     const seg = el("div", "p-seg");
     seg.setAttribute("aria-hidden", "true");
     for (let i = 0; i < 4; i++) seg.append(el("i"));
@@ -706,12 +732,21 @@
       if (ok) toast("Numéro copié : colle-le sur la page du transporteur");
     });
 
-    ligne.append(statut, centre, suivre);
+    // « Redrop » : un colis depose qu'il faut redeposer -- il repasse a
+    // imprimer, gratuitement
+    const redrop = el("button", "btn btn-sm btn-ghost p-redrop");
+    redrop.type = "button";
+    redrop.append(icone("redrop"), el("span", "p-redrop-libelle", "Redrop"));
+    redrop.addEventListener("click", () => ligne._colis && demandeRedrop(ligne._colis, redrop));
+
+    const actions = el("div", "p-actions");
+    actions.append(redrop, suivre);
+    ligne.append(statut, centre, actions);
     majLigne(ligne, c, recherche, { premiere: true });
     return ligne;
   }
 
-  function majLigne(ligne, c, recherche = "", { premiere = false } = {}) {
+  function majLigne(ligne, c, recherche = null, { premiere = false } = {}) {
     const avant = ligne._colis;
     ligne._colis = c;
     const etape = ETAPES.includes(c.etape) ? c.etape : "a_imprimer";
@@ -727,16 +762,19 @@
     ligne.querySelector(".p-sans").hidden = Boolean(numero);
     if (numero) {
       const texte = ligne.querySelector(".p-num-texte");
-      const i = recherche ? numero.toUpperCase().indexOf(recherche) : -1;
-      if (i >= 0) {
+      // la partie qui correspond (positions dans le numero sans espaces : le
+      // surlignage n'est pose que si le numero s'affiche ainsi)
+      const marque = recherche && norme(numero) === numero.toUpperCase() && recherche.fin > recherche.debut;
+      if (marque) {
         texte.replaceChildren(
-          document.createTextNode(numero.slice(0, i)),
-          el("mark", null, numero.slice(i, i + recherche.length)),
-          document.createTextNode(numero.slice(i + recherche.length))
+          document.createTextNode(numero.slice(0, recherche.debut)),
+          el("mark", recherche.type === "proche" ? "proche" : null, numero.slice(recherche.debut, recherche.fin)),
+          document.createTextNode(numero.slice(recherche.fin))
         );
       } else if (texte.textContent !== numero || texte.childElementCount) {
         texte.textContent = numero;
       }
+      ligne.classList.toggle("est-proche", recherche?.type === "proche");
       num.setAttribute("aria-label", `Copier le numéro ${numero}`);
     }
 
@@ -744,6 +782,10 @@
     tr.dataset.carrier = couleur(codeDe(c));
     tr.lastElementChild.textContent = nomDe(c);
     ligne.querySelector(".p-bj").hidden = !c.boiteJaune;
+    ligne.querySelector(".p-redrop-badge").hidden = !c.redrop;
+    const boutonRedrop = ligne.querySelector(".p-redrop");
+    boutonRedrop.hidden = !c.redropPossible;
+    boutonRedrop.setAttribute("aria-label", `Redropper le colis ${c.suivi?.numero || ""}`.trim());
     ligne.querySelector(".p-etat-nom").textContent = NOMS[etape];
     const badge = ligne.querySelector(".p-depot");
     badge.hidden = !depot;
@@ -756,7 +798,9 @@
     // la derniere etape franchie, et quand
     // pas encore poste, et une heure de drop est prevue : c'est elle qui compte
     const prevu = etape !== "drope" && c.depotPrevu ? `dépôt prévu ${quandDrop(c.depotPrevu)}` : "";
-    const moment = prevu || (etape === "drope" && c.dropeLe ? `dropé ${quand(date(c.dropeLe))}` : c.recuLe ? `reçu ${quand(date(c.recuLe))}` : "");
+    const moment =
+      prevu ||
+      (etape === "drope" && c.dropeLe ? `dropé ${quand(date(c.dropeLe))}` : c.redrop && c.recuLe ? `redrop demandé ${quand(date(c.recuLe))}` : c.recuLe ? `reçu ${quand(date(c.recuLe))}` : "");
     ligne.querySelector(".p-quand").textContent = moment;
 
     const rang = ETAPES.indexOf(etape);
@@ -1001,6 +1045,178 @@
         rend();
       }
     }
+  });
+
+  // --- Redrop ---------------------------------------------------------------------------
+  // Une confirmation, puis la demande : le colis repasse « à imprimer » (0 €)
+  // et la personne qui gere les colis est prevenue sur Telegram.
+  const feuille = $("redrop-feuille");
+  let aRedropper = null;
+  let boutonSource = null;
+
+  function demandeRedrop(c, bouton) {
+    aRedropper = c;
+    boutonSource = bouton;
+    const numero = c.suivi?.numero;
+    const pris = ["pris", "livre"].includes(c.depot?.etat);
+    $("redrop-texte").textContent =
+      `${numero ? `Le colis ${numero}` : "Ce colis"} repasse « à imprimer » pour être déposé à nouveau. C'est gratuit, et la personne qui gère tes colis est prévenue.` +
+      (pris ? `\n\n${nomDe(c)} l'indique déjà « ${DEPOTS[c.depot.etat].toLowerCase()} » : redroppe seulement s'il t'est revenu.` : "");
+    feuille.classList.remove("closing");
+    feuille.hidden = false;
+    requestAnimationFrame(() => $("redrop-ok").focus({ preventScroll: true }));
+  }
+
+  function fermeFeuille() {
+    if (feuille.hidden) return;
+    feuille.classList.add("closing");
+    setTimeout(() => {
+      feuille.hidden = true;
+      feuille.classList.remove("closing");
+    }, reduit ? 0 : 260);
+    boutonSource?.focus({ preventScroll: true });
+  }
+
+  feuille.addEventListener("click", (e) => {
+    if (e.target.closest("[data-redrop-fermer]")) fermeFeuille();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !feuille.hidden) fermeFeuille();
+  });
+  $("redrop-ok").addEventListener("click", async () => {
+    const ok = $("redrop-ok");
+    if (!aRedropper || ok.disabled) return;
+    ok.disabled = true;
+    ok.classList.add("is-busy");
+    try {
+      const res = await fetch(`/api/portail/${encodeURIComponent(jeton)}/redrop`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "omit",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref: aRedropper.ref }),
+      });
+      const corps = await res.json().catch(() => ({}));
+      if (res.status === 404 && !corps.error?.includes("Colis")) return lienRefuse(404);
+      if (!res.ok) throw new Error(corps.error || "Redrop impossible pour l'instant");
+      fermeFeuille();
+      toast(corps.deja ? "Déjà demandé : ce colis est déjà à redropper" : "Redrop demandé : ton colis repasse à imprimer");
+      // la liste se relit tout de suite (le colis remonte « Pas imprimé »)
+      etat.etag = null;
+      charge();
+    } catch (err) {
+      fermeFeuille();
+      toast(err.message);
+    } finally {
+      ok.disabled = false;
+      ok.classList.remove("is-busy");
+    }
+  });
+
+  // --- Suggestions au fil de la frappe ------------------------------------------------
+  // « 123456 » propose « 123456XXXX » : les meilleurs numeros, a choisir au
+  // doigt ou au clavier (↑ ↓ Entree).
+  const boiteSuggestions = $("suggestions");
+  let suggestions = [];
+  let suggestionActive = -1;
+  const MAX_SUGGESTIONS = 6;
+
+  function rendSuggestions() {
+    const q = norme(champ.value);
+    suggestions = [];
+    if (etat.donnees && q.length >= 3 && document.activeElement === champ) {
+      const vus = new Set();
+      for (const r of classe(etat.donnees.colis, champ.value)) {
+        const numero = r.c.suivi?.numero;
+        if (!numero || vus.has(numero)) continue;
+        vus.add(numero);
+        suggestions.push(r);
+        if (suggestions.length >= MAX_SUGGESTIONS) break;
+      }
+      // le numero exact deja tape : plus rien a proposer
+      if (suggestions.length === 1 && suggestions[0].type === "exact") suggestions = [];
+    }
+    if (suggestionActive >= suggestions.length) suggestionActive = -1;
+    boiteSuggestions.hidden = !suggestions.length;
+    champ.setAttribute("aria-expanded", String(Boolean(suggestions.length)));
+    champ.setAttribute("aria-activedescendant", suggestionActive >= 0 ? `sugg-${suggestionActive}` : "");
+    boiteSuggestions.replaceChildren(
+      ...suggestions.map((r, i) => {
+        const numero = r.c.suivi.numero;
+        const li = el("li", `p-suggestion${i === suggestionActive ? " is-active" : ""}${r.type === "proche" ? " est-proche" : ""}`);
+        li.id = `sugg-${i}`;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", String(i === suggestionActive));
+        li.dataset.i = String(i);
+        const num = el("span", "p-suggestion-num");
+        if (norme(numero) === numero.toUpperCase()) {
+          num.append(
+            document.createTextNode(numero.slice(0, r.debut)),
+            el("mark", r.type === "proche" ? "proche" : null, numero.slice(r.debut, r.fin)),
+            el("b", null, numero.slice(r.fin))
+          );
+        } else num.textContent = numero;
+        const tr = el("span", "p-suggestion-info carrier");
+        tr.dataset.carrier = couleur(codeDe(r.c));
+        tr.append(el("i", "carrier-dot"), document.createTextNode(`${nomDe(r.c)} · ${NOMS[r.c.etape] || ""}${r.type === "proche" ? " · proche" : ""}`));
+        li.append(num, tr);
+        return li;
+      })
+    );
+  }
+
+  function choisitSuggestion(i) {
+    const r = suggestions[i];
+    if (!r) return;
+    champ.value = r.c.suivi.numero;
+    suggestions = [];
+    suggestionActive = -1;
+    surRecherche();
+    boiteSuggestions.hidden = true;
+    champ.setAttribute("aria-expanded", "false");
+    // sur telephone : le clavier se ferme, le colis est la
+    if (!avecSouris) champ.blur();
+  }
+
+  champ.addEventListener("input", () => {
+    suggestionActive = -1;
+    rendSuggestions();
+  });
+  champ.addEventListener("focus", rendSuggestions);
+  champ.addEventListener("blur", () =>
+    setTimeout(() => {
+      if (document.activeElement !== champ) {
+        boiteSuggestions.hidden = true;
+        champ.setAttribute("aria-expanded", "false");
+      }
+    }, 120)
+  );
+  champ.addEventListener(
+    "keydown",
+    (e) => {
+      if (!suggestions.length || boiteSuggestions.hidden) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        suggestionActive = (suggestionActive + (e.key === "ArrowDown" ? 1 : -1) + suggestions.length + 1) % (suggestions.length + 1);
+        if (suggestionActive === suggestions.length) suggestionActive = -1;
+        rendSuggestions();
+      } else if (e.key === "Enter" && suggestionActive >= 0) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        choisitSuggestion(suggestionActive);
+      } else if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        boiteSuggestions.hidden = true;
+        champ.setAttribute("aria-expanded", "false");
+      }
+    },
+    { capture: true }
+  );
+  boiteSuggestions.addEventListener("pointerdown", (e) => {
+    const li = e.target.closest(".p-suggestion");
+    if (!li) return;
+    e.preventDefault(); // le champ garde le focus jusqu'au choix
+    choisitSuggestion(Number(li.dataset.i));
   });
 
   // --- C'est parti -----------------------------------------------------------------------

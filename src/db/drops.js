@@ -116,7 +116,10 @@ function dropSpecials(carriers) {
 // suivi et preuves) ; l'etiquette, deja imprimee, n'est pas remise dans la
 // file d'impression. Un redrop deja en attente pour ce colis est rendu tel
 // quel : jamais deux.
-function redropColis(id) {
+// `aImprimer` : le redrop demande par l'expediteur depuis son espace -- son
+// etiquette repasse « à imprimer » (toujours a 0 €). `par` : qui l'a demande,
+// pour l'historique.
+function redropColis(id, { aImprimer = false, par = null } = {}) {
   return transaction(() => {
     const o = db.prepare("SELECT * FROM colis WHERE id = ?").get(id);
     if (!o) return null;
@@ -128,10 +131,26 @@ function redropColis(id) {
       .prepare(
         `INSERT INTO colis (sender_name, type, price, price_locked, status, carrier, file_name, caption, file_id, file_kind,
                             printed_at, printed_by, note, redrop_de)
-         VALUES (?, ?, 0, 1, 'pending', ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, ?)`
+         VALUES (?, ?, 0, 1, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(o.sender_name, o.type, o.carrier, o.file_name, o.caption, o.file_id, o.file_kind, o.printed_at, o.printed_by ?? null, o.note ?? null, racine.id);
-    journalise("drop", "Redrop : colis oublié remis à poster", { detail: [colisJournal(o), "0 €"].join(" · "), valeur: 0, nombre: 1 });
+      .run(
+        o.sender_name,
+        o.type,
+        o.carrier,
+        o.file_name,
+        o.caption,
+        o.file_id,
+        o.file_kind,
+        aImprimer ? null : o.printed_at || db.prepare("SELECT datetime('now') AS t").get().t,
+        aImprimer ? null : o.printed_by ?? null,
+        o.note ?? null,
+        racine.id
+      );
+    journalise("drop", aImprimer ? "Redrop demandé : colis remis à imprimer" : "Redrop : colis oublié remis à poster", {
+      detail: [colisJournal(o), par, "0 €"].filter(Boolean).join(" · "),
+      valeur: 0,
+      nombre: 1,
+    });
     return { deja: false, colis: db.prepare("SELECT * FROM colis WHERE id = ?").get(info.lastInsertRowid) };
   });
 }

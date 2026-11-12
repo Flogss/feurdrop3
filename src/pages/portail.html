@@ -29,6 +29,10 @@
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 1 0-2.3 5.6"/><path d="M20 4.5v7h-7"/></symbol>
   <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></symbol>
+  <symbol id="i-redrop" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3L19.5 9"/><path d="M19.5 4v5h-5"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3L4.5 15"/><path d="M4.5 20v-5h5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="m3.5 7.5 8.5-4 8.5 4v9l-8.5 4-8.5-4z"/><path d="m3.5 7.5 8.5 4 8.5-4M12 11.5v9"/></symbol>
+  <symbol id="i-crown" viewBox="0 0 24 24"><path d="m3.5 8 4.5 4 4-6.5 4 6.5 4.5-4-1.8 10.5H5.3z"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></symbol>
   <!-- les quatre etapes -->
@@ -53,6 +57,12 @@
       <span class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></span>
       <span class="brand-word">DROP<span class="brand-ext">.suivi</span></span>
     </div>
+    <!-- mes colis / mes stats -->
+    <nav class="p-onglets" id="onglets" aria-label="Pages" hidden>
+      <span class="p-onglets-indice" aria-hidden="true"></span>
+      <button type="button" class="p-onglet" data-onglet="colis" aria-pressed="true"><svg class="icon"><use href="#i-box"/></svg><span>Colis</span></button>
+      <button type="button" class="p-onglet" data-onglet="stats" aria-pressed="false"><svg class="icon"><use href="#i-chart"/></svg><span>Stats</span></button>
+    </nav>
     <div class="topbar-end">
       <span class="live" id="live"><span class="live-dot"></span><span id="live-text">Connexion…</span></span>
     </div>
@@ -83,7 +93,10 @@
         <svg class="icon p-search-icone" aria-hidden="true"><use href="#i-search"/></svg>
         <label class="sr" for="recherche">Rechercher un numéro de suivi</label>
         <input class="field" id="recherche" type="search" placeholder="Rechercher un numéro de suivi…"
-               inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" />
+               inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"
+               role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions" />
+        <!-- les numeros proposes au fil de la frappe -->
+        <ul class="p-suggestions" id="suggestions" role="listbox" aria-label="Numéros proposés" hidden></ul>
         <kbd class="p-search-raccourci" aria-hidden="true">/</kbd>
         <button class="btn btn-icon btn-sm btn-ghost p-search-effacer" id="effacer" type="button" aria-label="Effacer la recherche" hidden>
           <svg class="icon"><use href="#i-x"/></svg>
@@ -138,6 +151,78 @@
     </main>
   </div>
 
+  <!-- mes stats : le nombre de colis postes (jamais d'argent) -->
+  <section class="p-stats" id="stats" hidden aria-label="Mes stats">
+    <header class="p-stats-tete">
+      <span class="eyebrow">Statistiques</span>
+      <h1 class="p-nom">Tes colis postés</h1>
+      <p class="p-resume" id="st-resume"></p>
+    </header>
+
+    <div class="stats-top p-stats-top">
+      <article class="card metric metric-feature p-st-record">
+        <span class="eyebrow"><svg class="icon"><use href="#i-crown"/></svg>Meilleure journée</span>
+        <span class="metric-value" id="st-record">—</span>
+        <span class="metric-sub" id="st-record-sub">Pas encore de colis posté</span>
+      </article>
+      <article class="card metric">
+        <span class="eyebrow">Colis postés</span>
+        <span class="metric-value" id="st-total">—</span>
+        <span class="metric-sub" id="st-total-sub">—</span>
+      </article>
+      <article class="card metric">
+        <span class="eyebrow">Cette semaine</span>
+        <span class="metric-value" id="st-semaine">—</span>
+        <span class="metric-sub" id="st-semaine-sub">—</span>
+      </article>
+      <article class="card metric">
+        <span class="eyebrow">Moyenne par jour</span>
+        <span class="metric-value" id="st-moyenne">—</span>
+        <span class="metric-sub" id="st-moyenne-sub">—</span>
+      </article>
+    </div>
+
+    <article class="card chart-card">
+      <header class="card-head">
+        <h2>Colis par jour</h2>
+        <span class="card-meta" id="st-jours-plage">—</span>
+      </header>
+      <div class="chart-scroll" id="st-jours"><div class="chart-track"></div></div>
+    </article>
+
+    <div class="stats-duo">
+      <article class="card chart-card">
+        <header class="card-head">
+          <h2>Colis par semaine</h2>
+          <span class="card-meta" id="st-semaines-plage">—</span>
+        </header>
+        <div class="chart-scroll" id="st-semaines"><div class="chart-track"></div></div>
+      </article>
+      <article class="card p-st-top">
+        <header class="card-head">
+          <h2>Tes meilleures journées</h2>
+        </header>
+        <ol class="p-podium" id="st-top"></ol>
+      </article>
+    </div>
+
+    <div class="stats-duo">
+      <article class="card chart-card">
+        <header class="card-head">
+          <h2>Colis par mois</h2>
+          <span class="card-meta" id="st-mois-plage">—</span>
+        </header>
+        <div class="chart-scroll" id="st-mois"><div class="chart-track"></div></div>
+      </article>
+      <article class="card p-st-tr">
+        <header class="card-head">
+          <h2>Par transporteur</h2>
+        </header>
+        <div class="p-parts" id="st-transporteurs"></div>
+      </article>
+    </div>
+  </section>
+
   <section class="p-message" id="message" hidden>
     <span class="empty-icon"><svg class="icon"><use href="#i-lock"/></svg></span>
     <h1 id="message-titre">Lien invalide</h1>
@@ -145,9 +230,26 @@
   </section>
 </div>
 
+<!-- « Redrop » : la confirmation -->
+<div class="sheet-layer" id="redrop-feuille" hidden>
+  <div class="sheet-backdrop" data-redrop-fermer></div>
+  <div class="sheet p-redrop-feuille" role="dialog" aria-modal="true" aria-labelledby="redrop-titre">
+    <span class="sheet-grip" aria-hidden="true"></span>
+    <span class="p-redrop-ico" aria-hidden="true"><svg class="icon"><use href="#i-redrop"/></svg></span>
+    <h2 class="sheet-title" id="redrop-titre">Redropper ce colis ?</h2>
+    <p class="sheet-message" id="redrop-texte"></p>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary btn-lg" type="button" data-redrop-fermer>Annuler</button>
+      <button class="btn btn-primary btn-lg" type="button" id="redrop-ok"><svg class="icon"><use href="#i-redrop"/></svg><span>Redropper</span></button>
+    </div>
+  </div>
+</div>
+
 <div class="toasts" id="toasts"></div>
 <div class="sr" id="annonce" aria-live="polite"></div>
 
+<script src="/portail-recherche.js"></script>
 <script src="/portail.js"></script>
+<script src="/portail-stats.js"></script>
 </body>
 </html>

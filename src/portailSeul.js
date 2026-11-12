@@ -18,7 +18,7 @@ const DASHBOARD = (process.env.DROP_INTERNE || "http://feurdrop3.railway.interna
 // les seuls fichiers que la page utilise : le systeme de design du
 // dashboard (styles.css, assemble depuis public/css/ -- voir assemblage.js --
 // et les particules du fond), et ceux du portail
-const FICHIERS = ["particules.js", "portail.css", "portail.js", "favicon.svg", "icon-192.png"];
+const FICHIERS = ["particules.js", "portail.css", "portail.js", "portail-stats.js", "portail-recherche.js", "favicon.svg", "icon-192.png"];
 
 const app = express();
 // derriere le proxy de Railway : l'adresse du visiteur vient de ses en-tetes
@@ -66,11 +66,13 @@ app.get("/api/portail/:jeton", async (req, res) => {
   }
 });
 
-// « Actualiser statuts La Poste » : la demande et sa progression passent
-// telles quelles au dashboard (qui ne relit que les colis de ce jeton).
+// « Actualiser statuts La Poste » (et sa progression), « Redrop » d'un colis,
+// les stats : la demande passe telle quelle au dashboard, qui ne lit et ne
+// touche que les colis de ce jeton. Seul le corps attendu est relaye (la
+// reference d'un colis pour le redrop), jamais autre chose.
 app.use(express.json({ limit: "1kb" }));
-for (const methode of ["get", "post"]) {
-  app[methode]("/api/portail/:jeton/actualisation", async (req, res) => {
+function relaie(chemin, methode, { corps = () => undefined } = {}) {
+  app[methode](`/api/portail/:jeton/${chemin}`, async (req, res) => {
     res.set(ENTETES);
     const jeton = req.params.jeton;
     if (essais.bloque(req.ip)) return res.status(429).json({ error: "Trop d'essais. Réessaie dans un quart d'heure." });
@@ -79,19 +81,31 @@ for (const methode of ["get", "post"]) {
       return res.status(404).json({ error: "Ce lien n'est pas valide, ou n'est plus actif." });
     }
     try {
-      const reponse = await fetch(`${DASHBOARD}/api/portail/${encodeURIComponent(jeton)}/actualisation`, {
+      const reponse = await fetch(`${DASHBOARD}/api/portail/${encodeURIComponent(jeton)}/${chemin}`, {
         method: methode.toUpperCase(),
-        headers: { "x-forwarded-for": req.ip, "content-type": "application/json" },
-        body: methode === "post" ? "{}" : undefined,
-        signal: AbortSignal.timeout(10000),
+        headers: {
+          "x-forwarded-for": req.ip,
+          "content-type": "application/json",
+          ...(req.get("if-none-match") ? { "if-none-match": req.get("if-none-match") } : {}),
+        },
+        body: methode === "post" ? JSON.stringify(corps(req) || {}) : undefined,
+        signal: AbortSignal.timeout(15000),
       });
       if (reponse.status === 404) essais.echec(req.ip);
-      res.status(reponse.status).type("application/json").send(await reponse.text());
+      const etag = reponse.headers.get("etag");
+      if (etag) res.set("ETag", etag);
+      res.status(reponse.status);
+      if (reponse.status === 304) return res.end();
+      res.type("application/json").send(await reponse.text());
     } catch (err) {
       res.status(502).json({ error: "Service momentanément indisponible" });
     }
   });
 }
+relaie("actualisation", "get");
+relaie("actualisation", "post");
+relaie("stats", "get");
+relaie("redrop", "post", { corps: (req) => ({ ref: typeof req.body?.ref === "string" ? req.body.ref.slice(0, 40) : null }) });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "Introuvable" }));
 

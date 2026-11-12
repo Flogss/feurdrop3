@@ -20,7 +20,7 @@ const PUBLIC = path.join(__dirname, "..", "public");
 let pageVersionnee = null;
 function pageHtml() {
   if (!pageVersionnee) {
-    pageVersionnee = fs.readFileSync(PAGE, "utf8").replace(/(href|src)="\/(styles\.css|portail\.css|portail\.js)"/g, (tout, attr, fichier) => {
+    pageVersionnee = fs.readFileSync(PAGE, "utf8").replace(/(href|src)="\/(styles\.css|portail\.css|portail\.js|portail-stats\.js|portail-recherche\.js)"/g, (tout, attr, fichier) => {
       const empreinte = crypto.createHash("sha1").update(contenuPublic(fichier)).digest("hex").slice(0, 10);
       return `${attr}="/${fichier}?v=${empreinte}"`;
     });
