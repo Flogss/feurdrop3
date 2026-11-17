@@ -1011,8 +1011,28 @@ private struct PanneauEtiquette: View {
         }
     }
 
+    /// L'editeur et le comparateur : des pages du site, ouvertes dans le navigateur
+    private func ouvreSurLeSite(_ chemin: String, _ requete: [URLQueryItem]) {
+        guard var c = URLComponents(url: AppModel.shared.serverURL, resolvingAgainstBaseURL: false) else { return }
+        c.path = chemin
+        c.queryItems = requete
+        if let url = c.url { NSWorkspace.shared.open(url) }
+    }
+
     private var actions: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let id = model.ouverteId {
+                Button {
+                    ouvreSurLeSite("/bordereaux/editeur", [URLQueryItem(name: "colis", value: String(id))])
+                } label: { Label("Modifier dans l'éditeur", systemImage: "square.and.pencil") }
+                    .boutonVerreFort()
+                    .help("Ouvre l'éditeur dans le navigateur : un document de travail par-dessus l'étiquette, jamais l'étiquette elle-même")
+                Button {
+                    ouvreSurLeSite("/bordereaux/comparer", [URLQueryItem(name: "a", value: String(id))])
+                } label: { Label("Comparer", systemImage: "rectangle.split.2x1") }
+                    .boutonVerre()
+                    .help("Ouvre le comparateur dans le navigateur")
+            }
             Button {
                 Task { await model.lis(force: true) }
             } label: { Label("Relire les codes", systemImage: "arrow.clockwise") }
