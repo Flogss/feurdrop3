@@ -168,7 +168,13 @@
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ motDePasse, mode: "web" }),
+        // l'app posee sur l'ecran d'accueil a ses propres cookies (pas ceux de
+        // Safari) : elle apparait a part dans la liste des appareils
+        body: JSON.stringify({
+          motDePasse,
+          mode: "web",
+          contexte: navigator.standalone === true || matchMedia("(display-mode: standalone)").matches ? "ecran-accueil" : null,
+        }),
       });
       const corps = await reponse.json().catch(() => ({}));
       await auMoins();

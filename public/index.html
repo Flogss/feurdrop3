@@ -145,10 +145,11 @@
     </nav>
 
     <div class="topbar-end">
-      <span class="live" id="live-status" title="Synchronisation avec le serveur">
+      <!-- un vrai bouton : il en avait l'air, et ne repondait pas -->
+      <button class="live" id="live-status" type="button" title="Synchronisé avec le serveur · cliquer pour actualiser maintenant" aria-label="En direct : actualiser maintenant">
         <span class="live-dot"></span>
         <span class="live-text" id="live-text">En direct</span>
-      </span>
+      </button>
       <button class="heure-drop" id="heure-drop-btn" type="button" aria-haspopup="dialog" aria-label="Heure de drop">
         <svg class="icon"><use href="#i-clock"/></svg>
         <span class="heure-drop-texte" id="heure-drop-texte">Heure de drop</span>

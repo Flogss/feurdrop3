@@ -163,6 +163,21 @@ function particulesSurFilPrincipal(toile, nombre) {
   }
 }
 
+// « En direct » : un appui actualise tout de suite (et le dit)
+$("live-status").addEventListener("click", async (e) => {
+  const pastille = e.currentTarget;
+  if (pastille.getAttribute("aria-busy") === "true") return;
+  pastille.setAttribute("aria-busy", "true");
+  rejoue(pastille, "is-actualise", 700);
+  haptique();
+  try {
+    await refreshAll();
+    toast(pastille.classList.contains("is-off") ? "Serveur injoignable · nouvel essai automatique" : "Actualisé", pastille.classList.contains("is-off") ? "error" : "info", 1800);
+  } finally {
+    pastille.removeAttribute("aria-busy");
+  }
+});
+
 // --- Etat de synchronisation --------------------------------------------------
 // "En direct" ne ment pas : il dit si le dernier rafraichissement a joint le
 // serveur. Une coupure se signale une fois, et son retour aussi.

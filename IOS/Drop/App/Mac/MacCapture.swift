@@ -15,6 +15,18 @@ enum MacCapture {
         if let dossier = reglages.string(forKey: "DropFilm") {
             Task { @MainActor in await filme(dossier) }
         }
+        // `-DropLargeurFenetre 1000` : la fenetre Drop a cette largeur (la barre du haut a toutes les tailles)
+        let largeurVoulue = reglages.double(forKey: "DropLargeurFenetre")
+        if largeurVoulue > 0 {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                if let f = NSApp.windows.first(where: { $0.isVisible && $0.title == "Drop" }) {
+                    var cadre = f.frame
+                    cadre.size.width = largeurVoulue
+                    f.setFrame(cadre, display: true)
+                }
+            }
+        }
         guard let chemin = reglages.string(forKey: "DropCapture") else { return }
         if let nom = reglages.string(forKey: "DropPageMac"), let page = MacPage(rawValue: nom) {
             Task { @MainActor in

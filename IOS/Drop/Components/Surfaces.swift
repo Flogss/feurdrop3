@@ -182,9 +182,10 @@ struct ShareBar: View {
 /// "En direct" : dit si le dernier rafraichissement a joint le serveur.
 struct LivePill: View {
     let online: Bool
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: compact ? 0 : 7) {
             Circle()
                 .fill(online ? Theme.violetLight : Theme.danger)
                 .frame(width: 7, height: 7)
@@ -193,15 +194,48 @@ struct LivePill: View {
                     // l'anneau qui s'ouvre, sans fin : anime par Core Animation
                     AnneauPulse(couleur: online ? Theme.violetLight : Theme.danger, diametre: 7, epaisseur: 1.5, echelle: 2.8, opacite: 0.7, duree: 2.2)
                 }
-            Text(online ? "En direct" : "Hors ligne")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(online ? Theme.text2 : Theme.danger)
-                .contentTransition(.opacity)
+            if !compact {
+                Text(online ? "En direct" : "Hors ligne")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(online ? Theme.text2 : Theme.danger)
+                    .contentTransition(.opacity)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, compact ? 13 : 12)
+        .padding(.vertical, compact ? 13 : 8)
         .glassEffect(.regular.tint(online ? .clear : Theme.danger.opacity(0.2)), in: .capsule)
         .animation(Theme.spring, value: online)
+    }
+}
+
+/// « En direct » : la pastille d'etat EST un bouton -- elle en avait l'air et
+/// ne repondait pas. Un appui actualise tout de suite et le dit.
+/// `compact` : le point seul (quand la place manque).
+struct BoutonEnDirect: View {
+    var compact = false
+    @Environment(AppModel.self) private var app
+    @State private var enCours = false
+    @State private var pouls = 0
+
+    var body: some View {
+        Button {
+            guard !enCours else { return }
+            enCours = true
+            pouls += 1
+            Task {
+                await app.refreshVisible()
+                enCours = false
+                app.toasts.show(app.isOnline ? "Actualisé" : "Serveur injoignable · nouvel essai automatique", style: app.isOnline ? .info : .error)
+            }
+        } label: {
+            LivePill(online: app.isOnline, compact: compact)
+                .symbolEffect(.bounce, value: pouls)
+                .scaleEffect(enCours ? 0.97 : 1)
+                .animation(Theme.spring, value: enCours)
+        }
+        .buttonStyle(PressScaleStyle(scale: 0.94))
+        .help(app.isOnline ? "Synchronisé avec le serveur · actualiser maintenant" : "Hors ligne · réessayer maintenant")
+        .accessibilityLabel(app.isOnline ? "En direct : actualiser maintenant" : "Hors ligne : réessayer")
     }
 }
 

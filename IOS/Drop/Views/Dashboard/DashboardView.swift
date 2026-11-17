@@ -174,27 +174,21 @@ private struct DashboardHeader: View {
     private var enTeteIPhone: some View {
         PageHeader("Drop") {
             GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 10) {
-                LivePill(online: app.isOnline)
+            // trois boutons de la MEME famille et de la meme hauteur : avant,
+            // le bouton de verre du systeme ajoutait sa propre marge autour des
+            // reglages (un cercle de 68 points a cote de pastilles de 34), et
+            // « En direct » ressemblait a un bouton sans en etre un
+            HStack(spacing: 8) {
+                BoutonEnDirect()
                 HeureDropBouton(compact: true)
                 Group {
                 #if os(macOS)
-                SettingsLink {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 44, height: 44)
-                }
+                SettingsLink { iconeReglages }
                 #else
-                NavigationLink(value: Route.settings) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.text)
-                        .frame(width: 44, height: 44)
-                }
+                NavigationLink(value: Route.settings) { iconeReglages }
                 #endif
                 }
-                .boutonVerre(.rond)
+                .buttonStyle(PressScaleStyle(scale: 0.9))
                 .accessibilityLabel("Réglages")
             }
             // jamais « En direct » coupe lettre par lettre : la date se resserre
@@ -202,6 +196,19 @@ private struct DashboardHeader: View {
             }
         }
     }
+}
+
+/// la roue des reglages : un rond de verre a la hauteur des pastilles voisines
+private var iconeReglages: some View {
+    Image(systemName: "gearshape.fill")
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundStyle(Theme.text)
+        .frame(width: 36, height: 36)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .contentShape(.circle)
+        // une cible au doigt d'au moins 44 points, sans grossir le dessin
+        .padding(4)
+        .contentShape(.rect)
 }
 
 private struct DashboardSkeleton: View {

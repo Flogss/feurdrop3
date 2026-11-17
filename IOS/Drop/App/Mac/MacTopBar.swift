@@ -16,11 +16,15 @@ struct MacTopBar: View {
     var surCadreMarque: (CGRect) -> Void = { _ in }
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
-    /// la largeur de la barre : en dessous d'un seuil, l'heure de drop se
-    /// resserre (l'horloge et l'heure seules) pour ne pas mordre sur le menu
-    /// du centre
-    @State private var largeur: CGFloat = 0
 
+    // La barre en trois colonnes, comme la grille du site (1fr auto 1fr) : la
+    // marque a gauche, le menu au centre, les outils a droite. Avant, le menu
+    // et les outils etaient poses l'un SUR l'autre (ZStack) sans se connaitre :
+    // des 1280 points de large, « En direct » recouvrait l'onglet Stats, qui ne
+    // repondait plus. Ici les deux colonnes de cote ont la meme largeur (le
+    // menu reste centre) et les outils prennent la forme qui tient dans la
+    // leur : tous visibles, puis l'heure resserree, puis les outils
+    // secondaires regroupes dans « Outils ». Jamais rien par-dessus le menu.
     var body: some View {
         ZStack {
             // le fond de la barre : on tire la fenetre par la
@@ -28,39 +32,23 @@ struct MacTopBar: View {
                 .contentShape(.rect)
                 .gesture(WindowDragGesture())
 
-            MacTabBar(selection: $selection, badges: [.printing: app.dashboard.stats?.aImprimer ?? 0])
-
-            HStack(spacing: 0) {
+            HStack(spacing: 12) {
                 Marque(posee: marquePosee, surCadre: surCadreMarque)
                     .padding(.leading, 86) // les trois boutons de la fenetre
-                Spacer()
-                GlassEffectContainer(spacing: 0) {
-                    HStack(spacing: 10) {
-                        LivePill(online: app.isOnline)
-                        HeureDropBouton(compact: largeur < 1440)
-                        outil(.tracking, aide: "Suivi des colis (⌘4)")
-                        outil(.itineraire, aide: "Créer un itinéraire — boîtes jaunes (⌘9)")
-                        // une fenetre a part, pas une page de celle-ci
-                        Button { openWindow(id: MacWindow.bordereaux) } label: {
-                            Image(systemName: "barcode.viewfinder")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Theme.text2)
-                                .frame(width: 40, height: 40)
-                        }
-                        .buttonStyle(VerreRond(actif: false))
-                        .help("Bordereaux — étude des codes et recherche d'un numéro, dans une fenêtre à part (⌘B)")
-                        .accessibilityLabel("Bordereaux")
-                        outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
-                        outil(.historique, aide: "Historique (⌘8)")
-                        outil(.locker, aide: "Mode locker (⌘5)", pastille: app.locker.pairs.count)
-                        outil(.settings, aide: "Réglages (⌘6)")
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                MacTabBar(selection: $selection, badges: [.printing: app.dashboard.stats?.aImprimer ?? 0])
+                    .fixedSize()
+                ViewThatFits(in: .horizontal) {
+                    outils(.complets)
+                    outils(.heureResserree)
+                    outils(.regroupes)
+                    outils(.minimaux)
                 }
                 .padding(.trailing, 22)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .frame(height: Self.hauteur)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { largeur = $0 }
         .padding(.top, 4)
         .background(alignment: .top) {
             // un voile tres leger : la barre reste lisible quand la page defile dessous
@@ -68,6 +56,91 @@ struct MacTopBar: View {
                 .frame(height: Self.hauteur + 30)
                 .allowsHitTesting(false)
         }
+    }
+
+    private enum Forme { case complets, heureResserree, regroupes, minimaux }
+
+    /// les pages d'outils regroupees dans « Outils » quand la place manque
+    private static let secondaires: [MacPage] = [.tracking, .itineraire, .depots, .historique, .locker]
+
+    private func outils(_ forme: Forme) -> some View {
+        GlassEffectContainer(spacing: 0) {
+            HStack(spacing: 10) {
+                BoutonEnDirect(compact: forme == .minimaux)
+                HeureDropBouton(compact: forme != .complets)
+                if forme == .complets || forme == .heureResserree {
+                    outil(.tracking, aide: "Suivi des colis (⌘4)")
+                    outil(.itineraire, aide: "Créer un itinéraire — boîtes jaunes (⌘9)")
+                    boutonBordereaux
+                    outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
+                    outil(.historique, aide: "Historique (⌘8)")
+                    outil(.locker, aide: "Mode locker (⌘5)", pastille: app.locker.pairs.count)
+                } else {
+                    menuOutils
+                }
+                outil(.settings, aide: "Réglages (⌘6)")
+            }
+        }
+        // chaque forme a sa taille ideale : c'est elle que ViewThatFits compare
+        .fixedSize()
+    }
+
+    /// Bordereaux : une fenetre a part, pas une page de celle-ci.
+    private var boutonBordereaux: some View {
+        Button { openWindow(id: MacWindow.bordereaux) } label: {
+            Image(systemName: "barcode.viewfinder")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.text2)
+                .frame(width: 40, height: 40)
+        }
+        .buttonStyle(VerreRond(actif: false))
+        .help("Bordereaux — étude des codes et recherche d'un numéro, dans une fenêtre à part (⌘B)")
+        .accessibilityLabel("Bordereaux")
+    }
+
+    /// Les outils secondaires, regroupes : la page ouverte s'y voit (icone et
+    /// teinte), les pastilles aussi.
+    private var menuOutils: some View {
+        let ouvert = Self.secondaires.first { $0 == selection }
+        let pastilles = (app.depots.resume?.attention ?? 0) + app.locker.pairs.count
+        return Menu {
+            ForEach(Self.secondaires) { page in
+                Button {
+                    selection = page
+                } label: {
+                    Label(page.title, systemImage: page.symbol)
+                }
+                // (les raccourcis ⌘4, ⌘7... sont deja dans le menu « Aller »)
+            }
+            Divider()
+            Button {
+                openWindow(id: MacWindow.bordereaux)
+            } label: {
+                Label("Bordereaux (fenêtre à part)", systemImage: "barcode.viewfinder")
+            }
+        } label: {
+            Image(systemName: ouvert.map(\.symboleActif) ?? "square.grid.2x2")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(ouvert != nil ? .white : Theme.text2)
+                .frame(width: 40, height: 40)
+                .overlay(alignment: .topTrailing) {
+                    if pastilles > 0 {
+                        Text(Format.integer(pastilles))
+                            .font(.system(size: 10, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .frame(minWidth: 17, minHeight: 17)
+                            .background(Theme.special.gradient, in: .capsule)
+                            .offset(x: 6, y: -4)
+                    }
+                }
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(VerreRond(actif: ouvert != nil))
+        .fixedSize()
+        .help("Outils : suivi, itinéraire, bordereaux, dépôts, historique, locker")
+        .accessibilityLabel("Outils")
     }
 
     /// Un bouton rond en verre ; allume (teinte violette) quand sa page est ouverte.

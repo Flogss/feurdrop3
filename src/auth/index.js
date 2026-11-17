@@ -88,7 +88,11 @@ function poseCookies(req, res, session) {
   // la duree de vie du cookie = ce qu'il reste de la session (jamais plus) ;
   // la vraie limite reste celle du serveur
   const maxAge = Math.max(0, Math.floor((session.expireLe - sessions.horloge.maintenant()) / 1000));
-  const commun = `Path=/; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
+  // Max-Age ET Expires (la meme echeance, absolue) : un cookie PERSISTANT, qui
+  // survit a la fermeture du navigateur, de Safari ou de l'app ecran
+  // d'accueil -- jamais un cookie de session efface a la fermeture
+  const expires = new Date(session.expireLe).toUTCString();
+  const commun = `Path=/; Max-Age=${maxAge}; Expires=${expires}${secure ? "; Secure" : ""}`;
   res.append("Set-Cookie", `${nomSession(secure)}=${session.jeton}; ${commun}; HttpOnly; SameSite=Lax`);
   res.append("Set-Cookie", `${nomCsrf(secure)}=${csrfDe(session)}; ${commun}; SameSite=Strict`);
 }
@@ -114,7 +118,11 @@ function exigeSession(req, res, next) {
   const { jeton, via } = jetonDe(req);
   const session = jeton ? sessions.lis(jeton) : null;
   if (!session) {
-    if (via === "cookie") effaceCookies(req, res);
+    // le cookie refuse n'est PAS efface ici : la reponse d'une requete partie
+    // avec l'ancien cookie peut arriver juste APRES une nouvelle connexion, et
+    // son « Max-Age=0 » effacait alors le cookie tout neuf (mot de passe
+    // redemande a la reouverture). Un cookie mort ne sert a rien (le serveur
+    // le refuse) et disparait de lui-meme a son echeance.
     res.set("WWW-Authenticate", 'Bearer realm="FeurDrop"');
     return res.status(401).json({ error: "Connexion requise", connexion: "/connexion" });
   }
@@ -129,13 +137,13 @@ function exigeSession(req, res, next) {
 
 /** Les pages et fichiers du dashboard : sans session, direction la connexion. */
 function exigeSessionPage(req, res, next) {
-  const { jeton, via } = jetonDe(req);
+  const { jeton } = jetonDe(req);
   if (jeton && sessions.lis(jeton)) {
     // la page ne reste dans aucun cache ; les fichiers sont revalides
     res.set("Cache-Control", req.path === "/" || /\.html?$/i.test(req.path) ? "no-store" : "private, no-cache");
     return next();
   }
-  if (via === "cookie") effaceCookies(req, res);
+  // (cookie refuse : pas efface, voir exigeSession)
   if (SURS.has(req.method) && (req.path === "/" || /\.html?$/i.test(req.path) || !path.extname(req.path))) {
     return res.redirect(302, "/connexion");
   }
@@ -166,8 +174,12 @@ function dureeLisible(s) {
   return `${min} min`;
 }
 
-// « Safari · iPhone » : de quoi reconnaitre ses appareils dans la liste
-function nomAppareil(propose, agent, mode) {
+// « Safari · iPhone », « Safari · iPhone · écran d'accueil » : de quoi
+// reconnaitre ses appareils dans la liste. Sur iPhone, Safari et l'app posee
+// sur l'ecran d'accueil ont chacun leurs cookies : ce sont deux connexions.
+const CONTEXTES = { "ecran-accueil": "écran d'accueil" };
+
+function nomAppareil(propose, agent, mode, contexte = null) {
   const propre = String(propose || "")
     // eslint-disable-next-line no-control-regex -- on retire justement les caracteres de controle
     .replace(/[\u0000-\u001f\u007f<>]/g, "")
@@ -176,9 +188,10 @@ function nomAppareil(propose, agent, mode) {
   if (propre) return propre;
   const ua = String(agent || "");
   const systeme = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : null;
-  const navigateur = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : null;
+  // (sur iPhone, Chrome, Firefox et Edge se disent CriOS, FxiOS, EdgiOS)
+  const navigateur = /Edg\/|EdgiOS\//.test(ua) ? "Edge" : /Chrome\/|CriOS\//.test(ua) ? "Chrome" : /Firefox\/|FxiOS\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : null;
   if (mode === "app") return systeme ? `App ${systeme}` : "App";
-  return [navigateur, systeme].filter(Boolean).join(" · ") || "Navigateur";
+  return [navigateur, systeme, CONTEXTES[contexte] || null].filter(Boolean).join(" · ") || "Navigateur";
 }
 
 async function connexion(req, res) {
@@ -212,7 +225,7 @@ async function connexion(req, res) {
   // l'appareil presentait, s'il en avait une, est fermee
   const ancien = jetonDe(req).jeton;
   if (ancien) sessions.revoque(ancien);
-  const appareil = nomAppareil(corps.appareil, req.get("user-agent"), mode);
+  const appareil = nomAppareil(corps.appareil, req.get("user-agent"), mode, corps.contexte);
   const session = sessions.cree({ type: mode, appareil });
   console.log(`[auth] connexion ouverte (${mode} · ${appareil})`);
 

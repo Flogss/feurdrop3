@@ -164,6 +164,11 @@ test("3. la session est memorisee sur l'appareil (cookie persistant, HttpOnly, S
   // session) : 259200, ou 259199 si une milliseconde s'est ecoulee
   const maxAge = Number(session.match(/Max-Age=(\d+)/)?.[1]);
   assert.ok(maxAge >= 259198 && maxAge <= 259200, `72 h, persistant : survit a la fermeture du navigateur (Max-Age=${maxAge})`);
+  // et la meme echeance en date absolue (Expires), pour les navigateurs et
+  // l'app ecran d'accueil qui ne liraient que celle-la
+  const expires = Date.parse(session.match(/Expires=([^;]+)/)?.[1]);
+  assert.ok(Math.abs(expires - Date.parse(r.json.expireLe)) < 1000, "Expires = la fin de la session, a la seconde");
+  assert.ok(expires - Date.now() > 71.9 * 3600 * 1000);
   const csrf = r.setCookie.find((c) => c.startsWith("feurdrop_csrf="));
   assert.ok(!/HttpOnly/.test(csrf), "le jeton anti-CSRF est lisible par la page");
 
@@ -187,6 +192,26 @@ test("4. chaque appareil a sa propre session, independante des autres", async ()
   assert.equal((await mac.va("/api/auth/deconnexion", { methode: "POST" })).status, 200);
   assert.equal((await mac.va("/api/stats")).status, 401);
   assert.equal((await iphone.va("/api/stats")).status, 200, "deconnecter le Mac ne touche pas l'iPhone");
+});
+
+test("4 bis. Safari, l'app ecran d'accueil et Chrome sur iPhone : des connexions distinctes, bien nommees", async () => {
+  const SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1";
+  const CHROME = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0 Mobile/15E148 Safari/604.1";
+  const ouvre = async (ua, contexte) => {
+    const nav = navigateur();
+    const r = await nav.va("/api/auth/connexion", { methode: "POST", corps: { motDePasse: MOT_DE_PASSE_TEST, mode: "web", contexte }, entetes: { "User-Agent": ua } });
+    assert.equal(r.status, 200);
+    return nav;
+  };
+  const safari = await ouvre(SAFARI, null);
+  await ouvre(SAFARI, "ecran-accueil");
+  await ouvre(CHROME, null);
+  await ouvre(SAFARI, "<script>"); // un contexte inconnu est ignore
+  const noms = (await safari.va("/api/auth/sessions")).json.sessions.map((x) => x.appareil);
+  assert.ok(noms.includes("Safari · iPhone"));
+  assert.ok(noms.includes("Safari · iPhone · écran d'accueil"));
+  assert.ok(noms.includes("Chrome · iPhone"));
+  assert.ok(!noms.some((n) => n.includes("<")));
 });
 
 // --- 5 et 6. 72 h, pas une minute de plus -------------------------------------------------
@@ -215,7 +240,7 @@ test("5. 72 h apres la connexion, la session expire meme si le site sert tous le
   assert.equal((await anonyme("/api/stats", { entetes: { Authorization: `Bearer ${jeton}` } })).status, 401, "l'app aussi");
 });
 
-test("6. un ancien cookie apres l'expiration : 401 pour l'API, la connexion pour le site, cookie efface", async () => {
+test("6. un ancien cookie apres l'expiration : 401 pour l'API, la connexion pour le site ; une connexion plus recente n'est jamais effacee", async () => {
   const t0 = Date.now();
   sessions.horloge.maintenant = () => t0;
   const nav = navigateur();
@@ -225,7 +250,11 @@ test("6. un ancien cookie apres l'expiration : 401 pour l'API, la connexion pour
 
   const api = await nav.va("/api/colis");
   assert.equal(api.status, 401);
-  assert.ok(api.setCookie.some((c) => /^feurdrop_session=;/.test(c) && /Max-Age=0/.test(c)), "le cookie mort est efface");
+  // la reponse d'une requete partie avec l'ancien cookie ne touche a aucun
+  // cookie : arrivee juste apres une nouvelle connexion, elle effacait le
+  // cookie tout neuf (et le mot de passe etait redemande a la reouverture)
+  assert.equal(api.setCookie.length, 0, "un refus n'efface aucun cookie");
+  assert.equal((await nav.va("/")).setCookie.length, 0);
 
   const rejoue = navigateur();
   for (const [k, v] of ancien) rejoue.cookies.set(k, v);

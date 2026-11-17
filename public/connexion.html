@@ -18,7 +18,10 @@
 <style>
   @property --angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 
-  .connexion { position: relative; z-index: 2; display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; padding: 24px 18px calc(24px + env(safe-area-inset-bottom)); perspective: 1400px; }
+  /* une colonne bornee par la largeur de l'ecran (minmax(0, 1fr)) : en
+     colonne « auto », la grille prenait la largeur du contenu de la carte
+     (jusqu'a 410 px) et la carte debordait a droite sur iPhone */
+  .connexion { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; min-height: 100vh; min-height: 100dvh; padding: 24px 18px calc(24px + env(safe-area-inset-bottom)); perspective: 1400px; }
 
   /* --- le decor : un horizon violet (le bord d'une planete eclairee), une
      etoile filante de temps en temps */
