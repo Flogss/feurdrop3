@@ -28,23 +28,37 @@ function nettoie(t) {
   db.prepare("DELETE FROM sessions WHERE expire_le < ? OR (revoque_le IS NOT NULL AND revoque_le < ?)").run(t - NETTOYAGE_MS, t - NETTOYAGE_MS);
 }
 
-/** Ouvre une session neuve. Renvoie le jeton (a donner a l'appareil, jamais garde). */
-function cree({ type, appareil = null }) {
+/**
+ * Ouvre une session neuve. Renvoie le jeton (a donner a l'appareil, jamais
+ * garde). `finAuPlusTard` : une echeance plus proche que 72 h (jamais plus
+ * loin) -- la fenetre integree de l'app ne survit pas a la session de l'app.
+ */
+function cree({ type, appareil = null, finAuPlusTard = null }) {
   if (!TYPES.has(type)) throw new Error("type de session inconnu");
   const jeton = crypto.randomBytes(32).toString("base64url");
   const id = empreinteJeton(jeton);
   const t = horloge.maintenant();
+  const fin = Math.min(t + DUREE_MS, Number.isFinite(finAuPlusTard) ? finAuPlusTard : Infinity);
   nettoie(t);
   db.prepare("INSERT INTO sessions (id, type, appareil, cree_le, expire_le, vu_le, mdp) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     id,
     type,
     appareil ? String(appareil).slice(0, 80) : null,
     t,
-    t + DUREE_MS,
+    fin,
     t,
     versionMotDePasse()
   );
-  return { jeton, id, expireLe: t + DUREE_MS };
+  return { jeton, id, expireLe: fin };
+}
+
+/** La session d'un identifiant (empreinte), si elle est encore valable. */
+function parId(id) {
+  const s = db.prepare("SELECT * FROM sessions WHERE id = ?").get(String(id || ""));
+  if (!s) return null;
+  const t = horloge.maintenant();
+  if (s.revoque_le != null || t >= s.expire_le || !s.mdp || s.mdp !== versionMotDePasse()) return null;
+  return s;
 }
 
 /**
@@ -84,4 +98,4 @@ function actives() {
     .filter((s) => s.mdp && s.mdp === version);
 }
 
-module.exports = { cree, lis, revoque, revoqueTout, actives, horloge, DUREE_MS, empreinteJeton };
+module.exports = { cree, lis, parId, revoque, revoqueTout, actives, horloge, DUREE_MS, empreinteJeton };

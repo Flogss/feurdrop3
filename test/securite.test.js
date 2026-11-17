@@ -214,6 +214,52 @@ test("4 bis. Safari, l'app ecran d'accueil et Chrome sur iPhone : des connexions
   assert.ok(!noms.some((n) => n.includes("<")));
 });
 
+test("4 ter. la fenetre integree de l'app : un code a usage unique, 60 s, pages de bordereaux seulement, jamais plus longue que l'app", async () => {
+  const t0 = Date.now();
+  sessions.horloge.maintenant = () => t0;
+  const jeton = await jetonApp();
+  const avecJeton = { Authorization: `Bearer ${jeton}` };
+  const demande = (chemin, entetes = avecJeton) => anonyme("/api/auth/pont", { methode: "POST", corps: { chemin }, entetes });
+
+  const r = await demande("/bordereaux/editeur?colis=12");
+  assert.equal(r.status, 200);
+  assert.match(r.json.url, /^\/connexion\/pont\?code=[A-Za-z0-9_-]{43}$/);
+
+  const fenetre = navigateur();
+  const ouvre = await fenetre.va(r.json.url);
+  assert.equal(ouvre.status, 302);
+  assert.equal(ouvre.entetes.get("location"), "/bordereaux/editeur?colis=12");
+  assert.ok(fenetre.cookies.get("feurdrop_session"), "la fenetre a sa session");
+  assert.equal((await fenetre.va("/bordereaux")).status, 200);
+  assert.equal((await fenetre.va("/api/bordereaux/etat")).status, 200);
+
+  // une seule fois
+  assert.equal((await navigateur().va(r.json.url)).entetes.get("location"), "/connexion");
+  // 60 secondes, pas plus
+  const vieux = (await demande("/bordereaux")).json.url;
+  sessions.horloge.maintenant = () => t0 + 61 * 1000;
+  assert.equal((await navigateur().va(vieux)).entetes.get("location"), "/connexion");
+  // seulement les pages de bordereaux, jamais une adresse exterieure
+  for (const mauvais of ["https://exemple.test/", "//exemple.test", "/api/colis", "/", "/bordereaux/../api", "/bordereaux\\x"]) {
+    assert.equal((await demande(mauvais)).status, 400, mauvais);
+  }
+  // seulement l'app (Bearer) : pas une page du site
+  assert.equal((await fenetre.va("/api/auth/pont", { methode: "POST", corps: { chemin: "/bordereaux" } })).status, 403);
+  assert.equal((await anonyme("/api/auth/pont", { methode: "POST", corps: { chemin: "/bordereaux" } })).status, 401);
+
+  // la session de la fenetre finit au plus tard avec celle de l'app
+  const lignes = db.db.prepare("SELECT type, appareil, expire_le FROM sessions ORDER BY cree_le").all();
+  const app = lignes.find((l) => l.type === "app");
+  const web = lignes.find((l) => l.appareil?.includes("fenêtre intégrée"));
+  assert.ok(web.expire_le <= app.expire_le);
+  // l'app deconnectee : un code deja donne ne sert plus a rien
+  sessions.horloge.maintenant = () => t0;
+  const encore = (await demande("/bordereaux")).json.url;
+  await anonyme("/api/auth/deconnexion", { methode: "POST", entetes: avecJeton });
+  assert.equal((await navigateur().va(encore)).entetes.get("location"), "/connexion");
+  sessions.horloge.maintenant = () => Date.now();
+});
+
 // --- 5 et 6. 72 h, pas une minute de plus -------------------------------------------------
 
 test("5. 72 h apres la connexion, la session expire meme si le site sert tous les jours", async () => {

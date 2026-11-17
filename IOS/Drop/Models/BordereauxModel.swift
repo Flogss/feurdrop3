@@ -390,6 +390,46 @@ final class BordereauxModel {
         }
     }
 
+    func rechargeCategories() async {
+        if let c = try? await api.categoriesBordereaux() { categories = c }
+    }
+
+    func creeCategorie(_ nom: String) async {
+        let propre = nom.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !propre.isEmpty else { return }
+        do {
+            _ = try await api.creeCategorieBordereaux(propre)
+            await rechargeCategories()
+        } catch {
+            toasts.show(error.localizedDescription, style: .error)
+        }
+    }
+
+    func modifieCategorie(_ id: Int, nom: String? = nil, couleur: String? = nil) async {
+        do {
+            _ = try await api.modifieCategorieBordereaux(id, nom: nom, couleur: couleur)
+            await rechargeCategories()
+            await chargeListe()
+            if let ouverte = ouverteId, let d = try? await api.bordereau(ouverte) { detail = d }
+        } catch {
+            toasts.show(error.localizedDescription, style: .error)
+            await rechargeCategories()
+        }
+    }
+
+    /// Supprime une categorie : ses etiquettes restent, simplement sans categorie.
+    func supprimeCategorie(_ id: Int) async {
+        do {
+            try await api.supprimeCategorieBordereaux(id)
+            if categorie == String(id) { categorie = "" }
+            await rechargeCategories()
+            await chargeListe()
+            if detail?.categorie?.id == id { detail?.categorie = nil }
+        } catch {
+            toasts.show(error.localizedDescription, style: .error)
+        }
+    }
+
     // MARK: Note d'etude (a part du fichier)
 
     func annote(_ texte: String) async -> Bool {

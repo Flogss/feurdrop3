@@ -158,7 +158,7 @@ function majBoutonsHistorique() {
 function rendHistorique() {
   const ul = $("ed-historique");
   if (ul.hidden) return;
-  ul.innerHTML = `<p class="ed-aide">Clique une étape pour y revenir ; ce qui suit reste rétablissable tant que tu ne modifies rien.</p><ol class="ed-histo">${ed.historique
+  ul.innerHTML = `<ol class="ed-histo">${ed.historique
     .map(
       (h, i) =>
         `<li><button type="button" class="ed-histo-etape${i === ed.position ? " is-on" : ""}${i > ed.position ? " is-futur" : ""}" data-etape="${i}">
@@ -384,12 +384,7 @@ function rendProprietes() {
     const modifs = elements().filter((e) => e.origine === "ajout" || e.modifie || e.supprime).length;
     zone.innerHTML = `
       <section class="ed-bloc"><h3>Page ${ed.page}${ed.nbPages > 1 ? ` sur ${ed.nbPages}` : ""}</h3>
-        <p class="ed-valeur-ligne">${enMm(ed.W)} × ${enMm(ed.H)} mm · ${pluriel(modifs, "modification")}</p>
-        <p class="ed-aide">Clique un texte ou un code de l'étiquette pour le prendre, ou ajoute des éléments avec les outils à gauche. Glisse sur la page pour en choisir plusieurs (Maj + clic aussi).</p></section>
-      <section class="ed-bloc ed-protection"><h3><svg class="icon"><use href="#i-lock"/></svg>Données d'expédition protégées</h3>
-        <p class="ed-aide">L'étiquette d'origine n'est jamais modifiée : l'export crée un nouveau PDF. Les codes lus sur l'étiquette gardent leur valeur (données du transporteur) ; un code ajouté ne peut pas porter un numéro de suivi ni des données d'expédition. Pour changer de numéro de suivi, il faut rééditer le bordereau chez le transporteur.</p></section>
-      <section class="ed-bloc"><h3>Raccourcis</h3><p class="ed-aide ed-raccourcis">
-        <kbd>${MAC ? "⌘" : "Ctrl"} Z</kbd> annuler · <kbd>${MAC ? "⌘⇧Z" : "Ctrl Y"}</kbd> rétablir · <kbd>${MAC ? "⌘" : "Ctrl"} D</kbd> dupliquer · <kbd>Suppr</kbd> supprimer · flèches : 0,5 mm (Maj : 5 mm) · <kbd>V</kbd> <kbd>H</kbd> <kbd>T</kbd> <kbd>B</kbd> <kbd>Q</kbd> <kbd>R</kbd> outils · <kbd>Espace</kbd> + glisser : déplacer la vue · <kbd>${MAC ? "⌘" : "Ctrl"}</kbd> + molette : zoom</p></section>`;
+        <p class="ed-valeur-ligne">${enMm(ed.W)} × ${enMm(ed.H)} mm · ${pluriel(modifs, "modification")}</p></section>`;
     return;
   }
   if (liste.length > 1) {
@@ -409,9 +404,7 @@ function rendProprietes() {
     return;
   }
   const e = liste[0];
-  const origine = e.origine === "original"
-    ? `<p class="ed-origine">${e.type === "code" ? "Code de l'étiquette d'origine" : "Texte de l'étiquette d'origine"}${e.modifie ? " · <b>modifié</b> (masqué à sa place d'origine)" : " · pas encore modifié"}</p>`
-    : `<p class="ed-origine is-ajout">Ajouté dans cette version de travail</p>`;
+  const origine = e.origine === "original" && e.modifie ? `<p class="ed-origine"><b>Modifié</b></p>` : "";
   let propres = "";
   if (e.type === "texte") {
     propres = `<section class="ed-bloc"><h3>Texte</h3>
@@ -433,15 +426,14 @@ function rendProprietes() {
         <textarea class="ed-zone-texte ed-mono" data-prop="valeur" rows="2"${protege || e.verrou ? " readonly" : ""}>${escapeHtml(e.valeur)}</textarea></label>
       ${
         protege
-          ? `<p class="ed-protege"><svg class="icon"><use href="#i-lock"/></svg><span>Valeur protégée : donnée d'expédition du transporteur. Tu peux déplacer, redimensionner ou masquer ce code ; pour changer son contenu, réédite le bordereau chez le transporteur.</span></p>`
-          : `<button class="btn btn-secondary btn-sm" type="button" data-action="regenerer"><svg class="icon"><use href="#i-refresh"/></svg><span>Régénérer le code</span></button><p class="ed-message" id="ed-message-code"></p>`
+          ? `<p class="ed-protege"><svg class="icon"><use href="#i-lock"/></svg><span>Valeur du transporteur</span></p>`
+          : `<p class="ed-message" id="ed-message-code"></p>`
       }
       <label class="ed-champ ed-champ-couleur"><span>Couleur</span><input type="color" data-prop="couleur" value="${e.couleur || "#000000"}"${protege ? " disabled" : ""} /></label>
       </section>`;
   } else if (e.type === "rect") {
     propres = `<section class="ed-bloc"><h3>Rectangle</h3>
-      <label class="ed-champ ed-champ-couleur"><span>Fond</span><input type="color" data-prop="fond" value="${e.fond}" /></label>
-      <p class="ed-aide">Un rectangle blanc masque une zone de l'étiquette dans la version exportée.</p></section>`;
+      <label class="ed-champ ed-champ-couleur"><span>Fond</span><input type="color" data-prop="fond" value="${e.fond}" /></label></section>`;
   }
   zone.innerHTML = `${origine}${propres}${blocPosition(e)}${blocActions(e)}`;
 }
@@ -457,7 +449,7 @@ function rendCalques() {
   if (zone.hidden) return;
   const liste = visibles().slice().reverse(); // le premier de la liste = tout devant
   zone.innerHTML = liste.length
-    ? `<p class="ed-aide">Du premier plan (en haut) au fond. Les éléments de l'étiquette d'origine sont dessous tous les calques.</p><ul class="ed-calques">${liste
+    ? `<ul class="ed-calques">${liste
         .map(
           (e) => `<li class="ed-calque-ligne${ed.selection.has(e.id) ? " is-on" : ""}" data-calque="${e.id}">
         <span class="ed-calque-type">${{ texte: "T", code: e.format && FORMATS_2D.includes(e.format) ? "QR" : "|||", rect: "▭" }[e.type]}</span>
@@ -467,7 +459,7 @@ function rendCalques() {
       </li>`
         )
         .join("")}</ul>`
-    : `<p class="ed-aide">Aucun élément sur cette page pour l'instant.</p>`;
+    : `<p class="ed-aide">Aucun élément.</p>`;
 }
 
 // --- Actions -------------------------------------------------------------------------------
@@ -1155,8 +1147,9 @@ $("ed-proprietes").addEventListener("input", (evt) => {
   if (["x", "y", "l", "h"].includes(prop)) return; // a la validation (change)
   if (prop === "valeur") {
     if (e.origine === "original") return;
+    // le code se redessine a la frappe
     clearTimeout(minuteurValeur);
-    minuteurValeur = setTimeout(() => appliqueValeur(e, evt.target.value), 500);
+    minuteurValeur = setTimeout(() => appliqueValeur(e, evt.target.value, null, { silencieux: true }), 90);
     return;
   }
   if (prop === "texte") {
@@ -1217,18 +1210,22 @@ $("ed-proprietes").addEventListener("change", (evt) => {
 
 // une nouvelle valeur : le code est regenere par le serveur (qui refuse un
 // numero de suivi ou des donnees d'expedition)
-async function appliqueValeur(e, valeur, libelle = null) {
+let minuteurHistoriqueCode = null;
+async function appliqueValeur(e, valeur, libelle = null, { silencieux = false } = {}) {
   const message = $("ed-message-code");
   try {
     await codeDe(e.format, valeur);
     e.valeur = valeur;
     if (message) {
-      message.textContent = "Code régénéré.";
-      message.className = "ed-message is-ok";
+      message.textContent = "";
+      message.className = "ed-message";
     }
-    engage(libelle || `Contenu du code → ${String(valeur).slice(0, 24)}`);
     rendElements();
     rendCalques();
+    // une seule etape d'historique pour une saisie (pas une par lettre)
+    clearTimeout(minuteurHistoriqueCode);
+    if (silencieux) minuteurHistoriqueCode = setTimeout(() => engage(`Contenu du code → ${String(valeur).slice(0, 24)}`), 700);
+    else engage(libelle || `Contenu du code → ${String(valeur).slice(0, 24)}`);
   } catch (err) {
     if (message) {
       message.textContent = err.message;

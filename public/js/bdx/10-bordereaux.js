@@ -648,7 +648,7 @@ function bdxMontreBulle(zone) {
       <span class="bdx-role r-${code.role}">${BDX_ROLES[code.role] || "Code"}</span>
     </div>
     ${valeur}
-    <div class="bdx-bulle-pied">${code.lisible ? "Clic : choisir · Double-clic : copier" : "Le code est repéré, sa valeur n'a pas pu être lue"}</div>`;
+`;
   b.hidden = false;
   document.querySelectorAll(".bdx-zone.is-survol").forEach((x) => x.classList.remove("is-survol"));
   zone.classList.add("is-survol");
@@ -711,7 +711,6 @@ function bdxRendPanneau() {
   } else if (probable) {
     const lien = bdxLienSuivi(probable.suivi);
     suivi = `
-      <p class="bdx-p-note-info">Aucun numéro dans le nom du fichier. Un code lu a la forme d'un numéro ${escapeHtml(probable.suivi.nom)} :</p>
       <div class="bdx-p-num is-probable">
         <span class="bdx-p-num-label">Numéro probable · lu sur l'étiquette</span>
         <span class="bdx-p-num-valeur">${escapeHtml(probable.suivi.numero)}</span>
@@ -719,7 +718,7 @@ function bdxRendPanneau() {
       </div>
       ${lien ? `<a class="btn btn-secondary btn-sm bdx-p-ouvrir" href="${escapeAttr(lien)}" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external"/></svg><span>Ouvrir le suivi du colis</span></a>` : ""}`;
   } else {
-    suivi = `<p class="bdx-p-note-info">Aucun numéro de suivi connu pour ce colis${a?.etat === "analyse" ? " ni reconnu sur l'étiquette" : ""}.</p>`;
+    suivi = `<p class="bdx-p-note-info">Pas de numéro de suivi</p>`;
   }
 
   let codes;
@@ -752,7 +751,7 @@ function bdxRendPanneau() {
       ${codes}
     </section>
     <section class="bdx-p-bloc">
-      <h3 class="bdx-p-h">Catégorie <span class="bdx-p-h-info">un classement à part</span></h3>
+      <h3 class="bdx-p-h">Catégorie</h3>
       <div class="bdx-p-categorie">
         <select id="bdx-p-categorie" aria-label="Catégorie de l'étiquette">
           <option value="">Sans catégorie</option>
@@ -764,7 +763,7 @@ function bdxRendPanneau() {
     </section>
     ${c.detail?.note ? `<section class="bdx-p-bloc"><h3 class="bdx-p-h">Note du colis</h3><p class="bdx-p-texte">${escapeHtml(c.detail.note)}</p></section>` : ""}
     <section class="bdx-p-bloc bdx-p-annotation">
-      <h3 class="bdx-p-h">Note d'étude <span class="bdx-p-h-info">gardée à part : le fichier n'est jamais modifié</span></h3>
+      <h3 class="bdx-p-h">Note</h3>
       <textarea id="bdx-annotation" rows="2" maxlength="2000" placeholder="Ex. code abîmé, numéro relu à la main…">${escapeHtml(note)}</textarea>
       <button class="btn btn-secondary btn-sm" id="bdx-annotation-ok" type="button" hidden><svg class="icon"><use href="#i-check"/></svg><span>Enregistrer la note</span></button>
     </section>
@@ -773,8 +772,7 @@ function bdxRendPanneau() {
       <a class="btn btn-secondary btn-sm" href="/bordereaux/comparer?a=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-layers"/></svg><span>Comparer</span></a>
       <button class="btn btn-secondary btn-sm" id="bdx-relire" type="button"${c.analyseEnCours ? " disabled" : ""}><svg class="icon"><use href="#i-refresh"/></svg><span>Relire les codes</span></button>
       <a class="btn btn-ghost btn-sm" href="/api/bordereaux/${r.id}/fichier?telecharger=1" download><svg class="icon"><use href="#i-upload"/></svg><span>Fichier d'origine</span></a>
-    </div>
-    ${a?.empreinte ? `<p class="bdx-p-origine" title="Empreinte SHA-256 du fichier d'origine : ${escapeAttr(a.empreinte)}">Original intact · ${escapeHtml(a.empreinte.slice(0, 12))}…${a.analyseLe ? ` · lu le ${escapeHtml(new Date(a.analyseLe).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }))}` : ""}</p>` : ""}`;
+    </div>`;
 }
 
 function bdxItemCode(code, i, plusieursPages) {
@@ -811,7 +809,7 @@ function bdxRendResultats(r) {
   const info = $("bdx-recherche-info");
   if (!r) {
     ul.innerHTML = "";
-    info.textContent = "Tape au moins 3 caractères : le numéro entier, son début, sa fin, ou avec une faute de frappe.";
+    info.textContent = "";
     return;
   }
   if (!r.resultats.length) {
@@ -844,7 +842,6 @@ function bdxRendResultats(r) {
           </span>
         </button>
         <span class="bdx-res-actions">
-          ${b.index?.etat !== "analyse" ? `<span class="bdx-res-pas-lue">Étiquette pas encore lue : elle le sera à l'ouverture</span>` : ""}
           ${lien ? `<a class="btn btn-secondary btn-sm" href="${escapeAttr(lien)}" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external"/></svg><span>Ouvrir le suivi du colis</span></a>` : ""}
         </span>
       </li>`;

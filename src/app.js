@@ -72,6 +72,8 @@ function creeApp() {
   // se connecter, se deconnecter
   app.use("/api/auth", auth.routesPubliques);
   app.get("/connexion", auth.pageConnexion);
+  // la fenetre integree de l'app : un code a usage unique contre une session
+  app.get("/connexion/pont", auth.pont);
   // ce dont la page de connexion a besoin (et le portail en local) : aucune donnee
   app.use(servirPaquets({ seulement: ["styles.css"] }));
   for (const fichier of ["connexion.js", "favicon.svg", "icon-192.png", "icon-512.png", "manifest.json", "sw.js", "particules.js", "portail.css", "portail.js", "portail-stats.js", "portail-recherche.js"]) {

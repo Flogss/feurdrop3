@@ -134,7 +134,7 @@
               <button class="btn btn-secondary btn-sm bdx-plus" id="bdx-plus" type="button" hidden>Plus d'étiquettes</button>
             </div>
             <div class="bdx-gauche-recherche" id="bdx-gauche-recherche" role="tabpanel" aria-labelledby="bdx-onglet-recherche" hidden>
-              <p class="bdx-recherche-info" id="bdx-recherche-info">Tape au moins 3 caractères : le numéro entier, son début, sa fin, ou avec une faute de frappe.</p>
+              <p class="bdx-recherche-info" id="bdx-recherche-info"></p>
               <ul class="bdx-resultats" id="bdx-resultats" role="listbox" aria-label="Étiquettes trouvées"></ul>
             </div>
           </aside>
@@ -171,7 +171,6 @@
             <div class="bdx-vide" id="bdx-vide">
               <span class="bdx-vide-icone"><svg class="icon"><use href="#i-barcode"/></svg></span>
               <b>Choisis une étiquette</b>
-              <span>Ses codes-barres et QR codes s'allument au survol : leur valeur, leur format, leur rôle.</span>
             </div>
             <div class="bdx-message" id="bdx-message" hidden></div>
             <div class="bdx-bulle" id="bdx-bulle" role="tooltip" hidden></div>
@@ -191,7 +190,6 @@
       <h2 id="bdx-categories-titre">Catégories</h2>
       <button class="bdx-outil" type="button" data-bdx-ferme aria-label="Fermer"><svg class="icon"><use href="#i-x"/></svg></button>
     </header>
-    <p class="bdx-fenetre-info">Un classement à part : rien n'est écrit dans les étiquettes. Supprimer une catégorie garde ses étiquettes, simplement sans catégorie.</p>
     <ul class="bdx-categories" id="bdx-categories-liste"></ul>
     <form class="bdx-categorie-nouvelle" id="bdx-categorie-nouvelle">
       <input id="bdx-categorie-nom" type="text" maxlength="40" placeholder="Nouvelle catégorie (ex. Retours)" autocomplete="off" />

@@ -65,13 +65,14 @@ struct MacTopBar: View {
 
     private func outils(_ forme: Forme) -> some View {
         GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: forme == .minimaux ? 6 : 10) {
                 BoutonEnDirect(compact: forme == .minimaux)
                 HeureDropBouton(compact: forme != .complets)
+                // les bordereaux restent toujours a portee de clic
+                boutonBordereaux
                 if forme == .complets || forme == .heureResserree {
                     outil(.tracking, aide: "Suivi des colis (⌘4)")
                     outil(.itineraire, aide: "Créer un itinéraire — boîtes jaunes (⌘9)")
-                    boutonBordereaux
                     outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
                     outil(.historique, aide: "Historique (⌘8)")
                     outil(.locker, aide: "Mode locker (⌘5)", pastille: app.locker.pairs.count)
@@ -112,12 +113,6 @@ struct MacTopBar: View {
                 }
                 // (les raccourcis ⌘4, ⌘7... sont deja dans le menu « Aller »)
             }
-            Divider()
-            Button {
-                openWindow(id: MacWindow.bordereaux)
-            } label: {
-                Label("Bordereaux (fenêtre à part)", systemImage: "barcode.viewfinder")
-            }
         } label: {
             Image(systemName: ouvert.map(\.symboleActif) ?? "square.grid.2x2")
                 .font(.system(size: 15, weight: .semibold))
@@ -139,7 +134,7 @@ struct MacTopBar: View {
         .menuIndicator(.hidden)
         .buttonStyle(VerreRond(actif: ouvert != nil))
         .fixedSize()
-        .help("Outils : suivi, itinéraire, bordereaux, dépôts, historique, locker")
+        .help("Outils : suivi, itinéraire, dépôts, historique, locker")
         .accessibilityLabel("Outils")
     }
 

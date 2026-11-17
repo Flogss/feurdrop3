@@ -256,7 +256,7 @@ async function rendComparaison() {
   const jeton = ++cmp.jeton;
   majPile();
   if (!A || !B) {
-    $("cmp-differences").innerHTML = `<p class="ed-aide">Choisis au moins deux étiquettes : la première sert de référence (A).</p>`;
+    $("cmp-differences").innerHTML = `<p class="ed-aide">Ajoute deux étiquettes.</p>`;
     return;
   }
   $("cmp-nom-a").textContent = `${A.resume.expediteur || "—"} · ${A.resume.fichier || `#${A.id}`}`;
@@ -316,7 +316,7 @@ function rendDifferences() {
       <ul class="cmp-diffs">${codes.map(([r, i]) => ligneCode(r, i)).join("")}</ul></section>
     <section class="ed-bloc"><h3>Textes</h3><div class="cmp-compte">${resume(ct) || '<span class="ed-aide">Pas de texte lisible (image)</span>'}</div>
       <ul class="cmp-diffs">${textes.length ? textes.map(([r, i]) => ligneTexte(r, i)).join("") : `<li class="ed-aide">${ct.identique ? `Les ${ct.identique} textes sont identiques.` : ""}</li>`}</ul></section>
-    <section class="ed-bloc"><h3>Visuellement</h3><p class="ed-aide">${(cmp.part * 100).toFixed(2).replace(".", ",")} % des pixels changent entre A et B (en rose avec « Différences »).</p></section>`;
+    <section class="ed-bloc"><h3>Visuellement</h3><p class="ed-aide">${(cmp.part * 100).toFixed(2).replace(".", ",")} % des pixels changent</p></section>`;
 }
 
 // --- Modes, zoom, synchro ---------------------------------------------------------------------

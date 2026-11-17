@@ -265,6 +265,8 @@ const routesPrivees = express.Router();
 routesPrivees.get("/session", (req, res) => {
   res.json({ ...resumeSession(req.session), appareils: sessions.actives().length });
 });
+// l'app demande un code pour ouvrir une page du site dans sa fenetre
+routesPrivees.post("/pont", demandePont);
 routesPrivees.get("/sessions", (req, res) => {
   res.json({ sessions: sessions.actives().map((s) => resumeSession(s, req.session)) });
 });
@@ -275,6 +277,50 @@ routesPrivees.post("/deconnexion-partout", (req, res) => {
   effaceCookies(req, res);
   res.json({ ok: true, fermees });
 });
+
+// --- Le pont de l'app vers ses fenetres integrees ----------------------------------------
+// L'app du Mac affiche certaines pages du site (l'editeur, le comparateur de
+// bordereaux) dans sa propre fenetre. Plutot que de redemander le mot de
+// passe : l'app (connectee, jeton Bearer) demande un CODE a usage unique,
+// valable 60 secondes, pour une page de bordereaux precise ; la fenetre
+// l'echange contre sa propre session (cookie), qui ne survit jamais a celle
+// de l'app. Le code n'est garde qu'en empreinte, et ne sert qu'une fois.
+
+const PONT_DUREE_MS = 60 * 1000;
+const PAGES_DU_PONT = /^\/bordereaux(?:\/(?:editeur|comparer))?(?:\?[A-Za-z0-9=&%._-]*)?$/;
+const codesPont = new Map(); // empreinte -> { sessionId, chemin, fin, appareil }
+
+function nettoiePont(t) {
+  for (const [k, v] of codesPont) if (v.fin <= t) codesPont.delete(k);
+}
+
+function demandePont(req, res) {
+  res.set("Cache-Control", "no-store");
+  // seulement l'app (jeton Bearer) : une page du site n'en a pas besoin
+  if (jetonDe(req).via !== "bearer" || req.session.type !== "app") return res.status(403).json({ error: "Réservé à l'app." });
+  const chemin = String(req.body?.chemin || "");
+  if (!PAGES_DU_PONT.test(chemin)) return res.status(400).json({ error: "Page non autorisée." });
+  const t = sessions.horloge.maintenant();
+  nettoiePont(t);
+  const code = crypto.randomBytes(32).toString("base64url");
+  codesPont.set(sessions.empreinteJeton(code), { sessionId: req.session.id, chemin, fin: t + PONT_DUREE_MS, appareil: req.session.appareil });
+  res.json({ url: `/connexion/pont?code=${code}` });
+}
+
+function pont(req, res) {
+  res.set("Cache-Control", "no-store");
+  const t = sessions.horloge.maintenant();
+  nettoiePont(t);
+  const cle = sessions.empreinteJeton(String(req.query.code || ""));
+  const demande = codesPont.get(cle);
+  codesPont.delete(cle); // une seule fois, meme rate
+  const app = demande && demande.fin > t ? sessions.parId(demande.sessionId) : null;
+  if (!app) return res.redirect(302, "/connexion");
+  const session = sessions.cree({ type: "web", appareil: `${app.appareil || "App"} · fenêtre intégrée`.slice(0, 80), finAuPlusTard: app.expire_le });
+  console.log(`[auth] fenêtre intégrée ouverte (${app.appareil || "app"})`);
+  poseCookies(req, res, session);
+  res.redirect(302, demande.chemin);
+}
 
 // La page de connexion. Deja connecte : direction le dashboard.
 function pageConnexion(req, res) {
@@ -291,6 +337,7 @@ function annonce() {
 }
 
 module.exports = {
+  pont,
   exigeSession,
   exigeSessionPage,
   httpsObligatoire,

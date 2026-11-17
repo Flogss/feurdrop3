@@ -15,6 +15,13 @@ enum MacCapture {
         if let dossier = reglages.string(forKey: "DropFilm") {
             Task { @MainActor in await filme(dossier) }
         }
+        // `-DropPageSite /bordereaux/editeur?colis=1` : une page du site dans sa fenetre
+        if let chemin = reglages.string(forKey: "DropPageSite") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                PagesSite.ouvre(chemin)
+            }
+        }
         // `-DropLargeurFenetre 1000` : la fenetre Drop a cette largeur (la barre du haut a toutes les tailles)
         let largeurVoulue = reglages.double(forKey: "DropLargeurFenetre")
         if largeurVoulue > 0 {
@@ -161,7 +168,7 @@ enum MacCapture {
                 try? liste.write(toFile: chemin + ".fenetres.txt", atomically: true, encoding: .utf8)
                 // `-DropCaptureFenetre Bordereaux` : cette fenetre-la plutot que la principale
                 let titre = UserDefaults.standard.string(forKey: "DropCaptureFenetre")
-                let principale = NSApp.windows.first { $0.isVisible && $0.frame.width > 600 && (titre == nil || $0.title == titre) }
+                let principale = NSApp.windows.first { $0.isVisible && $0.frame.width > 600 && (titre == nil || $0.title.hasPrefix(titre!)) }
                 guard let fenetre = contenu.windows.first(where: { $0.windowID == CGWindowID(principale?.windowNumber ?? -1) })
                         ?? contenu.windows.filter({ $0.windowLayer == 0 && $0.isOnScreen }).max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else { return }
                 let filtre = SCContentFilter(desktopIndependentWindow: fenetre)
@@ -195,7 +202,7 @@ enum TestSouris {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(reglages.double(forKey: "DropTestDelai").nonZero ?? 5))
             let titre = reglages.string(forKey: "DropCaptureFenetre")
-            guard let fenetre = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 && (titre == nil || $0.title == titre) }),
+            guard let fenetre = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 && (titre == nil || $0.title.hasPrefix(titre!)) }),
                   let racine = fenetre.contentView else { return }
             let hauteur = racine.bounds.height
             @MainActor func envoie(_ type: NSEvent.EventType, _ x: CGFloat, _ yHaut: CGFloat) {

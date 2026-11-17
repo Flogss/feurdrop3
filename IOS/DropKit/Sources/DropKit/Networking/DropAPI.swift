@@ -382,6 +382,35 @@ public struct DropAPI: Sendable {
 
     /// `{"categorie": null}` pour declasser : la cle est ecrite meme a nil
     /// (l'encodage par defaut l'omettrait)
+    private struct CorpsCategorieModif: Encodable, Sendable {
+        let nom: String?
+        let couleur: String?
+    }
+
+    public func modifieCategorieBordereaux(_ id: Int, nom: String? = nil, couleur: String? = nil) async throws -> BordereauCategorie? {
+        let r: ReponseCategorie = try await client.send(.patch, "/api/bordereaux/categories/\(id)", body: CorpsCategorieModif(nom: nom, couleur: couleur))
+        return r.categorie
+    }
+
+    private struct ReponseOk: Decodable, Sendable { let ok: Bool? }
+
+    /// Supprime une categorie : ses etiquettes restent, sans categorie.
+    public func supprimeCategorieBordereaux(_ id: Int) async throws {
+        let _: ReponseOk = try await client.send(.delete, "/api/bordereaux/categories/\(id)")
+    }
+
+    // MARK: - Pages du site dans l'app
+
+    private struct CorpsPont: Encodable, Sendable { let chemin: String }
+    private struct ReponsePont: Decodable, Sendable { let url: String }
+
+    /// Un code a usage unique (60 s) pour ouvrir une page de bordereaux du site
+    /// dans une fenetre de l'app, sans redemander le mot de passe.
+    public func pont(vers chemin: String) async throws -> String {
+        let r: ReponsePont = try await client.send(.post, "/api/auth/pont", body: CorpsPont(chemin: chemin))
+        return r.url
+    }
+
     private struct CorpsClasse: Encodable, Sendable {
         let categorie: Int?
         enum Cle: String, CodingKey { case categorie }

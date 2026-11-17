@@ -21,8 +21,6 @@ struct BordereauxFenetre: View {
                         .foregroundStyle(Theme.violetLight)
                     Text("Connecte-toi dans la fenêtre Drop")
                         .font(.title3.weight(.semibold))
-                    Text("Les bordereaux s'ouvrent avec la même session.")
-                        .foregroundStyle(Theme.text2)
                 }
             }
         }
@@ -289,7 +287,7 @@ private struct ColonneGauche: View {
 
     private var infoRecherche: String {
         let q = model.requete.filter { $0.isLetter || $0.isNumber }
-        if q.count < 3 { return "Tape au moins 3 caractères : le numéro entier, son début, sa fin, ou avec une faute de frappe." }
+        if q.count < 3 { return "" }
         if !model.rechercheFaite { return "Recherche…" }
         if model.resultats.isEmpty { return "Aucune étiquette ne porte ce numéro, même à une faute près." }
         if model.totalResultats > model.resultats.count { return "\(Format.integer(model.totalResultats)) étiquettes — les \(model.resultats.count) plus proches" }
@@ -327,6 +325,7 @@ private struct FlowFiltres: View {
 /// Transporteur, a partir du, tri, categorie.
 private struct TrisEtFiltres: View {
     @Bindable var model: BordereauxModel
+    @State private var gereCategories = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -368,14 +367,20 @@ private struct TrisEtFiltres: View {
                     }
                 }
             }
-            HStack {
+            HStack(spacing: 10) {
                 Text(Format.count(model.total, "étiquette", "étiquettes")).font(.caption.monospacedDigit()).foregroundStyle(Theme.text3)
                 Spacer()
                 if model.filtresActifs {
                     Button("Effacer les filtres") { model.effaceFiltres() }
                         .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(Theme.violetLight)
                 }
+                Button("Catégories…") { gereCategories = true }
+                    .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(Theme.violetLight)
+                    .help("Créer, renommer, recolorer ou supprimer les catégories")
             }
+        }
+        .sheet(isPresented: $gereCategories) {
+            GestionCategories(model: model)
         }
     }
 
@@ -385,6 +390,80 @@ private struct TrisEtFiltres: View {
             contenu().labelsHidden().pickerStyle(.menu).controlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Les categories : creer, renommer, recolorer, supprimer (les etiquettes restent).
+private struct GestionCategories: View {
+    @Bindable var model: BordereauxModel
+    @Environment(\.dismiss) private var ferme
+    @State private var nouvelle = ""
+    @State private var noms: [Int: String] = [:]
+    @State private var aSupprimer: BordereauCategorie?
+    private static let couleurs = ["violet", "bleu", "turquoise", "vert", "jaune", "orange", "rose", "rouge", "gris"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Catégories").font(.title2.weight(.bold))
+                Spacer()
+                Button("Fermer") { ferme() }.keyboardShortcut(.cancelAction)
+            }
+            ScrollView {
+                VStack(spacing: 8) {
+                    if model.categories.isEmpty {
+                        Text("Aucune catégorie pour l'instant.").foregroundStyle(Theme.text3).frame(maxWidth: .infinity).padding(.vertical, 20)
+                    }
+                    ForEach(model.categories) { c in
+                        HStack(spacing: 10) {
+                            Circle().fill(PuceCategorie.couleur(c.couleur)).frame(width: 12, height: 12).shadow(color: PuceCategorie.couleur(c.couleur), radius: 5)
+                            TextField("Nom", text: Binding(get: { noms[c.id] ?? c.nom }, set: { noms[c.id] = $0 }))
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { Task { await model.modifieCategorie(c.id, nom: noms[c.id]) } }
+                            Text(Format.count(c.etiquettes ?? 0, "étiquette", "étiquettes")).font(.caption).foregroundStyle(Theme.text3).fixedSize()
+                            HStack(spacing: 4) {
+                                ForEach(Self.couleurs, id: \.self) { k in
+                                    Button { Task { await model.modifieCategorie(c.id, couleur: k) } } label: {
+                                        Circle().fill(PuceCategorie.couleur(k)).frame(width: 15, height: 15)
+                                            .overlay { if k == c.couleur { Circle().strokeBorder(.white, lineWidth: 2) } }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(k)
+                                }
+                            }
+                            Button(role: .destructive) { aSupprimer = c } label: { Image(systemName: "trash") }
+                                .buttonStyle(.plain).foregroundStyle(Theme.danger).help("Supprimer la catégorie")
+                        }
+                        .padding(10)
+                        .background(.white.opacity(0.03), in: .rect(cornerRadius: 12))
+                    }
+                }
+            }
+            .frame(minHeight: 160, maxHeight: 360)
+            HStack {
+                TextField("Nouvelle catégorie (ex. Retours)", text: $nouvelle)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(cree)
+                Button("Créer", action: cree).boutonVerreFort().disabled(nouvelle.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 640)
+        .task { await model.rechargeCategories() }
+        .confirmationDialog("Supprimer la catégorie « \(aSupprimer?.nom ?? "") » ?", isPresented: Binding(get: { aSupprimer != nil }, set: { if !$0 { aSupprimer = nil } }), titleVisibility: .visible) {
+            Button("Supprimer", role: .destructive) {
+                if let c = aSupprimer { Task { await model.supprimeCategorie(c.id) } }
+                aSupprimer = nil
+            }
+        } message: {
+            Text("Ses \(aSupprimer?.etiquettes ?? 0) étiquette(s) restent, simplement sans catégorie.")
+        }
+    }
+
+    private func cree() {
+        let nom = nouvelle
+        nouvelle = ""
+        Task { await model.creeCategorie(nom) }
     }
 }
 
@@ -546,9 +625,6 @@ private struct CarteResultat: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            if r.index?.etat != "analyse" {
-                Text("Étiquette pas encore lue : elle le sera à l'ouverture").font(.system(size: 10.5)).foregroundStyle(Theme.text3)
-            }
             if let url = r.suivi?.url {
                 Link(destination: url) {
                     Label("Ouvrir le suivi du colis", systemImage: "arrow.up.right.square")
@@ -647,10 +723,6 @@ private struct VisionneuseCadre: View {
                 .frame(width: 76, height: 76)
                 .phaseAnimator([0.0, 1.0]) { vue, phase in vue.offset(y: phase * -6) } animation: { _ in .easeInOut(duration: 2) }
                 Text("Choisis une étiquette").font(.title3.weight(.bold))
-                Text("Ses codes-barres et QR codes s'allument au survol : leur valeur, leur format, leur rôle.")
-                    .foregroundStyle(Theme.text3)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -686,7 +758,7 @@ private struct BulleCode: View {
     var body: some View {
         GeometryReader { geo in
             let largeur: CGFloat = min(360, geo.size.width - 16)
-            let hauteurEstimee: CGFloat = 92
+            let hauteurEstimee: CGFloat = 70
             let dessus = bulle.cadre.minY - hauteurEstimee - 10 > 8
             let x = min(max(bulle.cadre.midX - largeur / 2, 8), geo.size.width - largeur - 8)
             let y = dessus ? bulle.cadre.minY - hauteurEstimee - 10 : min(bulle.cadre.maxY + 10, geo.size.height - hauteurEstimee - 8)
@@ -702,9 +774,6 @@ private struct BulleCode: View {
                 } else {
                     Text(bulle.code.erreur ?? "illisible").font(.callout.weight(.semibold)).foregroundStyle(Theme.warn)
                 }
-                Text(bulle.code.lisible ? "Clic : choisir · Double-clic : copier" : "Le code est repéré, sa valeur n'a pas pu être lue")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.text3)
             }
             .padding(10)
             .frame(width: largeur, height: hauteurEstimee, alignment: .topLeading)
@@ -814,12 +883,6 @@ private struct PanneauEtiquette: View {
                 }
                 annotation
                 actions
-                if let e = model.detail?.analyse.empreinte {
-                    Text("Original intact · \(String(e.prefix(12)))…")
-                        .font(.system(size: 10.5).monospacedDigit())
-                        .foregroundStyle(Theme.text3)
-                        .help("Empreinte SHA-256 du fichier d'origine : \(e)")
-                }
             }
             .padding(16)
         }
@@ -883,10 +946,6 @@ private struct PanneauEtiquette: View {
         let probable = r.suivi == nil ? model.codes.first { $0.role == "suivi-probable" }?.suivi : nil
         if let s = r.suivi ?? probable {
             VStack(alignment: .leading, spacing: 8) {
-                if r.suivi == nil {
-                    Text("Aucun numéro dans le nom du fichier. Un code lu a la forme d'un numéro \(s.nom) :")
-                        .font(.caption).foregroundStyle(Theme.text2)
-                }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(r.suivi == nil ? "Numéro probable · lu sur l'étiquette" : "Numéro de suivi · \(s.nom)")
@@ -913,8 +972,7 @@ private struct PanneauEtiquette: View {
                 }
             }
         } else {
-            Text("Aucun numéro de suivi connu pour ce colis\(model.detail?.analyse.etat == "analyse" ? " ni reconnu sur l'étiquette" : "").")
-                .font(.callout).foregroundStyle(Theme.text2)
+            Text("Pas de numéro de suivi").font(.callout).foregroundStyle(Theme.text2)
         }
     }
 
@@ -960,7 +1018,7 @@ private struct PanneauEtiquette: View {
 
     /// Classer l'etiquette : un classement a part, rien n'est ecrit dedans.
     private var categorie: some View {
-        bloc("Catégorie", detail: "un classement à part") {
+        bloc("Catégorie") {
             HStack(spacing: 8) {
                 Menu {
                     Button("Sans catégorie") { Task { await model.classe(nil) } }
@@ -993,7 +1051,7 @@ private struct PanneauEtiquette: View {
     }
 
     private var annotation: some View {
-        bloc("Note d'étude", detail: "gardée à part : le fichier n'est jamais modifié") {
+        bloc("Note") {
             TextEditor(text: $note)
                 .font(.callout)
                 .scrollContentBackground(.hidden)
@@ -1011,12 +1069,12 @@ private struct PanneauEtiquette: View {
         }
     }
 
-    /// L'editeur et le comparateur : des pages du site, ouvertes dans le navigateur
+    /// L'editeur et le comparateur : les pages du site, dans une fenetre de l'app
     private func ouvreSurLeSite(_ chemin: String, _ requete: [URLQueryItem]) {
-        guard var c = URLComponents(url: AppModel.shared.serverURL, resolvingAgainstBaseURL: false) else { return }
+        var c = URLComponents()
         c.path = chemin
         c.queryItems = requete
-        if let url = c.url { NSWorkspace.shared.open(url) }
+        PagesSite.ouvre(c.string ?? chemin)
     }
 
     private var actions: some View {
@@ -1026,12 +1084,12 @@ private struct PanneauEtiquette: View {
                     ouvreSurLeSite("/bordereaux/editeur", [URLQueryItem(name: "colis", value: String(id))])
                 } label: { Label("Modifier dans l'éditeur", systemImage: "square.and.pencil") }
                     .boutonVerreFort()
-                    .help("Ouvre l'éditeur dans le navigateur : un document de travail par-dessus l'étiquette, jamais l'étiquette elle-même")
+                    .help("L'éditeur, dans une fenêtre de l'app : un document de travail par-dessus l'étiquette, jamais l'étiquette elle-même")
                 Button {
                     ouvreSurLeSite("/bordereaux/comparer", [URLQueryItem(name: "a", value: String(id))])
                 } label: { Label("Comparer", systemImage: "rectangle.split.2x1") }
                     .boutonVerre()
-                    .help("Ouvre le comparateur dans le navigateur")
+                    .help("Le comparateur, dans une fenêtre de l'app")
             }
             Button {
                 Task { await model.lis(force: true) }
