@@ -24,7 +24,8 @@ test("/app.js et /styles.css : les morceaux bout a bout, dans l'ordre, revalides
   }
   // chaque morceau du site est bien inscrit (un fichier oublie ne serait jamais charge)
   for (const dossier of ["js", "css"]) {
-    const inscrits = Object.values(PAQUETS).flatMap((p) => p.morceaux).filter((m) => m.startsWith(`${dossier}/`));
+    // (un morceau partage par plusieurs paquets -- les outils des pages a part -- compte une fois)
+    const inscrits = [...new Set(Object.values(PAQUETS).flatMap((p) => p.morceaux).filter((m) => m.startsWith(`${dossier}/`)))];
     // sous-dossiers compris (js/bdx/ : la page Bordereaux)
     const presents = fs
       .readdirSync(path.join(__dirname, "..", "public", dossier), { recursive: true, withFileTypes: true })
@@ -36,7 +37,7 @@ test("/app.js et /styles.css : les morceaux bout a bout, dans l'ordre, revalides
 
 test("les scripts assembles se lisent d'un bloc (pas d'erreur de syntaxe a la jointure)", async () => {
   const vm = require("vm");
-  for (const nom of ["app.js", "bordereaux.js"]) {
+  for (const nom of Object.keys(PAQUETS).filter((n) => n.endsWith(".js"))) {
     const r = await app.appel(`/${nom}`);
     assert.doesNotThrow(() => new vm.Script(r.texte, { filename: nom }));
   }

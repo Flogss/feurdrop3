@@ -250,6 +250,12 @@ async function analyseEtDetail(colisId, options) {
   return detail(colisId);
 }
 
+/** Les codes lus sur l'etiquette d'un colis (a plat), ou [] si elle n'est pas lue. */
+function codesDuColis(colisId) {
+  const d = detail(colisId);
+  return d?.analyse?.pages ? d.analyse.pages.flatMap((p) => p.codes) : [];
+}
+
 /** Les octets d'origine d'une etiquette, tels quels. */
 async function fichierOriginal(colisId) {
   const colis = getColisById(colisId);
@@ -576,6 +582,7 @@ module.exports = {
   recherche,
   etat,
   annote,
+  codesDuColis,
   classe,
   categories: base.categories,
   creeCategorie: base.creeCategorie,

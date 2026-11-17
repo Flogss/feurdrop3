@@ -94,6 +94,13 @@ function ouvre() {
       classe_le TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS colis_categories_cat ON colis_categories(categorie_id);
+    -- le document de travail de l'editeur (un par etiquette) : les elements
+    -- ajoutes ou modifies, a part ; l'etiquette d'origine n'est jamais touchee
+    CREATE TABLE IF NOT EXISTS travaux (
+      colis_id INTEGER PRIMARY KEY,
+      modele TEXT NOT NULL,
+      modifie_le TEXT NOT NULL
+    );
   `);
   return base;
 }
@@ -351,6 +358,23 @@ function categoriesDesColis() {
 const colisDeLaCategorie = (id) => ouvre().prepare("SELECT colis_id FROM colis_categories WHERE categorie_id = ?").all(id).map((r) => r.colis_id);
 const colisClasses = () => ouvre().prepare("SELECT colis_id FROM colis_categories").all().map((r) => r.colis_id);
 
+// --- Documents de travail (editeur) ---------------------------------------------------------
+
+function travail(colisId) {
+  const t = ouvre().prepare("SELECT modele, modifie_le FROM travaux WHERE colis_id = ?").get(colisId);
+  return t ? { modele: JSON.parse(t.modele), modifieLe: t.modifie_le } : null;
+}
+
+function gardeTravail(colisId, modele) {
+  const quand = maintenant();
+  ouvre()
+    .prepare("INSERT INTO travaux (colis_id, modele, modifie_le) VALUES (?, ?, ?) ON CONFLICT(colis_id) DO UPDATE SET modele = excluded.modele, modifie_le = excluded.modifie_le")
+    .run(colisId, JSON.stringify(modele), quand);
+  return { modifieLe: quand };
+}
+
+const effaceTravail = (colisId) => ouvre().prepare("DELETE FROM travaux WHERE colis_id = ?").run(colisId).changes > 0;
+
 const resumeFichiers = () => ouvre().prepare("SELECT empreinte, type, pages, version, erreur, analyse_le FROM fichiers").all();
 
 module.exports = {
@@ -381,4 +405,7 @@ module.exports = {
   categoriesDesColis,
   colisDeLaCategorie,
   colisClasses,
+  travail,
+  gardeTravail,
+  effaceTravail,
 };

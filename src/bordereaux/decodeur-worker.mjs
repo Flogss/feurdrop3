@@ -7,10 +7,21 @@ import { parentPort } from "node:worker_threads";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { prepareZXingModule, readBarcodes, formatToLabel, MATRIX_BARCODE_FORMATS } from "zxing-wasm/reader";
+import { prepareZXingModule as prepareEcrivain, writeBarcode } from "zxing-wasm/writer";
 
 const require = createRequire(import.meta.url);
 const wasmBinary = await readFile(require.resolve("zxing-wasm/reader/zxing_reader.wasm"));
 prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
+// l'ecrivain (codes regeneres par l'editeur), charge a sa premiere demande
+let ecrivainPret = null;
+async function ecrivain() {
+  if (!ecrivainPret) {
+    ecrivainPret = readFile(require.resolve("zxing-wasm/writer/zxing_writer.wasm")).then((binaire) => {
+      prepareEcrivain({ overrides: { wasmBinary: binaire }, fireImmediately: true });
+    });
+  }
+  return ecrivainPret;
+}
 
 const OPTIONS = {
   formats: [], // tous : 1D (Code 128, 39, 93, EAN, UPC, ITF, Codabar, DataBar) et 2D (QR, DataMatrix, Aztec, PDF417, MaxiCode)
@@ -34,7 +45,24 @@ function nomDuFormat(format) {
   }
 }
 
-parentPort.on("message", async ({ id, octets }) => {
+// Un code a partir d'une valeur : la matrice de ses modules (1 = noir),
+// sans marge -- l'editeur et l'export PDF la dessinent en vectoriel.
+async function ecrit(id, format, texte) {
+  try {
+    await ecrivain();
+    const r = await writeBarcode(texte, { format, scale: 1, addQuietZones: false });
+    if (r.error) return parentPort.postMessage({ id, erreur: r.error });
+    const { width, height, data } = r.symbol;
+    const modules = new Uint8Array(width * height);
+    for (let i = 0; i < modules.length; i += 1) modules[i] = data[i] < 128 ? 1 : 0;
+    parentPort.postMessage({ id, code: { largeur: width, hauteur: height, modules } }, [modules.buffer]);
+  } catch (err) {
+    parentPort.postMessage({ id, erreur: err?.message || String(err) });
+  }
+}
+
+parentPort.on("message", async ({ id, octets, type, format, texte }) => {
+  if (type === "ecrire") return ecrit(id, format, texte);
   try {
     const resultats = await readBarcodes(octets, OPTIONS);
     parentPort.postMessage({

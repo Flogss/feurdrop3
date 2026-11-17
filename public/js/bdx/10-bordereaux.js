@@ -769,6 +769,8 @@ function bdxRendPanneau() {
       <button class="btn btn-secondary btn-sm" id="bdx-annotation-ok" type="button" hidden><svg class="icon"><use href="#i-check"/></svg><span>Enregistrer la note</span></button>
     </section>
     <div class="bdx-p-actions">
+      <a class="btn btn-primary btn-sm" href="/bordereaux/editeur?colis=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-edit"/></svg><span>Modifier dans l'éditeur</span></a>
+      <a class="btn btn-secondary btn-sm" href="/bordereaux/comparer?a=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-layers"/></svg><span>Comparer</span></a>
       <button class="btn btn-secondary btn-sm" id="bdx-relire" type="button"${c.analyseEnCours ? " disabled" : ""}><svg class="icon"><use href="#i-refresh"/></svg><span>Relire les codes</span></button>
       <a class="btn btn-ghost btn-sm" href="/api/bordereaux/${r.id}/fichier?telecharger=1" download><svg class="icon"><use href="#i-upload"/></svg><span>Fichier d'origine</span></a>
     </div>

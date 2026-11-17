@@ -40,6 +40,16 @@ const PAQUETS = {
     type: "application/javascript; charset=UTF-8",
     morceaux: ["js/bdx/00-outils.js", "js/bdx/10-bordereaux.js"],
   },
+  // l'editeur de bordereaux (/bordereaux/editeur), a part lui aussi
+  "editeur.js": {
+    type: "application/javascript; charset=UTF-8",
+    morceaux: ["js/bdx/00-outils.js", "js/bdx/20-editeur.js"],
+  },
+  // le comparateur de bordereaux (/bordereaux/comparer)
+  "comparateur.js": {
+    type: "application/javascript; charset=UTF-8",
+    morceaux: ["js/bdx/00-outils.js", "js/bdx/30-comparateur.js"],
+  },
   "styles.css": {
     type: "text/css; charset=UTF-8",
     morceaux: [
@@ -50,6 +60,7 @@ const PAQUETS = {
       "css/35-depots.css", // controle des depots
       "css/37-itineraire.css", // itineraire boites jaunes
       "css/38-bordereaux.css", // etude des bordereaux
+      "css/39-editeur.css", // editeur de bordereaux
       "css/40-retours.css", // toasts, feuille de confirmation
       "css/50-adaptations.css", // petits ecrans, bureau, mouvement reduit
       "css/60-historique.css",

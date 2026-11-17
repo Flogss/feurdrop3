@@ -60,6 +60,8 @@ function creeApp() {
   // le global, celui du suivi ne servait jamais et une liste de 140 Ko
   // repartait en 413.
   app.use("/api/suivi/verifier", express.json({ limit: LIMITE_LISTE_SUIVI }));
+  // le document de travail de l'editeur de bordereaux (512 Ko au plus, verifie)
+  app.use("/api/bordereaux", express.json({ limit: "600kb" }));
   app.use(express.json({ limit: LIMITE_JSON }));
 
   // --- 1. ouvert a tous, ou protege par sa propre cle --------------------------
@@ -94,11 +96,15 @@ function creeApp() {
   // --- 3. les pages et fichiers du dashboard : session obligatoire ------------------
   app.use(auth.exigeSessionPage);
   // /app.js : assemble depuis public/js/ (voir assemblage.js)
-  app.use(servirPaquets({ seulement: ["app.js", "bordereaux.js"] }));
+  app.use(servirPaquets({ seulement: ["app.js", "bordereaux.js", "editeur.js", "comparateur.js"] }));
   // les bordereaux : une page a part du dashboard, a sa propre adresse
-  app.get("/bordereaux", (req, res) =>
-    res.sendFile(path.join(PUBLIC, "bordereaux.html"), { headers: { "Content-Security-Policy": CSP_DASHBOARD, "Cache-Control": "no-cache" } })
-  );
+  const pagePrivee = (fichier) => (req, res) =>
+    res.sendFile(path.join(PUBLIC, fichier), { headers: { "Content-Security-Policy": CSP_DASHBOARD, "Cache-Control": "no-cache" } });
+  app.get("/bordereaux", pagePrivee("bordereaux.html"));
+  // l'editeur (un document de travail par-dessus l'etiquette, jamais elle)
+  app.get("/bordereaux/editeur", pagePrivee("editeur.html"));
+  // le comparateur (deux etiquettes ou plus, rien n'est modifie)
+  app.get("/bordereaux/comparer", pagePrivee("comparateur.html"));
   // la visionneuse des bordereaux : pdf.js tel qu'installe (node_modules),
   // deux fichiers et ses polices standard, rien d'autre du paquet
   const PDFJS = path.dirname(require.resolve("pdfjs-dist/package.json"));

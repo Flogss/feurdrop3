@@ -45,7 +45,7 @@ function demarre() {
       enCours.delete(m.id);
       clearTimeout(attente.minuteur);
       if (m.erreur) attente.reject(new Error(m.erreur));
-      else attente.resolve(m.resultats);
+      else attente.resolve(m.code || m.resultats);
     });
   });
   t.on("error", (err) => {
@@ -96,6 +96,30 @@ function lisCodes(octets) {
   return tache;
 }
 
+/**
+ * Un code-barres ou QR code a partir d'une valeur : { largeur, hauteur,
+ * modules } (une case par module, 1 = noir). Meme file que la lecture.
+ */
+function ecritCode(format, texte) {
+  const tache = file.then(async () => {
+    clearTimeout(minuteurArret);
+    const t = await demarre();
+    const id = prochainId++;
+    return new Promise((resolve, reject) => {
+      const minuteur = setTimeout(() => {
+        enCours.delete(id);
+        reject(new ErreurLecteur("génération du code trop longue"));
+        arrete();
+      }, 15000);
+      enCours.set(id, { resolve, reject, minuteur });
+      t.ref();
+      t.postMessage({ id, type: "ecrire", format, texte });
+    });
+  });
+  file = tache.catch(() => {}).finally(planifieArret);
+  return tache;
+}
+
 const actif = () => thread !== null;
 
-module.exports = { lisCodes, arrete, actif, ErreurLecteur };
+module.exports = { lisCodes, ecritCode, arrete, actif, ErreurLecteur };

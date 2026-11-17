@@ -17,6 +17,8 @@ const express = require("express");
 const { routeAsync } = require("../http");
 const bordereaux = require("../bordereaux");
 const { ErreurLecteur } = require("../bordereaux/decodeur");
+const editeur = require("../bordereaux/editeur");
+const { getColisById } = require("../db");
 
 const router = express.Router();
 
@@ -128,6 +130,83 @@ router.get(
     // seuls un PDF ou une image (reconnus a leurs octets) s'ouvrent dans le
     // navigateur ; tout le reste se telecharge (octet-stream, nosniff)
     res.end(Buffer.from(f.octets.buffer, f.octets.byteOffset, f.octets.byteLength));
+  })
+);
+
+// --- L'editeur : un document de travail a part ------------------------------------------
+//   GET    /:id/travail          le brouillon (ou null)
+//   PUT    /:id/travail          { modele } : sauvegarde automatique
+//   DELETE /:id/travail          repartir de l'original
+//   POST   /:id/code             { format, valeur } : un code regenere (apercu)
+//   POST   /:id/travail/export   { modele } : le NOUVEAU PDF (l'original ne bouge pas)
+
+function repondEditeur(res, err) {
+  if (err instanceof editeur.ErreurEditeur) {
+    return res.status(err.status).json({ error: err.message, protege: err.protege || false, transporteur: err.transporteur || null });
+  }
+  if (err instanceof ErreurLecteur) return res.status(503).json({ error: err.message });
+  console.error("[editeur]", err);
+  return res.status(500).json({ error: `Impossible : ${err.message}` });
+}
+
+router.get("/:id/travail", (req, res) => {
+  const id = idDe(req);
+  if (!id || !bordereaux.detail(id)) return res.status(404).json({ error: "Étiquette introuvable." });
+  res.json({ travail: editeur.brouillon(id) });
+});
+
+router.put("/:id/travail", (req, res) => {
+  const id = idDe(req);
+  if (!id || !bordereaux.detail(id)) return res.status(404).json({ error: "Étiquette introuvable." });
+  try {
+    res.json(editeur.gardeBrouillon(id, req.body?.modele));
+  } catch (err) {
+    repondEditeur(res, err);
+  }
+});
+
+router.delete("/:id/travail", (req, res) => {
+  const id = idDe(req);
+  if (!id || !bordereaux.detail(id)) return res.status(404).json({ error: "Étiquette introuvable." });
+  res.json({ efface: require("../bordereaux/base").effaceTravail(id) });
+});
+
+router.post(
+  "/:id/code",
+  routeAsync(async (req, res) => {
+    const id = idDe(req);
+    const colis = id ? getColisById(id) : null;
+    if (!colis || !colis.file_id) return res.status(404).json({ error: "Étiquette introuvable." });
+    try {
+      // le code de l'etiquette elle-meme (deplace ou redimensionne) : verifie
+      // contre ce qui a ete lu, jamais d'apres la page
+      const codeId = Number.isInteger(req.body?.codeId) ? req.body.codeId : null;
+      const lu = codeId ? bordereaux.codesDuColis(id).find((c) => c.id === codeId) : null;
+      const original = Boolean(lu && lu.lisible && lu.valeur === req.body?.valeur && lu.format === req.body?.format);
+      const { format, valeur, largeur, hauteur, chemin } = await editeur.genereCode(String(req.body?.format || ""), req.body?.valeur, { colis, original });
+      res.json({ format, valeur, largeur, hauteur, chemin });
+    } catch (err) {
+      repondEditeur(res, err);
+    }
+  })
+);
+
+router.post(
+  "/:id/travail/export",
+  routeAsync(async (req, res) => {
+    const id = idDe(req);
+    if (!id || !bordereaux.detail(id)) return res.status(404).json({ error: "Étiquette introuvable." });
+    try {
+      const { pdf, nom } = await editeur.exporte(id, req.body?.modele, { telecharge: bordereaux.telecharge, codesLus: bordereaux.codesDuColis(id) });
+      res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${nom.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(nom)}`,
+        "Cache-Control": "no-store",
+      });
+      res.end(Buffer.from(pdf));
+    } catch (err) {
+      repondEditeur(res, err);
+    }
   })
 );
 
