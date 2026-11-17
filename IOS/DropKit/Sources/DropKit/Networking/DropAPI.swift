@@ -351,12 +351,50 @@ public struct DropAPI: Sendable {
 
     // MARK: - Bordereaux
 
-    /// Les etiquettes, de la plus recente a la plus ancienne (`avant` : la suite).
-    public func bordereaux(filtre: String = "tous", texte: String = "", avant: Int? = nil) async throws -> BordereauxListe {
-        var query = [URLQueryItem(name: "filtre", value: filtre)]
+    /// Les etiquettes : filtrees (etape, texte, transporteur, a partir d'un jour
+    /// « AAAA-MM-JJ », categorie : id ou "aucune") et triees ("recent",
+    /// "ancien", "transporteur") ; `decalage` : la page suivante.
+    public func bordereaux(
+        filtre: String = "tous", texte: String = "", transporteur: String? = nil, depuis: String? = nil,
+        categorie: String? = nil, tri: String = "recent", decalage: Int? = nil
+    ) async throws -> BordereauxListe {
+        var query = [URLQueryItem(name: "filtre", value: filtre), URLQueryItem(name: "tri", value: tri)]
         if !texte.isEmpty { query.append(URLQueryItem(name: "q", value: texte)) }
-        if let avant { query.append(URLQueryItem(name: "avant", value: String(avant))) }
+        if let transporteur, !transporteur.isEmpty { query.append(URLQueryItem(name: "transporteur", value: transporteur)) }
+        if let depuis, !depuis.isEmpty { query.append(URLQueryItem(name: "depuis", value: depuis)) }
+        if let categorie, !categorie.isEmpty { query.append(URLQueryItem(name: "categorie", value: categorie)) }
+        if let decalage { query.append(URLQueryItem(name: "decalage", value: String(decalage))) }
         return try await client.send(.get, "/api/bordereaux", query: query)
+    }
+
+    public func categoriesBordereaux() async throws -> [BordereauCategorie] {
+        let r: BordereauxCategories = try await client.send(.get, "/api/bordereaux/categories")
+        return r.categories
+    }
+
+    private struct CorpsCategorie: Encodable, Sendable { let nom: String }
+    private struct ReponseCategorie: Decodable, Sendable { let categorie: BordereauCategorie? }
+
+    public func creeCategorieBordereaux(_ nom: String) async throws -> BordereauCategorie? {
+        let r: ReponseCategorie = try await client.send(.post, "/api/bordereaux/categories", body: CorpsCategorie(nom: nom))
+        return r.categorie
+    }
+
+    /// `{"categorie": null}` pour declasser : la cle est ecrite meme a nil
+    /// (l'encodage par defaut l'omettrait)
+    private struct CorpsClasse: Encodable, Sendable {
+        let categorie: Int?
+        enum Cle: String, CodingKey { case categorie }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Cle.self)
+            try c.encode(categorie, forKey: .categorie)
+        }
+    }
+
+    /// Classe une etiquette (nil : sans categorie). Rien n'est ecrit dans l'etiquette.
+    public func classeBordereau(_ id: Int, categorie: Int?) async throws -> BordereauCategorie? {
+        let r: ReponseCategorie = try await client.send(.put, "/api/bordereaux/\(id)/categorie", body: CorpsClasse(categorie: categorie))
+        return r.categorie
     }
 
     public func bordereauxEtat() async throws -> BordereauxEtat {

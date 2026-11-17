@@ -83,6 +83,7 @@ private struct BordereauxContenu: View {
             // `-DropBordereauxRecherche 6A123` cherche un numero
             let reglages = UserDefaults.standard
             if reglages.bool(forKey: "DropBordereauZones") { model.zonesToutes = true }
+            if let t = reglages.string(forKey: "DropBordereauxTri") { model.tri = t }
             if let q = reglages.string(forKey: "DropBordereauxRecherche") {
                 model.onglet = .recherche
                 model.requete = q
@@ -220,9 +221,10 @@ private struct ColonneGauche: View {
         .overlay { RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.08)) }
 
         FlowFiltres(model: model)
+        TrisEtFiltres(model: model)
 
         ScrollView {
-            LazyVStack(spacing: 4) {
+            LazyVStack(spacing: 4, pinnedViews: [.sectionHeaders]) {
                 if model.liste.isEmpty {
                     Text(model.erreurListe ?? (model.chargementListe ? "Chargement…" : "Aucune étiquette ici."))
                         .font(.callout)
@@ -230,10 +232,17 @@ private struct ColonneGauche: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                 }
-                ForEach(model.liste) { b in
-                    LigneEtiquette(b: b, choisie: model.ouverteId == b.id) {
-                        Task { await model.ouvre(b.id) }
+                if model.tri == "transporteur" {
+                    // par transporteur : un intertitre (et son nombre) avant chacun
+                    ForEach(groupes, id: \.code) { g in
+                        Section {
+                            ForEach(g.etiquettes) { b in ligne(b) }
+                        } header: {
+                            IntertitreTransporteur(code: g.code, nom: g.nom, n: model.transporteurs.first { $0.code == g.code }?.n ?? g.etiquettes.count)
+                        }
                     }
+                } else {
+                    ForEach(model.liste) { b in ligne(b) }
                 }
                 if model.suite != nil {
                     Button("Plus d'étiquettes") { Task { await model.chargeListe(suite: true) } }
@@ -243,6 +252,23 @@ private struct ColonneGauche: View {
             }
         }
         .scrollIndicators(.never)
+    }
+
+    private func ligne(_ b: BordereauResume) -> some View {
+        LigneEtiquette(b: b, choisie: model.ouverteId == b.id) {
+            Task { await model.ouvre(b.id) }
+        }
+    }
+
+    /// la liste par transporteur, dans l'ordre du serveur
+    private var groupes: [(code: String, nom: String, etiquettes: [BordereauResume])] {
+        var resultat: [(code: String, nom: String, etiquettes: [BordereauResume])] = []
+        for b in model.liste {
+            let code = b.transporteur?.code ?? "aucun"
+            if resultat.last?.code == code { resultat[resultat.count - 1].etiquettes.append(b) }
+            else { resultat.append((code, b.transporteur?.nom ?? "Sans transporteur", [b])) }
+        }
+        return resultat
     }
 
     @ViewBuilder
@@ -298,6 +324,119 @@ private struct FlowFiltres: View {
     }
 }
 
+/// Transporteur, a partir du, tri, categorie.
+private struct TrisEtFiltres: View {
+    @Bindable var model: BordereauxModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Grid(horizontalSpacing: 8, verticalSpacing: 6) {
+                GridRow {
+                    choix("Transporteur") {
+                        Picker("", selection: $model.transporteur) {
+                            Text("Tous").tag("")
+                            ForEach(model.transporteurs) { t in Text("\(t.nom) (\(t.n))").tag(t.code) }
+                        }
+                    }
+                    choix("À partir du") {
+                        HStack(spacing: 4) {
+                            DatePicker("", selection: Binding(get: { model.depuis ?? .now }, set: { model.depuis = $0 }), displayedComponents: .date)
+                                .labelsHidden()
+                                .datePickerStyle(.field)
+                                .opacity(model.depuis == nil ? 0.45 : 1)
+                            if model.depuis != nil {
+                                Button { model.depuis = nil } label: { Image(systemName: "xmark.circle.fill") }
+                                    .buttonStyle(.plain).foregroundStyle(Theme.text3).help("Toutes les dates")
+                            }
+                        }
+                    }
+                }
+                GridRow {
+                    choix("Tri") {
+                        Picker("", selection: $model.tri) {
+                            Text("Plus récentes").tag("recent")
+                            Text("Plus anciennes").tag("ancien")
+                            Text("Par transporteur").tag("transporteur")
+                        }
+                    }
+                    choix("Catégorie") {
+                        Picker("", selection: $model.categorie) {
+                            Text("Toutes").tag("")
+                            Text("Sans catégorie").tag("aucune")
+                            ForEach(model.categories) { c in Text("\(c.nom) (\(c.etiquettes ?? 0))").tag(String(c.id)) }
+                        }
+                    }
+                }
+            }
+            HStack {
+                Text(Format.count(model.total, "étiquette", "étiquettes")).font(.caption.monospacedDigit()).foregroundStyle(Theme.text3)
+                Spacer()
+                if model.filtresActifs {
+                    Button("Effacer les filtres") { model.effaceFiltres() }
+                        .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(Theme.violetLight)
+                }
+            }
+        }
+    }
+
+    private func choix<Contenu: View>(_ titre: String, @ViewBuilder contenu: () -> Contenu) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(titre.uppercased()).font(.system(size: 9.5, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.text3)
+            contenu().labelsHidden().pickerStyle(.menu).controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct IntertitreTransporteur: View {
+    let code: String
+    let nom: String
+    let n: Int
+
+    var body: some View {
+        let couleur = Theme.carrier(code == "aucun" ? "" : code)
+        HStack(spacing: 7) {
+            Circle().fill(couleur).frame(width: 7, height: 7).shadow(color: couleur, radius: 4)
+            Text(nom).font(.system(size: 12, weight: .semibold)).foregroundStyle(couleur)
+            Spacer()
+            Text("\(n)").font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(Theme.text3)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Color(red: 0.07, green: 0.06, blue: 0.10).opacity(0.95), in: .rect(cornerRadius: 10))
+    }
+}
+
+/// La pastille d'une categorie, a ses couleurs.
+struct PuceCategorie: View {
+    let categorie: BordereauCategorie
+
+    static func couleur(_ nom: String) -> Color {
+        switch nom {
+        case "violet": Theme.violet
+        case "bleu": Theme.info
+        case "turquoise": Theme.teal
+        case "vert": Theme.carrier("CHRONO")
+        case "jaune": Theme.carrier("LP")
+        case "orange": Theme.special
+        case "rose": Theme.carrier("MR")
+        case "rouge": Theme.danger
+        default: Theme.text3
+        }
+    }
+
+    var body: some View {
+        let c = Self.couleur(categorie.couleur)
+        HStack(spacing: 4) {
+            Circle().fill(c).frame(width: 5, height: 5)
+            Text(categorie.nom).lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(c)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(c.opacity(0.15), in: .capsule)
+    }
+}
+
 private struct LigneEtiquette: View {
     let b: BordereauResume
     let choisie: Bool
@@ -315,6 +454,7 @@ private struct LigneEtiquette: View {
                         .foregroundStyle(Theme.text3)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    if let c = b.categorie { PuceCategorie(categorie: c) }
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 3) {
@@ -668,6 +808,7 @@ private struct PanneauEtiquette: View {
                     ProgressView().frame(maxWidth: .infinity)
                 }
                 codes
+                categorie
                 if let n = model.detail?.note, !n.isEmpty {
                     bloc("Note du colis") { Text(n).font(.callout).foregroundStyle(Theme.text2) }
                 }
@@ -811,6 +952,43 @@ private struct PanneauEtiquette: View {
                     Text("Seules les premières pages ont été lues.").font(.caption).foregroundStyle(Theme.text3)
                 }
             }
+        }
+    }
+
+    @State private var nouvelleCategorie = ""
+    @State private var demandeNouvelle = false
+
+    /// Classer l'etiquette : un classement a part, rien n'est ecrit dedans.
+    private var categorie: some View {
+        bloc("Catégorie", detail: "un classement à part") {
+            HStack(spacing: 8) {
+                Menu {
+                    Button("Sans catégorie") { Task { await model.classe(nil) } }
+                    if !model.categories.isEmpty { Divider() }
+                    ForEach(model.categories) { c in
+                        Button(c.nom) { Task { await model.classe(c.id) } }
+                    }
+                    Divider()
+                    Button("Nouvelle catégorie…") { demandeNouvelle = true }
+                } label: {
+                    if let c = model.detail?.categorie { PuceCategorie(categorie: c) } else { Text("Sans catégorie").foregroundStyle(Theme.text2) }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                Spacer()
+            }
+            .padding(.horizontal, 10).frame(height: 34)
+            .background(.black.opacity(0.25), in: .rect(cornerRadius: 11))
+            .overlay { RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.09)) }
+        }
+        .alert("Nouvelle catégorie", isPresented: $demandeNouvelle) {
+            TextField("Nom (ex. Retours)", text: $nouvelleCategorie)
+            Button("Créer et classer") {
+                let nom = nouvelleCategorie
+                nouvelleCategorie = ""
+                Task { await model.classe(nil, nouvelle: nom) }
+            }
+            Button("Annuler", role: .cancel) { nouvelleCategorie = "" }
         }
     }
 

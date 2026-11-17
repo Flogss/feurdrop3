@@ -41,6 +41,25 @@ public struct BordereauIndex: Decodable, Sendable, Hashable {
     }
 }
 
+/// Une categorie de l'utilisateur (« Retours »...) : un classement a part.
+public struct BordereauCategorie: Decodable, Sendable, Hashable, Identifiable {
+    public let id: Int
+    public let nom: String
+    /// "violet" | "bleu" | "turquoise" | "vert" | "jaune" | "orange" | "rose" | "rouge" | "gris"
+    public let couleur: String
+    /// le nombre d'etiquettes (dans la liste des categories)
+    public let etiquettes: Int?
+}
+
+/// Un transporteur present dans la liste, et son nombre d'etiquettes.
+public struct BordereauTransporteurCompte: Decodable, Sendable, Hashable, Identifiable {
+    /// "LP", ... ou "aucun"
+    public let code: String
+    public let nom: String
+    public let n: Int
+    public var id: String { code }
+}
+
 /// Une etiquette, telle que la liste la montre.
 public struct BordereauResume: Decodable, Sendable, Hashable, Identifiable {
     public let id: Int
@@ -57,11 +76,21 @@ public struct BordereauResume: Decodable, Sendable, Hashable, Identifiable {
     public let redrop: Bool?
     public let suivi: BordereauSuivi?
     public var index: BordereauIndex?
+    public var categorie: BordereauCategorie?
 }
 
 public struct BordereauxListe: Decodable, Sendable {
     public let bordereaux: [BordereauResume]
     public let suite: Int?
+    /// la page suivante (tous les tris)
+    public let decalageSuivant: Int?
+    public let total: Int?
+    public let transporteurs: [BordereauTransporteurCompte]?
+    public let categories: [BordereauCategorie]?
+}
+
+public struct BordereauxCategories: Decodable, Sendable {
+    public let categories: [BordereauCategorie]
 }
 
 public struct BordereauZone: Decodable, Sendable, Hashable {
@@ -125,6 +154,7 @@ public struct BordereauDetail: Decodable, Sendable, Hashable {
     public let note: String?
     /// la note d'etude, gardee a part du fichier
     public var annotation: BordereauAnnotation?
+    public var categorie: BordereauCategorie?
     public let analyse: BordereauAnalyse
 }
 

@@ -74,6 +74,14 @@ final class BordereauxModel {
     // la liste (onglet Etude)
     var filtre = "tous"
     var texteFiltre = ""
+    /// transporteur ("" : tous, "aucun" : sans), a partir d'un jour, tri, categorie ("" : toutes, "aucune", ou l'id)
+    var transporteur = "" { didSet { if transporteur != oldValue { filtresChanges() } } }
+    var depuis: Date? { didSet { if depuis != oldValue { filtresChanges() } } }
+    var tri = "recent" { didSet { if tri != oldValue { filtresChanges() } } }
+    var categorie = "" { didSet { if categorie != oldValue { filtresChanges() } } }
+    private(set) var transporteurs: [BordereauTransporteurCompte] = []
+    private(set) var categories: [BordereauCategorie] = []
+    private(set) var total = 0
     private(set) var liste: [BordereauResume] = []
     private(set) var suite: Int?
     private(set) var chargementListe = false
@@ -143,13 +151,42 @@ final class BordereauxModel {
         if let e = try? await api.bordereauxEtat() { etat = e }
     }
 
+    private static let jourISO: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "Europe/Paris")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    var filtresActifs: Bool { !transporteur.isEmpty || depuis != nil || tri != "recent" || !categorie.isEmpty }
+
+    func effaceFiltres() {
+        transporteur = ""
+        depuis = nil
+        tri = "recent"
+        categorie = ""
+    }
+
+    private func filtresChanges() {
+        liste = []
+        Task { await chargeListe() }
+    }
+
     func chargeListe(suite plus: Bool = false) async {
         chargementListe = true
         defer { chargementListe = false }
         do {
-            let r = try await api.bordereaux(filtre: filtre, texte: texteFiltre.trimmingCharacters(in: .whitespaces), avant: plus ? suite : nil)
+            let r = try await api.bordereaux(
+                filtre: filtre, texte: texteFiltre.trimmingCharacters(in: .whitespaces), transporteur: transporteur,
+                depuis: depuis.map { Self.jourISO.string(from: $0) }, categorie: categorie, tri: tri,
+                decalage: plus ? suite : nil
+            )
             liste = plus ? liste + r.bordereaux : r.bordereaux
-            suite = r.suite
+            suite = r.decalageSuivant
+            total = r.total ?? liste.count
+            transporteurs = r.transporteurs ?? []
+            if let c = r.categories { categories = c }
             erreurListe = nil
         } catch {
             erreurListe = error.localizedDescription
@@ -331,6 +368,26 @@ final class BordereauxModel {
         guard p != page else { return }
         bulle = nil
         page = p
+    }
+
+    // MARK: Categories (un classement a part)
+
+    /// Classe l'etiquette ouverte (nil : sans categorie) ; `nouvelle` : la cree d'abord.
+    func classe(_ categorieId: Int?, nouvelle: String? = nil) async {
+        guard let id = ouverteId else { return }
+        do {
+            var cible = categorieId
+            if let nom = nouvelle?.trimmingCharacters(in: .whitespacesAndNewlines), !nom.isEmpty {
+                cible = try await api.creeCategorieBordereaux(nom)?.id
+            }
+            let c = try await api.classeBordereau(id, categorie: cible)
+            detail?.categorie = c
+            if let i = liste.firstIndex(where: { $0.id == id }) { liste[i].categorie = c }
+            if let toutes = try? await api.categoriesBordereaux() { categories = toutes }
+            toasts.show(c.map { "Classée dans « \($0.nom) »" } ?? "Retirée de sa catégorie", style: .info)
+        } catch {
+            toasts.show(error.localizedDescription, style: .error)
+        }
     }
 
     // MARK: Note d'etude (a part du fichier)
