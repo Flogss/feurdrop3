@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Bordereaux · DROP.ctrl</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="theme-color" content="#08070b" />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="styles.css" />
+<!-- une page a part du dashboard : ses outils et sa visionneuse seulement
+     (bordereaux.js, voir src/assemblage.js) ; meme session, memes styles -->
+<script src="bordereaux.js" defer></script>
+</head>
+<body class="page-bdx">
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3.5v10.5M7.5 9.5 12 14l4.5-4.5"/><path d="M4.5 14.5v3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v10.5a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1V9"/></symbol>
+  <symbol id="i-printer" viewBox="0 0 24 24"><path d="M7 8.5V3.5h10v5"/><rect x="3" y="8.5" width="18" height="8.5" rx="2"/><path d="M7 14h10v6.5H7z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 16.5v-5"/><path d="M12 16.5V5"/><path d="M17.5 16.5v-8"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M3.5 6.5h9M17.5 6.5h3"/><circle cx="15" cy="6.5" r="2.25"/><path d="M3.5 12h2M10.5 12h10"/><circle cx="8" cy="12" r="2.25"/><path d="M3.5 17.5h11M19.5 17.5h1"/><circle cx="17" cy="17.5" r="2.25"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 16.5V6H2.5v10.5H4"/><path d="M14 16.5H9.5"/><path d="M14 9.5h4.2l3.3 3.6v3.4H20"/><circle cx="6.75" cy="17" r="2.25"/><circle cx="17.25" cy="17" r="2.25"/></symbol>
+  <symbol id="i-home-in" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M20.5 7.5 12 3 3.5 7.5v9L12 21l8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5"/><path d="M12 12v9"/><path d="m7.75 5.25 8.5 4.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15.5" r="4.5"/><path d="m11.2 12.3 8.3-8.3"/><path d="m16 7.5 2.5 2.5"/><path d="m18.5 5 2 2"/></symbol>
+  <symbol id="i-barcode" viewBox="0 0 24 24"><path d="M3.5 5.5v13M7 5.5v13M10 5.5v13M14 5.5v13M17 5.5v13M20.5 5.5v13"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.75-4.75"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6.5 9H3.5v6h3L11 19z"/><path d="M15.5 9a4 4 0 0 1 0 6M18.5 6a8 8 0 0 1 0 12"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6.5 2.5 8.5 2.5 8.5h-17S6 15.5 6 9"/><path d="M10.25 20.5a2 2 0 0 0 3.5 0"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6.5 9.5 17 4 11.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.83 2.83 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v5.5M14 11v5.5"/><path d="M6 7l.9 12.1a1.5 1.5 0 0 0 1.5 1.4h7.2a1.5 1.5 0 0 0 1.5-1.4L18 7"/><path d="M9 7V4.5h6V7"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21l-4-7.5L3 9.5z"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11.5" height="11.5" rx="2.5"/><path d="M15 9V5.5A2 2 0 0 0 13 3.5H5.5a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2H9"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5V8H16"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6.5a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3.5M7 8.5l5-5 5 5"/><path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M15 20.5H5.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2V15z"/><path d="M15 20.5V15h5.5"/><path d="M8 8.5h8M8 12h5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.25 4.1 1 5.85L12 16.9l-5.25 2.75 1-5.85L3.5 9.7l5.9-.9z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9.5v4M12 17h.01"/><path d="M10.3 4 2.4 17.6A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-2.9L13.7 4a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7.5v9"/><path d="M6 7.5c0 3 2.5 4.5 6 4.5h4"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></symbol>
+  <symbol id="i-euro" viewBox="0 0 24 24"><path d="M18 6.5a7 7 0 1 0 0 11"/><path d="M4 10h9M4 14h9"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.3 8.3-8.7 8.7z"/><circle cx="8" cy="8" r="1.5"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3.5h6.5V10M20.5 3.5 11.5 12.5"/><path d="M18.5 14v4.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2H10"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4h12l-2 4 2 4H5"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4.5 3.5 6.5v13L9 17.5l6 2 5.5-2v-13L15 6.5z"/><path d="M9 4.5v13M15 6.5v13"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/></symbol>
+  <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></symbol>
+  <symbol id="i-navigation" viewBox="0 0 24 24"><path d="m3.5 11 17-7.5-7.5 17-2-7.5z"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5a1.5 1.5 0 0 1 1.4-1h9.2a1.5 1.5 0 0 1 1.4 1l2.5 8"/><path d="M3.5 13.5v5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-5h-5l-1.5 2.5h-4L8.5 13.5z"/></symbol>
+  <symbol id="i-party" viewBox="0 0 24 24"><path d="M4 20 8.5 7.5l8 8z"/><path d="M14 4.5c.8 1 .8 2.2 0 3.2M19.5 10c-1-.8-2.2-.8-3.2 0M17.5 3.5v1M20.5 6.5h-1M11 3.5l.5 1"/></symbol>
+</svg>
+
+<div class="bdx-fond" aria-hidden="true"></div>
+
+<header class="bdx-haut">
+  <a class="brand" href="/" title="Ouvrir le dashboard Drop">
+    <span class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></span>
+    <span class="brand-word">DROP<span class="brand-ext">.ctrl</span></span>
+  </a>
+  <span class="bdx-separateur" aria-hidden="true"></span>
+  <div class="bdx-titres">
+    <h1>Bordereaux</h1>
+    <p class="bdx-etat" id="bdx-etat"><span class="bdx-etat-point" aria-hidden="true"></span><span id="bdx-etat-texte">Étude des étiquettes et de leurs codes</span></p>
+  </div>
+  <div class="segmented bdx-onglets" role="tablist" aria-label="Bordereaux">
+          <button type="button" role="tab" class="seg is-on" id="bdx-onglet-etude" data-bdx-onglet="etude" aria-selected="true" aria-controls="bdx-gauche-etude"><svg class="icon"><use href="#i-file"/></svg>Étude des bordereaux</button>
+          <button type="button" role="tab" class="seg" id="bdx-onglet-recherche" data-bdx-onglet="recherche" aria-selected="false" aria-controls="bdx-gauche-recherche"><svg class="icon"><use href="#i-search"/></svg>Recherche / modifications</button>
+        </div>
+</header>
+
+<main class="bdx-page">
+      <div class="bdx-espace" id="bdx-espace" data-onglet="etude">
+        <label class="bdx-grande-recherche" id="bdx-grande-recherche" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="bdx-q" type="search" placeholder="Rechercher un numéro de suivi…" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" aria-label="Rechercher un numéro de suivi" aria-controls="bdx-resultats" />
+          <kbd class="bdx-touche" aria-hidden="true">/</kbd>
+        </label>
+
+        <div class="bdx-colonnes">
+          <!-- a gauche : les etiquettes (Etude) ou les resultats (Recherche) -->
+          <aside class="card bdx-gauche" aria-label="Étiquettes">
+            <div class="bdx-gauche-etude" id="bdx-gauche-etude" role="tabpanel" aria-labelledby="bdx-onglet-etude">
+              <label class="bdx-filtre-champ">
+                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                <input id="bdx-filtre" type="search" placeholder="Expéditeur ou fichier" autocomplete="off" spellcheck="false" aria-label="Filtrer les étiquettes" />
+              </label>
+              <div class="bdx-puces" id="bdx-filtres" role="radiogroup" aria-label="Étape">
+                <button type="button" role="radio" class="bdx-puce is-on" data-filtre="tous" aria-checked="true">Toutes</button>
+                <button type="button" role="radio" class="bdx-puce" data-filtre="a_imprimer" aria-checked="false">À imprimer</button>
+                <button type="button" role="radio" class="bdx-puce" data-filtre="imprimes" aria-checked="false">Imprimées</button>
+                <button type="button" role="radio" class="bdx-puce" data-filtre="deposes" aria-checked="false">Déposées</button>
+              </div>
+              <ul class="bdx-liste" id="bdx-liste" aria-label="Étiquettes"></ul>
+              <button class="btn btn-secondary btn-sm bdx-plus" id="bdx-plus" type="button" hidden>Plus d'étiquettes</button>
+            </div>
+            <div class="bdx-gauche-recherche" id="bdx-gauche-recherche" role="tabpanel" aria-labelledby="bdx-onglet-recherche" hidden>
+              <p class="bdx-recherche-info" id="bdx-recherche-info">Tape au moins 3 caractères : le numéro entier, son début, sa fin, ou avec une faute de frappe.</p>
+              <ul class="bdx-resultats" id="bdx-resultats" role="listbox" aria-label="Étiquettes trouvées"></ul>
+            </div>
+          </aside>
+
+          <!-- au centre : la visionneuse -->
+          <article class="bdx-visionneuse" id="bdx-visionneuse" aria-label="Visionneuse">
+            <div class="bdx-scene" id="bdx-scene" tabindex="0" aria-label="Étiquette (glisser pour déplacer, Ctrl + molette pour zoomer)">
+              <div class="bdx-feuille" id="bdx-feuille" hidden>
+                <canvas class="bdx-canvas" id="bdx-canvas"></canvas>
+                <img class="bdx-image" id="bdx-image" alt="" hidden />
+                <div class="bdx-scan" aria-hidden="true"></div>
+                <div class="bdx-zones" id="bdx-zones"></div>
+              </div>
+            </div>
+            <div class="bdx-barre" id="bdx-barre" role="toolbar" aria-label="Affichage" hidden>
+              <div class="bdx-groupe bdx-pages" id="bdx-pages">
+                <button class="bdx-outil" id="bdx-page-prec" type="button" aria-label="Page précédente"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+                <span class="bdx-page-texte" id="bdx-page-texte" aria-live="polite">1 / 1</span>
+                <button class="bdx-outil" id="bdx-page-suiv" type="button" aria-label="Page suivante"><svg class="icon"><use href="#i-arrow-right"/></svg></button>
+              </div>
+              <div class="bdx-groupe">
+                <button class="bdx-outil" id="bdx-zoom-moins" type="button" aria-label="Dézoomer"><svg class="icon"><use href="#i-minus"/></svg></button>
+                <button class="bdx-zoom-valeur" id="bdx-zoom-valeur" type="button" aria-label="Zoom (cliquer pour 100 %)">100 %</button>
+                <button class="bdx-outil" id="bdx-zoom-plus" type="button" aria-label="Zoomer"><svg class="icon"><use href="#i-plus"/></svg></button>
+              </div>
+              <div class="bdx-groupe">
+                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-largeur" type="button" aria-pressed="true" title="Ajuster à la largeur (0)">Largeur</button>
+                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-page" type="button" aria-pressed="false" title="Page entière (1)">Page</button>
+              </div>
+              <div class="bdx-groupe">
+                <button class="bdx-outil bdx-outil-texte" id="bdx-zones-toutes" type="button" aria-pressed="false" title="Montrer toutes les zones (Z)"><svg class="icon"><use href="#i-barcode"/></svg>Zones</button>
+              </div>
+            </div>
+            <div class="bdx-vide" id="bdx-vide">
+              <span class="bdx-vide-icone"><svg class="icon"><use href="#i-barcode"/></svg></span>
+              <b>Choisis une étiquette</b>
+              <span>Ses codes-barres et QR codes s'allument au survol : leur valeur, leur format, leur rôle.</span>
+            </div>
+            <div class="bdx-message" id="bdx-message" hidden></div>
+            <div class="bdx-bulle" id="bdx-bulle" role="tooltip" hidden></div>
+          </article>
+
+          <!-- a droite : l'etiquette, ses codes, ses actions -->
+          <aside class="card bdx-panneau" id="bdx-panneau" aria-label="Détails de l'étiquette" hidden></aside>
+        </div>
+      </div>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

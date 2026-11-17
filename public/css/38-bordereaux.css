@@ -4,31 +4,52 @@
    place a l'etiquette. Les zones des codes sont posees en pourcentage de la
    page : elles suivent le zoom et le deplacement sans jamais glisser. */
 
-.bdx-tete { grid-template-columns: minmax(0, 1fr) auto; }
-.bdx-onglets { align-self: end; }
+/* --- La page a part : sa barre, son fond -------------------------------------------- */
+.page-bdx { min-height: 100dvh; }
+.bdx-fond {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(1100px 620px at 12% -12%, rgb(var(--accent-rgb) / 0.17), transparent 62%),
+    radial-gradient(900px 560px at 100% 0%, rgb(var(--violet-700) / 0.16), transparent 60%),
+    radial-gradient(1200px 700px at 50% 120%, rgb(var(--violet-800) / 0.22), transparent 60%),
+    var(--bg);
+}
+.bdx-haut {
+  position: relative; z-index: 2; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  min-height: 76px; padding: 10px 24px; animation: bdx-descend var(--t-4) var(--ease-out) both;
+}
+.bdx-haut .brand { color: inherit; text-decoration: none; }
+@media (hover: hover) { .bdx-haut .brand:hover { background: rgb(255 255 255 / 0.05); } }
+.bdx-separateur { width: 1px; height: 30px; background: var(--line-2); }
+.bdx-titres { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bdx-titres h1 {
+  font: 760 26px/1.05 var(--font-display); letter-spacing: -0.035em;
+  background: var(--grad-text); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.bdx-onglets { margin-left: auto; }
 .bdx-onglets .seg { height: 36px; padding: 0 14px; font-size: 13.5px; }
 .bdx-onglets .seg .icon { width: 15px; height: 15px; }
 
-.bdx-etat { display: flex; align-items: center; gap: 8px; }
+.bdx-etat { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .bdx-etat-point { position: relative; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: rgb(var(--violet-300) / 0.5); }
 .bdx-etat.is-actif .bdx-etat-point { background: rgb(var(--violet-300)); box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.9); }
 .bdx-etat.is-actif .bdx-etat-point::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: ping 1.8s var(--ease-out) infinite; }
 
 /* --- L'espace de travail -------------------------------------------------------------- */
-.bdx-espace { --bdx-l: min(1720px, calc(100vw - 64px)); display: flex; flex-direction: column; gap: 12px; }
+.bdx-page { position: relative; z-index: 1; padding: 0 24px 18px; }
+.bdx-espace { display: flex; flex-direction: column; gap: 12px; animation: bdx-monte var(--t-5) var(--ease-out) 60ms both; }
 .bdx-colonnes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-height: 0; }
 
 @media (min-width: 1100px) {
-  /* l'en-tete et l'espace debordent ensemble de la colonne du site ;
-     --bdx-haut : ou commence l'espace (mesure a l'arrivee sur la page) */
-  .bdx-tete, .bdx-espace { width: var(--bdx-l); margin-left: calc(50% - var(--bdx-l) / 2); }
-  .bdx-tete { --bdx-l: min(1720px, calc(100vw - 64px)); }
-  .bdx-espace { height: max(600px, calc(100dvh - var(--bdx-haut, 240px) - 18px)); }
-  .bdx-colonnes { flex: 1; grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(300px, 340px); }
+  /* toute la fenetre, sans defilement de la page : chaque colonne defile
+     pour elle-meme (--bdx-haut : ou commence l'espace, mesure au demarrage) */
+  .page-bdx { height: 100dvh; overflow: hidden; }
+  .bdx-espace { height: max(560px, calc(100dvh - var(--bdx-haut, 86px) - 18px)); }
+  .bdx-colonnes { flex: 1; grid-template-columns: minmax(270px, 310px) minmax(0, 1fr) minmax(300px, 350px); }
   .bdx-gauche, .bdx-panneau { min-height: 0; overflow: hidden; }
   .bdx-panneau { overflow-y: auto; }
   /* sans panneau (aucune etiquette ouverte), la visionneuse prend la place */
-  .bdx-colonnes:has(.bdx-panneau[hidden]) { grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); }
+  .bdx-colonnes:has(.bdx-panneau[hidden]) { grid-template-columns: minmax(270px, 310px) minmax(0, 1fr); }
 }
 @media (min-width: 1100px) and (max-width: 1379px) {
   .bdx-colonnes { grid-template-columns: minmax(240px, 270px) minmax(0, 1fr) minmax(280px, 300px); }
@@ -66,6 +87,7 @@
 .bdx-grande-recherche.is-cherche::after { opacity: 1; animation: bdx-reflet 900ms linear infinite; }
 @keyframes bdx-reflet { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 @keyframes bdx-descend { from { opacity: 0; transform: translate3d(0, -8px, 0) scale(0.99); } }
+@keyframes bdx-monte { from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); } }
 
 /* --- La colonne de gauche ---------------------------------------------------------------- */
 .bdx-gauche { display: flex; flex-direction: column; padding: 12px; }
@@ -139,7 +161,6 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 16px 34px -20px rgb(0 0 0 / 0.95);
   animation: bdx-monte var(--t-4) var(--ease-out) both;
 }
-@keyframes bdx-monte { from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); } }
 .bdx-groupe { display: flex; align-items: center; gap: 2px; }
 .bdx-groupe + .bdx-groupe { padding-left: 6px; border-left: 1px solid rgb(255 255 255 / 0.08); }
 .bdx-groupe[hidden] { display: none; }

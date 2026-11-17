@@ -25,15 +25,21 @@ test("/app.js et /styles.css : les morceaux bout a bout, dans l'ordre, revalides
   // chaque morceau du site est bien inscrit (un fichier oublie ne serait jamais charge)
   for (const dossier of ["js", "css"]) {
     const inscrits = Object.values(PAQUETS).flatMap((p) => p.morceaux).filter((m) => m.startsWith(`${dossier}/`));
-    const presents = fs.readdirSync(path.join(__dirname, "..", "public", dossier)).map((f) => `${dossier}/${f}`);
+    // sous-dossiers compris (js/bdx/ : la page Bordereaux)
+    const presents = fs
+      .readdirSync(path.join(__dirname, "..", "public", dossier), { recursive: true, withFileTypes: true })
+      .filter((f) => f.isFile())
+      .map((f) => path.relative(path.join(__dirname, "..", "public"), path.join(f.parentPath, f.name)).split(path.sep).join("/"));
     assert.deepEqual(presents.sort(), inscrits.sort());
   }
 });
 
-test("le script assemble se lit d'un bloc (pas d'erreur de syntaxe a la jointure)", async () => {
-  const r = await app.appel("/app.js");
+test("les scripts assembles se lisent d'un bloc (pas d'erreur de syntaxe a la jointure)", async () => {
   const vm = require("vm");
-  assert.doesNotThrow(() => new vm.Script(r.texte, { filename: "app.js" }));
+  for (const nom of ["app.js", "bordereaux.js"]) {
+    const r = await app.appel(`/${nom}`);
+    assert.doesNotThrow(() => new vm.Script(r.texte, { filename: nom }));
+  }
 });
 
 test("en-tetes de securite : CSP sur la page, rien en ligne dans le HTML", async () => {

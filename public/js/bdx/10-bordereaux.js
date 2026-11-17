@@ -1,4 +1,5 @@
 // --- Bordereaux — étude et recherche ------------------------------------------------
+// Une page a part du dashboard (/bordereaux, dans son propre onglet).
 // Les etiquettes deja dans FeurDrop, affichees telles quelles (pdf.js pour les
 // PDF, l'image sinon), et leurs codes lus par le serveur (/api/bordereaux) :
 // chaque code-barre ou QR code est une zone posee sur la page, en pourcentage
@@ -105,7 +106,6 @@ async function bdxChargeEtat() {
     const enFond = e.indexation?.active && e.indexation.restants > 0;
     $("bdx-etat").classList.toggle("is-actif", Boolean(enFond));
     $("bdx-etat").title = enFond ? `Lecture en fond : encore ${e.indexation.restants} étiquette(s) récente(s)` : `Étiquettes des ${e.indexation?.jours || 45} derniers jours lues en fond ; les plus anciennes, à la première ouverture`;
-    $("bordereaux-link-sub").textContent = `${pluriel(e.codes, "code indexé", "codes indexés")} · recherche d'un numéro`;
   } catch {
     /* l'etat n'est qu'indicatif */
   }
@@ -177,6 +177,7 @@ function bdxMajLigne(id, detail) {
     const b = liste.find((x) => x.id === id);
     if (b) b.index = index;
   }
+  if (index.etat === "analyse") document.querySelector(`#bdx-resultats [data-bdx-id="${id}"] .bdx-res-pas-lue`)?.remove();
   const bouton = document.querySelector(`#bdx-liste [data-bdx-ouvre="${id}"] .bdx-ligne-meta`);
   if (bouton) bouton.innerHTML = `${bdxBadge(index)}<time>${escapeHtml(bdxDate(bdx.liste.find((x) => x.id === id)?.recuLe))}</time>`;
 }
@@ -853,9 +854,6 @@ function bdxReajuste() {
 
 // --- Branchements --------------------------------------------------------------------------
 
-$("bordereaux-link").addEventListener("click", () => switchView("bordereaux"));
-$("bordereaux-back").addEventListener("click", () => switchView("dashboard"));
-
 document.querySelectorAll("[data-bdx-onglet]").forEach((b) => b.addEventListener("click", () => bdxOnglet(b.dataset.bdxOnglet)));
 
 $("bdx-filtres").addEventListener("click", (e) => {
@@ -1084,7 +1082,6 @@ if ("ResizeObserver" in window) {
 
 // clavier : pages, zoom, recherche (seulement sur cette page, hors saisie)
 document.addEventListener("keydown", (e) => {
-  if (currentView !== "bordereaux") return;
   const saisie = e.target.closest?.("input, textarea, select, [contenteditable]");
   if (saisie) return;
   if (e.key === "/" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f")) {
@@ -1116,28 +1113,37 @@ document.addEventListener("keydown", (e) => {
   action();
 });
 
-// --- Arrivee et depart ----------------------------------------------------------------------
+// --- Demarrage --------------------------------------------------------------------------
+// L'adresse peut viser une etiquette ou un numero : /bordereaux?colis=123,
+// /bordereaux?q=6A123.
 
 // la hauteur de l'espace : jusqu'en bas de la fenetre, la page ne defile pas
 function bdxMesureHaut() {
   const espace = $("bdx-espace");
-  // offsetTop : sans les transformations de l'animation d'entree
   let haut = 0;
   for (let el = espace; el; el = el.offsetParent) haut += el.offsetTop;
   if (haut > 0) espace.style.setProperty("--bdx-haut", `${Math.round(haut)}px`);
 }
+window.addEventListener("resize", bdxMesureHaut, { passive: true });
 
-function arriveeBordereaux() {
+function bdxDemarre() {
   bdxMesureHaut();
   bdxChargeEtat();
-  if (!bdx.liste.length) bdxChargeListe();
-  clearInterval(bdx.minuteurEtat);
-  bdx.minuteurEtat = setInterval(bdxChargeEtat, 15000);
-  requestAnimationFrame(bdxReajuste);
+  bdxChargeListe();
+  setInterval(() => {
+    if (!document.hidden) bdxChargeEtat();
+  }, 15000);
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q");
+  const colis = Number(params.get("colis"));
+  if (q) {
+    bdxOnglet("recherche", { focus: false });
+    $("bdx-q").value = q;
+    bdxCherche(q).then(() => {
+      if (!colis && bdx.resultats.length) bdxOuvreResultat(0);
+    });
+  }
+  if (Number.isInteger(colis) && colis > 0) bdxOuvre(colis, { recherche: q || null });
 }
 
-function departBordereaux() {
-  clearInterval(bdx.minuteurEtat);
-  bdx.minuteurEtat = null;
-  bdxCacheBulle();
-}
+bdxDemarre();

@@ -58,7 +58,8 @@ before(async () => {
 });
 after(async () => {
   await app.ferme();
-  await faux.ferme();
+  // le bot interroge encore le faux Telegram : on ne l'attend pas
+  faux.ferme();
 });
 beforeEach(() => {
   videBase();
@@ -319,4 +320,25 @@ test("l'indexation en fond lit les etiquettes recentes, puis s'arrete", async ()
   const etat = (await app.appel("/api/bordereaux/etat")).json;
   assert.equal(etat.analysees, 2);
   assert.equal(etat.codes, 3);
+});
+
+test("une page a part : /bordereaux (sa page, son script), derriere la session", async () => {
+  const sans = await app.appel("/bordereaux", { anonyme: true });
+  assert.equal(sans.status, 302);
+  assert.match(sans.entetes.get("location"), /\/connexion/);
+  const page = await app.appel("/bordereaux");
+  assert.equal(page.status, 200);
+  assert.match(page.texte, /<h1>Bordereaux<\/h1>/);
+  assert.match(page.texte, /src="bordereaux\.js"/);
+  assert.match(page.entetes.get("content-security-policy"), /script-src 'self'/);
+  // le dashboard ne l'embarque plus : il l'ouvre a part
+  const dashboard = await app.appel("/");
+  assert.ok(!dashboard.texte.includes('id="view-bordereaux"'));
+  assert.match(dashboard.texte, /href="\/bordereaux" target="_blank"/);
+  const script = await app.appel("/bordereaux.js");
+  assert.equal(script.status, 200);
+  assert.match(script.texte, /function bdxOuvre/);
+  assert.ok(!(await app.appel("/app.js")).texte.includes("function bdxOuvre"));
+  // un fichier sans session : refuse (seules les pages renvoient a la connexion)
+  assert.equal((await app.appel("/bordereaux.js", { anonyme: true })).status, 401);
 });

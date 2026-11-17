@@ -560,6 +560,8 @@ button.metric:active { transform: scale(0.97); transition-duration: 80ms; }
    dessous (« 138 colis à regarder ») et faisait passer le titre sur deux
    lignes. Elle s'efface, le compte reste lisible juste en dessous. */
 .tools .tool { container-type: inline-size; }
+/* un outil qui ouvre une page a part (Bordereaux) est un lien */
+a.tool { text-decoration: none; }
 @container (max-width: 300px) {
   .tool-badge { display: none; }
 }

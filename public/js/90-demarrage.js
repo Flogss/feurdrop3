@@ -41,7 +41,6 @@ async function demarre() {
                 ? loadJournal()
                 : refreshAll();
   if (["imprime", "special", "suivi", "depots", "historique"].includes(initiale)) refreshAll().catch(() => {});
-  if (initiale === "bordereaux") arriveeBordereaux();
 
   if (lancement) {
     await lancement.revelation;

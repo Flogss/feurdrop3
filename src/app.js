@@ -36,7 +36,7 @@ function creeApp() {
   const auth = require("./auth");
   const { DOMAINE_PORTAIL } = require("./portail");
   const { gestionErreurs } = require("./http");
-  const { entetesSecurite, entetesFichier } = require("./securite");
+  const { entetesSecurite, entetesFichier, CSP_DASHBOARD } = require("./securite");
   const { servirPaquets } = require("./assemblage");
   const PUBLIC = path.join(__dirname, "..", "public");
 
@@ -94,7 +94,11 @@ function creeApp() {
   // --- 3. les pages et fichiers du dashboard : session obligatoire ------------------
   app.use(auth.exigeSessionPage);
   // /app.js : assemble depuis public/js/ (voir assemblage.js)
-  app.use(servirPaquets({ seulement: ["app.js"] }));
+  app.use(servirPaquets({ seulement: ["app.js", "bordereaux.js"] }));
+  // les bordereaux : une page a part du dashboard, a sa propre adresse
+  app.get("/bordereaux", (req, res) =>
+    res.sendFile(path.join(PUBLIC, "bordereaux.html"), { headers: { "Content-Security-Policy": CSP_DASHBOARD, "Cache-Control": "no-cache" } })
+  );
   // la visionneuse des bordereaux : pdf.js tel qu'installe (node_modules),
   // deux fichiers et ses polices standard, rien d'autre du paquet
   const PDFJS = path.dirname(require.resolve("pdfjs-dist/package.json"));

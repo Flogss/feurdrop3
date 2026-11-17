@@ -29,10 +29,16 @@ const PAQUETS = {
       "js/72-heures-drop.js", // heures de drop (a cote de « En direct »)
       "js/75-depots.js", // controle des depots
       "js/77-itineraire.js", // itineraire boites jaunes (carte Leaflet chargee a la demande)
-      "js/78-bordereaux.js", // etude des bordereaux (pdf.js charge a la demande)
       "js/80-locker.js",
       "js/90-demarrage.js",
     ],
+  },
+  // la page Bordereaux, a part du dashboard (/bordereaux) : ses outils et sa
+  // visionneuse seulement (pdf.js charge a la demande) ; ses styles sont dans
+  // styles.css, comme ceux du site
+  "bordereaux.js": {
+    type: "application/javascript; charset=UTF-8",
+    morceaux: ["js/bdx/00-outils.js", "js/bdx/10-bordereaux.js"],
   },
   "styles.css": {
     type: "text/css; charset=UTF-8",
