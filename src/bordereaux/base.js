@@ -230,11 +230,22 @@ function empreinteDuFileId(fileId) {
   );
 }
 
-/** Tous les liens (pour l'indexation en fond et la liste). */
-const tousLesLiens = () =>
-  ouvre()
-    .prepare("SELECT cf.colis_id, cf.file_id, cf.empreinte, cf.erreur, cf.essais, f.version FROM colis_fichiers cf LEFT JOIN fichiers f ON f.empreinte = cf.empreinte")
-    .all();
+// Une liste d'identifiants ou d'empreintes, en un seul parametre : la liste
+// des bordereaux ne lit que l'index de SA page (60 etiquettes), jamais tout.
+const DANS = "(SELECT value FROM json_each(?))";
+const restreint = (sql, colonne, valeurs, suite = "") =>
+  valeurs ? ouvre().prepare(`${sql} WHERE ${colonne} IN ${DANS}${suite}`).all(JSON.stringify([...valeurs])) : ouvre().prepare(`${sql}${suite}`).all();
+
+/**
+ * Les liens etiquette -> fichier lu (pour l'indexation en fond, la liste et
+ * la recherche). `colisIds` : seulement ceux de ces etiquettes (sinon tous).
+ */
+const tousLesLiens = (colisIds = null) =>
+  restreint(
+    "SELECT cf.colis_id, cf.file_id, cf.empreinte, cf.erreur, cf.essais, f.version FROM colis_fichiers cf LEFT JOIN fichiers f ON f.empreinte = cf.empreinte",
+    "cf.colis_id",
+    colisIds
+  );
 
 /** Les codes lisibles et leur colis, pour la recherche. */
 const codesIndexes = () =>
@@ -252,11 +263,9 @@ const nombreCodes = () =>
     .prepare("SELECT COUNT(*) AS n FROM codes c JOIN colis_fichiers cf ON cf.empreinte = c.empreinte WHERE c.lisible = 1")
     .get().n;
 
-/** Nombre de codes par empreinte (lisibles, illisibles). */
-const resumeCodes = () =>
-  ouvre()
-    .prepare("SELECT empreinte, SUM(lisible) AS lisibles, SUM(1 - lisible) AS illisibles, COUNT(*) AS total FROM codes GROUP BY empreinte")
-    .all();
+/** Nombre de codes par empreinte (lisibles, illisibles). `empreintes` : seulement celles-la. */
+const resumeCodes = (empreintes = null) =>
+  restreint("SELECT empreinte, SUM(lisible) AS lisibles, SUM(1 - lisible) AS illisibles, COUNT(*) AS total FROM codes", "empreinte", empreintes, " GROUP BY empreinte");
 
 /** La note d'etude d'une etiquette : { texte, modifieLe } ou null. */
 function annotation(colisId) {
@@ -348,10 +357,10 @@ function classe(colisId, categorieId) {
   return categorie(categorieId);
 }
 
-/** colis_id -> categorie, pour une liste d'etiquettes. */
-function categoriesDesColis() {
+/** colis_id -> categorie, pour une liste d'etiquettes (`colisIds` : seulement celles-la). */
+function categoriesDesColis(colisIds = null) {
   const parId = new Map(ouvre().prepare("SELECT * FROM categories").all().map((c) => [c.id, categorieLue(c)]));
-  return new Map(ouvre().prepare("SELECT colis_id, categorie_id FROM colis_categories").all().map((r) => [r.colis_id, parId.get(r.categorie_id) || null]));
+  return new Map(restreint("SELECT colis_id, categorie_id FROM colis_categories", "colis_id", colisIds).map((r) => [r.colis_id, parId.get(r.categorie_id) || null]));
 }
 
 /** Les colis d'une categorie. */
@@ -375,7 +384,8 @@ function gardeTravail(colisId, modele) {
 
 const effaceTravail = (colisId) => ouvre().prepare("DELETE FROM travaux WHERE colis_id = ?").run(colisId).changes > 0;
 
-const resumeFichiers = () => ouvre().prepare("SELECT empreinte, type, pages, version, erreur, analyse_le FROM fichiers").all();
+/** L'etat des fichiers lus (`empreintes` : seulement ceux-la). */
+const resumeFichiers = (empreintes = null) => restreint("SELECT empreinte, type, pages, version, erreur, analyse_le FROM fichiers", "empreinte", empreintes);
 
 module.exports = {
   ouvre,

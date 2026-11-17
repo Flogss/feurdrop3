@@ -78,6 +78,16 @@ test("trop d'essais avec de faux liens : 429", async () => {
   assert.equal(autre.status, 404);
 });
 
+test("trop d'essais sur la progression de l'actualisation : 429 aussi", async () => {
+  let dernier = null;
+  for (let i = 0; i < 32; i++) {
+    dernier = await app.appel(`/api/portail/${"y".repeat(23)}${String(i).padStart(2, "0")}/actualisation`, {
+      entetes: { "X-Forwarded-For": "203.0.113.9" },
+    });
+  }
+  assert.equal(dernier.status, 429);
+});
+
 test("l'etape d'un colis suit le dashboard (a imprimer, imprime, en drop, drope)", async () => {
   const aImprimer = db.addColis("Alice", { fileId: "1", fileKind: "pdf", carrier: "MR" });
   const imprime = db.addColis("Alice", { fileId: "2", fileKind: "pdf", carrier: "MR" });

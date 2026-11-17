@@ -134,6 +134,26 @@ test("montants : prix invalides refuses par l'API", async () => {
   const ok = await app.appel("/api/senders", { methode: "POST", corps: { name: "Bob", price: 4.555, litPrice: 6, bjPrice: 4 } });
   assert.equal(ok.status, 200);
   assert.equal(ok.json.price, 4.56);
+
+  // vide, null, infini ou texte : refuses (ils devenaient 0 € sans rien dire)
+  for (const mauvais of ["", "   ", null, "Infinity", "1e400", "abc", true, [], {}]) {
+    const cree = await app.appel("/api/senders", { methode: "POST", corps: { name: "Carla", price: mauvais } });
+    assert.equal(cree.status, 400, `creation avec ${JSON.stringify(mauvais)}`);
+    for (const champ of ["price", "litPrice", "bjPrice", "kgPrice"]) {
+      const maj = await app.appel(`/api/senders/${ok.json.id}`, { methode: "PUT", corps: { [champ]: mauvais } });
+      assert.equal(maj.status, 400, `${champ} = ${JSON.stringify(mauvais)}`);
+    }
+  }
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM senders WHERE name = 'Carla'").get().n, 0);
+  const bob = db.db.prepare("SELECT price, lit_price, bj_price, kg_price FROM senders WHERE id = ?").get(ok.json.id);
+  assert.deepEqual({ ...bob }, { price: 4.56, lit_price: 6, bj_price: 4, kg_price: bob.kg_price });
+  assert.ok(bob.kg_price > 0);
+
+  // un nombre en texte reste accepte (« 3.5 »), zero aussi
+  const texte = await app.appel(`/api/senders/${ok.json.id}`, { methode: "PUT", corps: { price: " 3.5 ", bjPrice: 0 } });
+  assert.equal(texte.status, 200);
+  assert.equal(texte.json.price, 3.5);
+  assert.equal(texte.json.bj_price, 0);
 });
 
 // --- Transactions ---------------------------------------------------------------
@@ -238,6 +258,8 @@ test("+n colis par l'API : une panne libere la cle, le nouvel essai ajoute bien 
   const entetes = { "Idempotency-Key": "cle-unique-2" };
   const r1 = await app.appel("/api/colis/quick-add/Alice", { methode: "POST", corps: { n: 3 }, entetes });
   assert.equal(r1.status, 500);
+  // le message interne (ici celui de SQLite) reste dans les journaux, pas dans la reponse
+  assert.equal(r1.json.error, "Erreur interne");
   assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM colis").get().n, 0, "rien n'est reste de l'essai rate");
   db.db.exec("DROP TRIGGER panne");
   const r2 = await app.appel("/api/colis/quick-add/Alice", { methode: "POST", corps: { n: 3 }, entetes });

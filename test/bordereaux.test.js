@@ -343,6 +343,49 @@ test("une page a part : /bordereaux (sa page, son script), derriere la session",
   assert.equal((await app.appel("/bordereaux.js", { anonyme: true })).status, 401);
 });
 
+test("liste : chaque page ne lit que l'index de SES etiquettes, avec le meme resultat", async () => {
+  const pdf = await etiquettePdf([PAGE_COMPLETE]);
+  const a = colisAvecFichier("Alice", "6A99887766554.pdf", pdf);
+  await app.appel(`/api/bordereaux/${a.id}/analyse`, { methode: "POST", corps: {} });
+  const { categorie } = bordereaux.creeCategorie("Retours", "rose");
+  bordereaux.classe(a.id, categorie.id);
+  const b = colisAvecFichier("Bob", "b.pdf", pdf);
+  const c = colisAvecFichier("Carla", "c.pdf", pdf);
+
+  // ce que la liste demande a l'index
+  const demandes = {};
+  const espions = ["tousLesLiens", "resumeCodes", "resumeFichiers", "categoriesDesColis"];
+  const originaux = Object.fromEntries(espions.map((nom) => [nom, base[nom]]));
+  for (const nom of espions) {
+    base[nom] = (valeurs) => {
+      demandes[nom] = valeurs;
+      return originaux[nom](valeurs);
+    };
+  }
+  try {
+    const page1 = bordereaux.liste({ limite: 2 });
+    assert.deepEqual(page1.bordereaux.map((x) => x.id), [c.id, b.id]);
+    assert.deepEqual(demandes.tousLesLiens, [c.id, b.id], "les liens de la page seulement");
+    assert.deepEqual(demandes.categoriesDesColis, [c.id, b.id]);
+    assert.deepEqual(demandes.resumeCodes, [], "aucune etiquette lue sur cette page : aucun code a relire");
+    assert.deepEqual(page1.bordereaux.map((x) => [x.index.etat, x.categorie]), [["attente", null], ["attente", null]]);
+
+    const page2 = bordereaux.liste({ limite: 2, decalage: page1.decalageSuivant });
+    assert.deepEqual(page2.bordereaux.map((x) => x.id), [a.id]);
+    const empreinte = base.tousLesLiens([a.id])[0].empreinte;
+    assert.deepEqual(demandes.resumeCodes, [empreinte]);
+    assert.deepEqual(demandes.resumeFichiers, [empreinte]);
+    // le resultat d'avant : l'etat de l'index et la categorie de l'etiquette
+    assert.deepEqual(page2.bordereaux[0].index, { etat: "analyse", pages: 1, lisibles: 3, illisibles: 0 });
+    assert.equal(page2.bordereaux[0].categorie.nom, "Retours");
+  } finally {
+    Object.assign(base, originaux);
+  }
+  // sans restriction, les fonctions rendent toujours tout (indexation en fond, etat)
+  assert.equal(base.tousLesLiens().length, 1);
+  assert.equal(base.categoriesDesColis().size, 1);
+});
+
 test("tris et filtres : par transporteur, a partir d'un jour, plus anciennes ; la suite par pages", async () => {
   const pdf = Buffer.from("%PDF-1.4 test");
   const ids = {};

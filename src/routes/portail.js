@@ -52,10 +52,16 @@ router.post("/:jeton/actualisation", (req, res) => {
   res.status(etat.refuse ? 429 : 202).json(etat);
 });
 
+// (la progression : le meme limiteur que les autres routes du portail -- un
+// faux lien compte comme un echec, un vrai n'est jamais freine)
 router.get("/:jeton/actualisation", (req, res) => {
   res.set(ENTETES);
+  if (essais.bloque(req.ip)) return res.status(429).json({ error: "Trop d'essais. Réessaie dans un quart d'heure." });
   const etat = etatActualisationPortail(req.params.jeton);
-  if (!etat) return res.status(404).json({ error: "Ce lien n'est pas valide, ou n'est plus actif." });
+  if (!etat) {
+    essais.echec(req.ip);
+    return res.status(404).json({ error: "Ce lien n'est pas valide, ou n'est plus actif." });
+  }
   res.json(etat);
 });
 

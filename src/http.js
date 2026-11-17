@@ -34,7 +34,13 @@ function gestionErreurs(err, req, res, next) {
   let message = err.message || "Erreur interne";
   if (err.type === "entity.too.large") message = `Requête trop volumineuse (maximum ${tailleLisible(err.limit)})`;
   else if (err.type === "entity.parse.failed") message = "Corps de requête JSON illisible";
-  if (status >= 500) console.error(`[http] ${req.method} ${req.originalUrl} :`, err.stack || err.message);
+  if (status >= 500) {
+    // le detail (message SQL, chemin de fichier, pile) reste dans les
+    // journaux : la reponse, qui peut partir vers une page publique (le
+    // portail), n'en dit rien -- sauf erreur faite pour etre lue (expose)
+    console.error(`[http] ${req.method} ${req.originalUrl} :`, err.stack || err.message);
+    if (err.expose !== true) message = "Erreur interne";
+  }
   res.status(status).json({ error: message });
 }
 

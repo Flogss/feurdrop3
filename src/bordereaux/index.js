@@ -242,7 +242,7 @@ function detail(colisId) {
   const f = lien && lien.file_id === colis.file_id && lien.empreinte ? base.fichier(lien.empreinte) : null;
   const resume = resumeColis(colis);
   const analyse = f && f.version === VERSION_ANALYSE ? vueAnalyse(f, colis, resume.suivi) : { etat: lien?.erreur ? "echec" : "attente", erreur: lien?.erreur || null };
-  return { colis: resume, note: colis.note || null, annotation: base.annotation(colis.id), categorie: base.categoriesDesColis().get(colis.id) || null, analyse };
+  return { colis: resume, note: colis.note || null, annotation: base.annotation(colis.id), categorie: base.categoriesDesColis([colis.id]).get(colis.id) || null, analyse };
 }
 
 async function analyseEtDetail(colisId, options) {
@@ -279,6 +279,19 @@ const FILTRES = {
   imprimes: " AND status = 'pending' AND printed_at IS NOT NULL",
   deposes: " AND status = 'dropped'",
 };
+
+// L'index d'un lot d'etiquettes (une page de la liste, les resultats d'une
+// recherche) : leurs liens, leurs fichiers et leurs codes, et rien d'autre --
+// tout relire a chaque page ralentissait la liste a mesure que l'index grossit.
+function indexDesColis(ids) {
+  const lus = base.tousLesLiens(ids);
+  const empreintes = [...new Set(lus.map((l) => l.empreinte).filter(Boolean))];
+  return {
+    liens: new Map(lus.map((l) => [l.colis_id, l])),
+    resumes: new Map(base.resumeCodes(empreintes).map((r) => [r.empreinte, r])),
+    fichiers: new Map(base.resumeFichiers(empreintes).map((f) => [f.empreinte, f])),
+  };
+}
 
 function etatIndex(c, liens, resumes, fichiers) {
   const l = liens.get(c.id);
@@ -362,10 +375,9 @@ function liste(options = {}) {
     .all(...pNoms, ...p, limite + 1, decalage);
   const plus = lignes.length > limite;
   const page = lignes.slice(0, limite);
-  const liens = new Map(base.tousLesLiens().map((l) => [l.colis_id, l]));
-  const resumes = new Map(base.resumeCodes().map((r) => [r.empreinte, r]));
-  const fichiers = new Map(base.resumeFichiers().map((f) => [f.empreinte, f]));
-  const classees = base.categoriesDesColis();
+  const ids = page.map((c) => c.id);
+  const { liens, resumes, fichiers } = indexDesColis(ids);
+  const classees = base.categoriesDesColis(ids);
   // les transporteurs presents (avec les autres filtres) : le choix du filtre
   const sansTransporteur = conditions({ ...options, transporteur: null });
   const transporteurs = db
@@ -448,9 +460,7 @@ function recherche(q) {
     const lot = ids.slice(i, i + 500);
     for (const c of db.prepare(`SELECT * FROM colis WHERE id IN (${lot.map(() => "?").join(",")})`).all(...lot)) colis.set(c.id, c);
   }
-  const liens = new Map(base.tousLesLiens().map((l) => [l.colis_id, l]));
-  const resumes = new Map(base.resumeCodes().map((r) => [r.empreinte, r]));
-  const fichiers = new Map(base.resumeFichiers().map((f) => [f.empreinte, f]));
+  const { liens, resumes, fichiers } = indexDesColis(ids);
   const resultats = ids
     .filter((id) => colis.has(id))
     .map((id) => {

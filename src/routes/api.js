@@ -606,19 +606,24 @@ router.post("/senders/merge", (req, res) => {
   }
 });
 
+// Un prix envoye par le site ou l'app : un nombre fini et positif (ou une
+// chaine qui en est un). "" , null, "Infinity" ou "abc" sont refuses -- ils
+// devenaient 0 € sans rien dire (Number("") vaut 0, et arrondiCentimes
+// ramene l'infini a 0). Renvoie le nombre, ou null s'il est invalide.
+function prixLu(valeur) {
+  if (typeof valeur === "number") return Number.isFinite(valeur) && valeur >= 0 ? valeur : null;
+  if (typeof valeur !== "string" || !valeur.trim()) return null;
+  const n = Number(valeur.trim());
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 router.post("/senders", (req, res) => {
   const name = (req.body.name || "").trim();
-  const price = Number(req.body.price);
-  const litPrice = req.body.litPrice === undefined ? DEFAULT_LIT_PRICE : Number(req.body.litPrice);
-  const bjPrice = req.body.bjPrice === undefined ? price : Number(req.body.bjPrice);
-  const kgPrice = req.body.kgPrice === undefined ? DEFAULT_KG_PRICE : Number(req.body.kgPrice);
-  if (
-    !name ||
-    Number.isNaN(price) || price < 0 ||
-    Number.isNaN(litPrice) || litPrice < 0 ||
-    Number.isNaN(bjPrice) || bjPrice < 0 ||
-    Number.isNaN(kgPrice) || kgPrice < 0
-  ) {
+  const price = prixLu(req.body.price);
+  const litPrice = req.body.litPrice === undefined ? DEFAULT_LIT_PRICE : prixLu(req.body.litPrice);
+  const bjPrice = req.body.bjPrice === undefined ? price : prixLu(req.body.bjPrice);
+  const kgPrice = req.body.kgPrice === undefined ? DEFAULT_KG_PRICE : prixLu(req.body.kgPrice);
+  if (!name || price === null || litPrice === null || bjPrice === null || kgPrice === null) {
     return res.status(400).json({ error: "Nom ou prix invalide" });
   }
   try {
@@ -638,25 +643,12 @@ router.post("/senders", (req, res) => {
 
 router.put("/senders/:id", (req, res) => {
   const patch = {};
-  if (req.body.price !== undefined) {
-    const price = Number(req.body.price);
-    if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: "Prix invalide" });
-    patch.price = price;
-  }
-  if (req.body.litPrice !== undefined) {
-    const litPrice = Number(req.body.litPrice);
-    if (Number.isNaN(litPrice) || litPrice < 0) return res.status(400).json({ error: "Prix LIT invalide" });
-    patch.litPrice = litPrice;
-  }
-  if (req.body.bjPrice !== undefined) {
-    const bjPrice = Number(req.body.bjPrice);
-    if (Number.isNaN(bjPrice) || bjPrice < 0) return res.status(400).json({ error: "Prix BJ invalide" });
-    patch.bjPrice = bjPrice;
-  }
-  if (req.body.kgPrice !== undefined) {
-    const kgPrice = Number(req.body.kgPrice);
-    if (Number.isNaN(kgPrice) || kgPrice < 0) return res.status(400).json({ error: "Prix du kilo invalide" });
-    patch.kgPrice = kgPrice;
+  const erreurs = { price: "Prix invalide", litPrice: "Prix LIT invalide", bjPrice: "Prix BJ invalide", kgPrice: "Prix du kilo invalide" };
+  for (const [champ, erreur] of Object.entries(erreurs)) {
+    if (req.body[champ] === undefined) continue;
+    const valeur = prixLu(req.body[champ]);
+    if (valeur === null) return res.status(400).json({ error: erreur });
+    patch[champ] = valeur;
   }
   const sender = updateSenderPrices(req.params.id, patch);
   if (!sender) return res.status(404).json({ error: "Expediteur introuvable" });

@@ -45,7 +45,8 @@ const ico = (nom, classe = "") =>
   `<svg class="icon${classe ? ` ${classe}` : ""}" aria-hidden="true"><use href="#i-${nom}"/></svg>`;
 
 function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // null / undefined : rien (et non « null » a l'ecran), comme sur les pages bordereaux
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 function escapeAttr(str) { return escapeHtml(str); }
 
@@ -233,13 +234,14 @@ const TOAST_ICONES = { success: "check", error: "alert", info: "info" };
 function toast(message, type = "success", duree = type === "error" ? 5200 : 3400, { lien } = {}) {
   const pile = $("toasts");
   const el = document.createElement(lien ? "a" : "div");
+  // la classe d'abord : `className =` remplacerait celles posees avant
+  el.className = `toast toast-${type}`;
   if (lien) {
     el.href = lien;
     el.target = "_blank";
     el.rel = "noopener";
     el.classList.add("toast-lien");
   }
-  el.className = `toast toast-${type}`;
   el.setAttribute("role", type === "error" ? "alert" : "status");
   el.innerHTML = `<span class="toast-icon">${ico(TOAST_ICONES[type] || "info")}</span><span></span><span class="toast-temps"></span>`;
   el.children[1].textContent = message;
