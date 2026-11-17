@@ -79,6 +79,21 @@ function ouvre() {
       texte TEXT NOT NULL,
       modifie_le TEXT NOT NULL
     );
+    -- les categories de l'utilisateur (« Retours », « À vérifier »...) :
+    -- un classement a part, jamais ecrit dans les etiquettes ni les colis
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY,
+      nom TEXT NOT NULL,
+      couleur TEXT NOT NULL,
+      cree_le TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS categories_nom ON categories(nom COLLATE NOCASE);
+    CREATE TABLE IF NOT EXISTS colis_categories (
+      colis_id INTEGER PRIMARY KEY,
+      categorie_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      classe_le TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS colis_categories_cat ON colis_categories(categorie_id);
   `);
   return base;
 }
@@ -255,6 +270,87 @@ function annote(colisId, texte) {
   return annotation(colisId);
 }
 
+// --- Categories -------------------------------------------------------------------------
+
+const COULEURS = ["violet", "bleu", "turquoise", "vert", "jaune", "orange", "rose", "rouge", "gris"];
+
+const categorieLue = (c) => (c ? { id: c.id, nom: c.nom, couleur: c.couleur } : null);
+
+function categories() {
+  return ouvre()
+    .prepare(
+      `SELECT c.id, c.nom, c.couleur, COUNT(cc.colis_id) AS n FROM categories c
+       LEFT JOIN colis_categories cc ON cc.categorie_id = c.id GROUP BY c.id ORDER BY c.nom COLLATE NOCASE`
+    )
+    .all()
+    .map((c) => ({ ...categorieLue(c), etiquettes: c.n }));
+}
+
+const categorie = (id) => categorieLue(ouvre().prepare("SELECT * FROM categories WHERE id = ?").get(id));
+
+function nomPropre(nom) {
+  // eslint-disable-next-line no-control-regex -- on retire justement les caracteres de controle
+  return String(nom || "").replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
+/** Cree une categorie : { categorie } ou { erreur }. */
+function creeCategorie(nom, couleur) {
+  const propre = nomPropre(nom);
+  if (!propre) return { erreur: "Donne un nom à la catégorie." };
+  const c = COULEURS.includes(couleur) ? couleur : COULEURS[categories().length % COULEURS.length];
+  try {
+    const r = ouvre().prepare("INSERT INTO categories (nom, couleur, cree_le) VALUES (?, ?, ?)").run(propre, c, maintenant());
+    return { categorie: categorie(Number(r.lastInsertRowid)) };
+  } catch (err) {
+    if (/UNIQUE/.test(err.message)) return { erreur: "Cette catégorie existe déjà." };
+    throw err;
+  }
+}
+
+function modifieCategorie(id, { nom, couleur } = {}) {
+  if (!categorie(id)) return { erreur: "Catégorie introuvable.", status: 404 };
+  if (nom !== undefined) {
+    const propre = nomPropre(nom);
+    if (!propre) return { erreur: "Donne un nom à la catégorie." };
+    try {
+      ouvre().prepare("UPDATE categories SET nom = ? WHERE id = ?").run(propre, id);
+    } catch (err) {
+      if (/UNIQUE/.test(err.message)) return { erreur: "Cette catégorie existe déjà." };
+      throw err;
+    }
+  }
+  if (couleur !== undefined && COULEURS.includes(couleur)) ouvre().prepare("UPDATE categories SET couleur = ? WHERE id = ?").run(couleur, id);
+  return { categorie: categorie(id) };
+}
+
+/** Supprime une categorie : ses etiquettes restent, simplement sans categorie. */
+function supprimeCategorie(id) {
+  return ouvre().prepare("DELETE FROM categories WHERE id = ?").run(id).changes > 0;
+}
+
+/** Classe (ou declasse, null) une etiquette. */
+function classe(colisId, categorieId) {
+  if (categorieId == null) {
+    ouvre().prepare("DELETE FROM colis_categories WHERE colis_id = ?").run(colisId);
+    return null;
+  }
+  if (!categorie(categorieId)) return undefined;
+  ouvre()
+    .prepare("INSERT INTO colis_categories (colis_id, categorie_id, classe_le) VALUES (?, ?, ?) ON CONFLICT(colis_id) DO UPDATE SET categorie_id = excluded.categorie_id, classe_le = excluded.classe_le")
+    .run(colisId, categorieId, maintenant());
+  return categorie(categorieId);
+}
+
+/** colis_id -> categorie, pour une liste d'etiquettes. */
+function categoriesDesColis() {
+  const parId = new Map(ouvre().prepare("SELECT * FROM categories").all().map((c) => [c.id, categorieLue(c)]));
+  return new Map(ouvre().prepare("SELECT colis_id, categorie_id FROM colis_categories").all().map((r) => [r.colis_id, parId.get(r.categorie_id) || null]));
+}
+
+/** Les colis d'une categorie. */
+const colisDeLaCategorie = (id) => ouvre().prepare("SELECT colis_id FROM colis_categories WHERE categorie_id = ?").all(id).map((r) => r.colis_id);
+const colisClasses = () => ouvre().prepare("SELECT colis_id FROM colis_categories").all().map((r) => r.colis_id);
+
 const resumeFichiers = () => ouvre().prepare("SELECT empreinte, type, pages, version, erreur, analyse_le FROM fichiers").all();
 
 module.exports = {
@@ -275,4 +371,14 @@ module.exports = {
   resumeFichiers,
   annotation,
   annote,
+  COULEURS,
+  categories,
+  categorie,
+  creeCategorie,
+  modifieCategorie,
+  supprimeCategorie,
+  classe,
+  categoriesDesColis,
+  colisDeLaCategorie,
+  colisClasses,
 };

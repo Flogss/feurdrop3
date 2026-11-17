@@ -63,7 +63,7 @@ after(async () => {
 });
 beforeEach(() => {
   videBase();
-  for (const t of ["codes", "colis_fichiers", "annotations", "fichiers"]) base.ouvre().exec(`DELETE FROM ${t}`);
+  for (const t of ["codes", "colis_fichiers", "annotations", "fichiers", "colis_categories", "categories"]) base.ouvre().exec(`DELETE FROM ${t}`);
 });
 
 test("tous les codes d'une page, a leur place, chacun avec son role", async () => {
@@ -341,4 +341,86 @@ test("une page a part : /bordereaux (sa page, son script), derriere la session",
   assert.ok(!(await app.appel("/app.js")).texte.includes("function bdxOuvre"));
   // un fichier sans session : refuse (seules les pages renvoient a la connexion)
   assert.equal((await app.appel("/bordereaux.js", { anonyme: true })).status, 401);
+});
+
+test("tris et filtres : par transporteur, a partir d'un jour, plus anciennes ; la suite par pages", async () => {
+  const pdf = Buffer.from("%PDF-1.4 test");
+  const ids = {};
+  for (const [nom, carrier, jour] of [
+    ["a", "MR", "2026-11-01 10:00:00"],
+    ["b", "LP", "2026-11-05 10:00:00"],
+    ["c", "DPD", "2026-11-10 10:00:00"],
+    ["d", "LP", "2026-11-15 23:30:00"], // 16 novembre a Paris
+    ["e", null, "2026-11-16 08:00:00"],
+  ]) {
+    const c = colisAvecFichier(nom, `${nom}.pdf`, pdf, { carrier });
+    db.db.prepare("UPDATE colis SET created_at = ? WHERE id = ?").run(jour, c.id);
+    ids[nom] = c.id;
+  }
+  const noms = async (requete) => (await app.appel(`/api/bordereaux?${requete}`)).json.bordereaux.map((b) => b.expediteur);
+
+  assert.deepEqual(await noms("tri=recent"), ["e", "d", "c", "b", "a"]);
+  assert.deepEqual(await noms("tri=ancien"), ["a", "b", "c", "d", "e"]);
+  // par transporteur (son nom) : DPD, La Poste, Mondial Relay, puis sans transporteur
+  assert.deepEqual(await noms("tri=transporteur"), ["c", "d", "b", "a", "e"]);
+  assert.deepEqual(await noms("transporteur=LP"), ["d", "b"]);
+  assert.deepEqual(await noms("transporteur=aucun"), ["e"]);
+  // a partir du 10 novembre (jours de Paris : 15/11 23 h 30 UTC = le 16 a Paris)
+  assert.deepEqual(await noms("depuis=2026-11-10"), ["e", "d", "c"]);
+  assert.deepEqual(await noms("depuis=2026-11-16"), ["e", "d"]);
+  assert.deepEqual(await noms("depuis=2026-11-05&jusqua=2026-11-10&tri=ancien"), ["b", "c"]);
+  assert.deepEqual(await noms("depuis=pas-une-date"), ["e", "d", "c", "b", "a"], "une date illisible est ignoree");
+
+  const r = (await app.appel("/api/bordereaux?depuis=2026-11-05")).json;
+  assert.equal(r.total, 4);
+  assert.deepEqual(Object.fromEntries(r.transporteurs.map((t) => [t.code, t.n])), { LP: 2, DPD: 1, aucun: 1 });
+
+  // pages : la suite par decalage, quel que soit le tri
+  const p1 = (await app.appel("/api/bordereaux?tri=transporteur")).json;
+  assert.equal(p1.decalageSuivant, null);
+  const { liste } = require("../src/bordereaux");
+  const page1 = liste({ tri: "ancien", limite: 2 });
+  assert.deepEqual(page1.bordereaux.map((b) => b.expediteur), ["a", "b"]);
+  const page2 = liste({ tri: "ancien", limite: 2, decalage: page1.decalageSuivant });
+  assert.deepEqual(page2.bordereaux.map((b) => b.expediteur), ["c", "d"]);
+});
+
+test("categories : creer, classer, filtrer, renommer ; supprimer une categorie ne touche aucune etiquette", async () => {
+  const pdf = Buffer.from("%PDF-1.4 test");
+  const a = colisAvecFichier("Alice", "a.pdf", pdf);
+  const b = colisAvecFichier("Bob", "b.pdf", pdf);
+
+  const cree = await app.appel("/api/bordereaux/categories", { methode: "POST", corps: { nom: "  Retours  clients ", couleur: "rose" } });
+  assert.equal(cree.status, 201);
+  const retours = cree.json.categorie;
+  assert.deepEqual({ nom: retours.nom, couleur: retours.couleur }, { nom: "Retours clients", couleur: "rose" });
+  assert.equal((await app.appel("/api/bordereaux/categories", { methode: "POST", corps: { nom: "retours CLIENTS" } })).status, 400, "pas de doublon");
+  assert.equal((await app.appel("/api/bordereaux/categories", { methode: "POST", corps: { nom: "   " } })).status, 400);
+  const autre = (await app.appel("/api/bordereaux/categories", { methode: "POST", corps: { nom: "<b>À vérifier</b>" } })).json.categorie;
+  assert.equal(autre.nom, "bÀ vérifier/b", "pas de balise");
+
+  assert.equal((await app.appel(`/api/bordereaux/${a.id}/categorie`, { methode: "PUT", corps: { categorie: retours.id } })).status, 200);
+  assert.equal((await app.appel(`/api/bordereaux/${b.id}/categorie`, { methode: "PUT", corps: { categorie: 9999 } })).status, 404);
+  assert.equal((await app.appel(`/api/bordereaux/${b.id}/categorie`, { methode: "PUT", corps: { categorie: "x" } })).status, 400);
+
+  const filtre = async (q) => (await app.appel(`/api/bordereaux?categorie=${q}`)).json.bordereaux.map((x) => x.id);
+  assert.deepEqual(await filtre(retours.id), [a.id]);
+  assert.deepEqual(await filtre("aucune"), [b.id]);
+  const liste = (await app.appel("/api/bordereaux")).json;
+  assert.equal(liste.bordereaux.find((x) => x.id === a.id).categorie.nom, "Retours clients");
+  assert.equal(liste.categories.find((c) => c.id === retours.id).etiquettes, 1);
+  assert.equal((await app.appel(`/api/bordereaux/${a.id}`)).json.categorie.id, retours.id);
+
+  const renomme = await app.appel(`/api/bordereaux/categories/${retours.id}`, { methode: "PATCH", corps: { nom: "Retours", couleur: "vert" } });
+  assert.deepEqual({ nom: renomme.json.categorie.nom, couleur: renomme.json.categorie.couleur }, { nom: "Retours", couleur: "vert" });
+
+  assert.equal((await app.appel(`/api/bordereaux/categories/${retours.id}`, { methode: "DELETE" })).status, 200);
+  assert.ok(db.getColisById(a.id), "l'etiquette est toujours la");
+  assert.equal((await app.appel(`/api/bordereaux/${a.id}`)).json.categorie, null);
+  assert.deepEqual((await filtre("aucune")).sort(), [a.id, b.id].sort());
+  // declasser
+  await app.appel(`/api/bordereaux/${b.id}/categorie`, { methode: "PUT", corps: { categorie: autre.id } });
+  await app.appel(`/api/bordereaux/${b.id}/categorie`, { methode: "PUT", corps: { categorie: null } });
+  assert.deepEqual(await filtre(autre.id), []);
+  for (const chemin of ["/api/bordereaux/categories"]) assert.equal((await app.appel(chemin, { anonyme: true })).status, 401);
 });

@@ -22,6 +22,13 @@ const bdx = {
   onglet: "etude",
   filtre: "tous",
   filtreTexte: "",
+  transporteur: "",
+  depuis: "",
+  tri: "recent",
+  categorie: "",
+  categories: [],
+  transporteurs: [],
+  total: 0,
   liste: [],
   suite: null,
   jetonListe: 0,
@@ -68,6 +75,21 @@ function bdxDate(s) {
 const BDX_INVISIBLES = { "\x1d": "␝", "\x1e": "␞", "\x04": "␄", "\n": "↵", "\r": "", "\t": "⇥" };
 // eslint-disable-next-line no-control-regex -- justement : les reperer pour les montrer
 const bdxValeur = (v) => String(v ?? "").replace(/[\x00-\x1f\x7f]/g, (c) => BDX_INVISIBLES[c] ?? "·");
+
+// les couleurs des categories (noms gardes par le serveur -> teintes du site)
+const BDX_COULEURS = {
+  violet: "var(--violet-500)",
+  bleu: "var(--info-rgb)",
+  turquoise: "var(--teal-rgb)",
+  vert: "var(--c-chrono)",
+  jaune: "var(--c-lp)",
+  orange: "var(--special-rgb)",
+  rose: "var(--c-mr)",
+  rouge: "var(--danger-rgb)",
+  gris: "var(--c-unknown)",
+};
+const bdxTeinteCategorie = (c) => `--c: ${BDX_COULEURS[c?.couleur] || BDX_COULEURS.gris}`;
+const bdxPuceCategorie = (c) => (c ? `<span class="bdx-cat" style="${bdxTeinteCategorie(c)}">${escapeHtml(c.nom)}</span>` : "");
 
 // la teinte du transporteur (pastilles), la meme que partout sur le site
 const bdxTeinte = (code) => `--c: var(--c-${String(code || "unknown").toLowerCase().replace(/[^a-z]/g, "")}, var(--c-unknown))`;
@@ -134,6 +156,7 @@ function bdxLigne(b) {
       <span class="bdx-ligne-texte">
         <b>${escapeHtml(b.expediteur || "—")}</b>
         <span class="bdx-ligne-num">${escapeHtml(titre)}</span>
+        ${bdxPuceCategorie(b.categorie)}
       </span>
       <span class="bdx-ligne-meta">${bdxBadge(b.index)}<time>${escapeHtml(bdxDate(b.recuLe))}</time></span>
     </button>
@@ -144,23 +167,47 @@ function bdxRendListe() {
   const ul = $("bdx-liste");
   if (!bdx.liste.length) {
     ul.innerHTML = `<li class="bdx-liste-vide">${bdx.filtreTexte ? "Aucune étiquette ne correspond." : "Aucune étiquette ici."}</li>`;
+  } else if (bdx.tri === "transporteur") {
+    // par transporteur : un intertitre avant chaque transporteur
+    const nombres = Object.fromEntries(bdx.transporteurs.map((t) => [t.code, t.n]));
+    let precedent = null;
+    ul.innerHTML = bdx.liste
+      .map((b) => {
+        const code = b.transporteur?.code || "aucun";
+        const tete =
+          code !== precedent
+            ? `<li class="bdx-groupe-tete" style="${bdxTeinte(b.transporteur?.code)}"><span class="bdx-pastille"></span>${escapeHtml(b.transporteur?.nom || "Sans transporteur")}<b>${entier(nombres[code] || 0)}</b></li>`
+            : "";
+        precedent = code;
+        return tete + bdxLigne(b);
+      })
+      .join("");
   } else {
     ul.innerHTML = bdx.liste.map(bdxLigne).join("");
   }
-  $("bdx-plus").hidden = !bdx.suite;
+  $("bdx-plus").hidden = bdx.suite == null;
+  $("bdx-total").textContent = bdx.total ? pluriel(bdx.total, "étiquette") : "";
+  $("bdx-effacer-filtres").hidden = !(bdx.transporteur || bdx.depuis || bdx.categorie || bdx.tri !== "recent");
 }
 
 async function bdxChargeListe({ suite = false } = {}) {
   const jeton = ++bdx.jetonListe;
-  const params = new URLSearchParams({ filtre: bdx.filtre });
+  const params = new URLSearchParams({ filtre: bdx.filtre, tri: bdx.tri });
   if (bdx.filtreTexte) params.set("q", bdx.filtreTexte);
-  if (suite && bdx.suite) params.set("avant", String(bdx.suite));
+  if (bdx.transporteur) params.set("transporteur", bdx.transporteur);
+  if (bdx.depuis) params.set("depuis", bdx.depuis);
+  if (bdx.categorie) params.set("categorie", bdx.categorie);
+  if (suite && bdx.suite != null) params.set("decalage", String(bdx.suite));
   if (!suite && !bdx.liste.length) $("bdx-liste").innerHTML = `<li class="bdx-liste-vide"><span class="bdx-chargement-ligne"></span><span class="bdx-chargement-ligne"></span><span class="bdx-chargement-ligne"></span></li>`;
   try {
     const r = await fetchJSON(`/api/bordereaux?${params}`);
     if (jeton !== bdx.jetonListe) return;
     bdx.liste = suite ? [...bdx.liste, ...r.bordereaux] : r.bordereaux;
-    bdx.suite = r.suite;
+    bdx.suite = r.decalageSuivant;
+    bdx.total = r.total;
+    bdx.transporteurs = r.transporteurs || [];
+    bdxMetCategories(r.categories || []);
+    bdxRendChoixTransporteurs();
     bdxRendListe();
   } catch (err) {
     if (jeton !== bdx.jetonListe) return;
@@ -704,6 +751,17 @@ function bdxRendPanneau() {
       <h3 class="bdx-p-h">Codes détectés${nbCodes !== null ? ` <b>${nbCodes}</b>` : ""}</h3>
       ${codes}
     </section>
+    <section class="bdx-p-bloc">
+      <h3 class="bdx-p-h">Catégorie <span class="bdx-p-h-info">un classement à part</span></h3>
+      <div class="bdx-p-categorie">
+        <select id="bdx-p-categorie" aria-label="Catégorie de l'étiquette">
+          <option value="">Sans catégorie</option>
+          ${bdx.categories.map((k) => `<option value="${k.id}"${c.detail?.categorie?.id === k.id ? " selected" : ""}>${escapeHtml(k.nom)}</option>`).join("")}
+          <option value="nouvelle">Nouvelle catégorie…</option>
+        </select>
+        ${c.detail?.categorie ? bdxPuceCategorie(c.detail.categorie) : ""}
+      </div>
+    </section>
     ${c.detail?.note ? `<section class="bdx-p-bloc"><h3 class="bdx-p-h">Note du colis</h3><p class="bdx-p-texte">${escapeHtml(c.detail.note)}</p></section>` : ""}
     <section class="bdx-p-bloc bdx-p-annotation">
       <h3 class="bdx-p-h">Note d'étude <span class="bdx-p-h-info">gardée à part : le fichier n'est jamais modifié</span></h3>
@@ -990,6 +1048,9 @@ $("bdx-panneau").addEventListener("click", async (e) => {
     });
   }
 });
+$("bdx-panneau").addEventListener("change", (e) => {
+  if (e.target.id === "bdx-p-categorie") bdxClasse(e.target.value);
+});
 $("bdx-panneau").addEventListener("input", (e) => {
   if (e.target.id !== "bdx-annotation") return;
   const avant = bdx.courant?.detail?.annotation?.texte || "";
@@ -1126,7 +1187,198 @@ function bdxMesureHaut() {
 }
 window.addEventListener("resize", bdxMesureHaut, { passive: true });
 
+// --- Tris, filtres et categories -----------------------------------------------------
+
+const BDX_GARDE = "bordereaux.filtres";
+function bdxGardeFiltres() {
+  try {
+    localStorage.setItem(BDX_GARDE, JSON.stringify({ transporteur: bdx.transporteur, depuis: bdx.depuis, tri: bdx.tri, categorie: bdx.categorie }));
+  } catch {}
+}
+function bdxReprendFiltres() {
+  try {
+    const g = JSON.parse(localStorage.getItem(BDX_GARDE) || "{}");
+    if (typeof g.transporteur === "string") bdx.transporteur = g.transporteur;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(g.depuis || "")) bdx.depuis = g.depuis;
+    if (["recent", "ancien", "transporteur"].includes(g.tri)) bdx.tri = g.tri;
+    if (typeof g.categorie === "string") bdx.categorie = g.categorie;
+  } catch {}
+  $("bdx-depuis").value = bdx.depuis;
+  $("bdx-tri").value = bdx.tri;
+}
+
+function bdxRendChoixTransporteurs() {
+  const sel = $("bdx-transporteur");
+  const options = [`<option value="">Tous</option>`];
+  const presents = new Set();
+  for (const t of bdx.transporteurs) {
+    presents.add(t.code);
+    options.push(`<option value="${escapeAttr(t.code)}">${escapeHtml(t.nom)} (${entier(t.n)})</option>`);
+  }
+  // le transporteur choisi reste dans la liste, meme sans etiquette
+  if (bdx.transporteur && !presents.has(bdx.transporteur)) options.push(`<option value="${escapeAttr(bdx.transporteur)}">${escapeHtml(bdx.transporteur)} (0)</option>`);
+  sel.innerHTML = options.join("");
+  sel.value = bdx.transporteur;
+}
+
+function bdxMetCategories(liste) {
+  bdx.categories = liste;
+  const sel = $("bdx-categorie");
+  sel.innerHTML = `<option value="">Toutes</option><option value="aucune">Sans catégorie</option>${liste
+    .map((c) => `<option value="${c.id}">${escapeHtml(c.nom)} (${entier(c.etiquettes)})</option>`)
+    .join("")}`;
+  if (bdx.categorie && bdx.categorie !== "aucune" && !liste.some((c) => String(c.id) === bdx.categorie)) bdx.categorie = "";
+  sel.value = bdx.categorie;
+  if (!$("bdx-fenetre-categories").hidden) bdxRendCategories();
+}
+
+function bdxFiltreChange(cle, valeur) {
+  bdx[cle] = valeur;
+  bdxGardeFiltres();
+  bdx.liste = [];
+  bdxChargeListe();
+}
+
+$("bdx-transporteur").addEventListener("change", (e) => bdxFiltreChange("transporteur", e.target.value));
+$("bdx-depuis").addEventListener("change", (e) => bdxFiltreChange("depuis", e.target.value));
+$("bdx-tri").addEventListener("change", (e) => bdxFiltreChange("tri", e.target.value));
+$("bdx-categorie").addEventListener("change", (e) => bdxFiltreChange("categorie", e.target.value));
+$("bdx-effacer-filtres").addEventListener("click", () => {
+  Object.assign(bdx, { transporteur: "", depuis: "", tri: "recent", categorie: "" });
+  $("bdx-depuis").value = "";
+  $("bdx-tri").value = "recent";
+  bdxFiltreChange("categorie", "");
+});
+
+// classer l'etiquette ouverte (panneau)
+async function bdxClasse(valeur) {
+  const c = bdx.courant;
+  if (!c) return;
+  let id = valeur === "" ? null : Number(valeur);
+  if (valeur === "nouvelle") {
+    const nom = window.prompt("Nom de la nouvelle catégorie :");
+    if (!nom || !nom.trim()) {
+      bdxRendPanneau();
+      return;
+    }
+    try {
+      const r = await postJSON("/api/bordereaux/categories", { nom });
+      id = r.categorie.id;
+    } catch (err) {
+      toast(err.message, "error");
+      bdxRendPanneau();
+      return;
+    }
+  }
+  try {
+    const r = await fetchJSON(`/api/bordereaux/${c.id}/categorie`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categorie: id }) });
+    if (c.detail) c.detail.categorie = r.categorie;
+    const ligne = bdx.liste.find((b) => b.id === c.id);
+    if (ligne) ligne.categorie = r.categorie;
+    toast(r.categorie ? `Classée dans « ${r.categorie.nom} »` : "Retirée de sa catégorie", "info", 2200);
+    await bdxChargeCategories();
+    bdxRendListe();
+    bdxRendPanneau();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function bdxChargeCategories() {
+  try {
+    const r = await fetchJSON("/api/bordereaux/categories");
+    bdx.couleurs = r.couleurs;
+    bdxMetCategories(r.categories);
+  } catch {}
+}
+
+// la fenetre « Catégories »
+function bdxRendCategories() {
+  const couleurs = bdx.couleurs || Object.keys(BDX_COULEURS);
+  $("bdx-categories-liste").innerHTML = bdx.categories.length
+    ? bdx.categories
+        .map(
+          (c) => `<li class="bdx-categorie" data-id="${c.id}" style="${bdxTeinteCategorie(c)}">
+        <span class="bdx-categorie-pastille"></span>
+        <input class="bdx-categorie-nom" value="${escapeAttr(c.nom)}" maxlength="40" aria-label="Nom de la catégorie" />
+        <span class="bdx-categorie-n">${pluriel(c.etiquettes, "étiquette")}</span>
+        <span class="bdx-categorie-couleurs" role="radiogroup" aria-label="Couleur">${couleurs
+          .map((k) => `<button type="button" class="bdx-couleur${k === c.couleur ? " is-on" : ""}" style="--c: ${BDX_COULEURS[k]}" data-couleur="${k}" aria-label="${k}" aria-checked="${k === c.couleur}" role="radio"></button>`)
+          .join("")}</span>
+        <button class="bdx-outil" type="button" data-supprime="${c.id}" aria-label="Supprimer la catégorie"><svg class="icon"><use href="#i-trash"/></svg></button>
+      </li>`
+        )
+        .join("")
+    : `<li class="bdx-liste-vide">Aucune catégorie pour l'instant.</li>`;
+}
+
+async function bdxModifieCategorie(id, corps) {
+  try {
+    await fetchJSON(`/api/bordereaux/categories/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+    await bdxChargeCategories();
+    bdxChargeListe();
+  } catch (err) {
+    toast(err.message, "error");
+    bdxRendCategories();
+  }
+}
+
+$("bdx-gerer-categories").addEventListener("click", async () => {
+  await bdxChargeCategories();
+  bdxRendCategories();
+  $("bdx-fenetre-categories").hidden = false;
+  setTimeout(() => $("bdx-categorie-nom").focus(), 50);
+});
+$("bdx-fenetre-categories").addEventListener("click", async (e) => {
+  if (e.target.closest("[data-bdx-ferme]")) {
+    $("bdx-fenetre-categories").hidden = true;
+    return;
+  }
+  const couleur = e.target.closest("[data-couleur]");
+  if (couleur) {
+    await bdxModifieCategorie(Number(couleur.closest("[data-id]").dataset.id), { couleur: couleur.dataset.couleur });
+    return;
+  }
+  const suppr = e.target.closest("[data-supprime]");
+  if (suppr) {
+    const c = bdx.categories.find((x) => x.id === Number(suppr.dataset.supprime));
+    if (!c || !window.confirm(`Supprimer la catégorie « ${c.nom} » ? Ses ${c.etiquettes} étiquette(s) restent, simplement sans catégorie.`)) return;
+    try {
+      await fetchJSON(`/api/bordereaux/categories/${c.id}`, { method: "DELETE" });
+      if (bdx.categorie === String(c.id)) bdx.categorie = "";
+      await bdxChargeCategories();
+      bdxChargeListe();
+      if (bdx.courant?.detail?.categorie?.id === c.id) {
+        bdx.courant.detail.categorie = null;
+        bdxRendPanneau();
+      }
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  }
+});
+$("bdx-fenetre-categories").addEventListener("change", (e) => {
+  const champ = e.target.closest(".bdx-categorie-nom");
+  if (champ) bdxModifieCategorie(Number(champ.closest("[data-id]").dataset.id), { nom: champ.value });
+});
+$("bdx-categorie-nouvelle").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const champ = $("bdx-categorie-nom");
+  try {
+    await postJSON("/api/bordereaux/categories", { nom: champ.value });
+    champ.value = "";
+    await bdxChargeCategories();
+    bdxRendCategories();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("bdx-fenetre-categories").hidden) $("bdx-fenetre-categories").hidden = true;
+});
+
 function bdxDemarre() {
+  bdxReprendFiltres();
   bdxMesureHaut();
   bdxChargeEtat();
   bdxChargeListe();

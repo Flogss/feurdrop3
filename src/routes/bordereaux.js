@@ -1,6 +1,12 @@
 // /api/bordereaux : l'etude des etiquettes (voir src/bordereaux/). Derriere la
 // session du dashboard, comme le reste de l'API.
-//   GET  /                    liste (?filtre=tous|a_imprimer|imprimes|deposes&q=&avant=)
+//   GET  /                    liste (?filtre=tous|a_imprimer|imprimes|deposes&q=
+//                             &transporteur=LP|aucun&depuis=AAAA-MM-JJ&jusqua=
+//                             &categorie=<id>|aucune&tri=recent|ancien|transporteur
+//                             &decalage=, ou l'ancien &avant=)
+//   GET  /categories          les categories (et leur nombre d'etiquettes)
+//   POST /categories          { nom, couleur } ; PATCH /categories/:id ; DELETE /categories/:id
+//   PUT  /:id/categorie       { categorie: <id>|null } : classer une etiquette
 //   GET  /etat                l'index : etiquettes lues, a lire, en echec
 //   GET  /recherche?q=        un numero dans les codes lus et les numeros de suivi
 //   GET  /:id                 une etiquette : colis, suivi, codes (sans la relire)
@@ -19,16 +25,48 @@ const idDe = (req) => {
   return Number.isInteger(id) && id > 0 ? id : null;
 };
 
+const entier = (v) => {
+  const n = Number(v);
+  return Number.isInteger(n) ? n : null;
+};
+
 router.get("/", (req, res) => {
   const filtre = Object.hasOwn(bordereaux.FILTRES, req.query.filtre) ? req.query.filtre : "tous";
-  const avant = Number(req.query.avant);
+  const categorie = req.query.categorie === "aucune" ? "aucune" : entier(req.query.categorie);
   res.json(
     bordereaux.liste({
       filtre,
       q: String(req.query.q || "").slice(0, 80),
-      avant: Number.isInteger(avant) ? avant : null,
+      avant: entier(req.query.avant),
+      decalage: entier(req.query.decalage),
+      transporteur: /^[A-Za-z0-9_]{1,20}$/.test(req.query.transporteur || "") ? req.query.transporteur : null,
+      depuis: String(req.query.depuis || ""),
+      jusqua: String(req.query.jusqua || ""),
+      categorie,
+      tri: Object.hasOwn(bordereaux.TRIS, req.query.tri) ? req.query.tri : "recent",
     })
   );
+});
+
+// --- Categories (un classement a part : jamais dans les etiquettes) ----------------------
+
+router.get("/categories", (req, res) => res.json({ categories: bordereaux.categories(), couleurs: bordereaux.COULEURS }));
+
+router.post("/categories", (req, res) => {
+  const r = bordereaux.creeCategorie(req.body?.nom, req.body?.couleur);
+  if (r.erreur) return res.status(400).json({ error: r.erreur });
+  res.status(201).json(r);
+});
+
+router.patch("/categories/:id", (req, res) => {
+  const r = bordereaux.modifieCategorie(entier(req.params.id), { nom: req.body?.nom, couleur: req.body?.couleur });
+  if (r.erreur) return res.status(r.status || 400).json({ error: r.erreur });
+  res.json(r);
+});
+
+router.delete("/categories/:id", (req, res) => {
+  if (!bordereaux.supprimeCategorie(entier(req.params.id))) return res.status(404).json({ error: "Catégorie introuvable." });
+  res.json({ ok: true });
 });
 
 router.get("/etat", (req, res) => res.json(bordereaux.etat()));
@@ -92,6 +130,15 @@ router.get(
     res.end(Buffer.from(f.octets.buffer, f.octets.byteOffset, f.octets.byteLength));
   })
 );
+
+router.put("/:id/categorie", (req, res) => {
+  const id = idDe(req);
+  const valeur = req.body?.categorie;
+  if (valeur !== null && !Number.isInteger(valeur)) return res.status(400).json({ error: "Catégorie invalide." });
+  const r = id ? bordereaux.classe(id, valeur) : { status: 404, erreur: "Étiquette introuvable." };
+  if (r.erreur) return res.status(r.status || 400).json({ error: r.erreur });
+  res.json(r);
+});
 
 router.put("/:id/annotation", (req, res) => {
   const id = idDe(req);

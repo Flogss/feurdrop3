@@ -103,6 +103,33 @@
                 <button type="button" role="radio" class="bdx-puce" data-filtre="imprimes" aria-checked="false">Imprimées</button>
                 <button type="button" role="radio" class="bdx-puce" data-filtre="deposes" aria-checked="false">Déposées</button>
               </div>
+              <div class="bdx-tris" aria-label="Trier et filtrer">
+                <label class="bdx-choix">
+                  <span>Transporteur</span>
+                  <select id="bdx-transporteur"><option value="">Tous</option></select>
+                </label>
+                <label class="bdx-choix">
+                  <span>À partir du</span>
+                  <input id="bdx-depuis" type="date" />
+                </label>
+                <label class="bdx-choix">
+                  <span>Tri</span>
+                  <select id="bdx-tri">
+                    <option value="recent">Plus récentes</option>
+                    <option value="ancien">Plus anciennes</option>
+                    <option value="transporteur">Par transporteur</option>
+                  </select>
+                </label>
+                <label class="bdx-choix">
+                  <span>Catégorie</span>
+                  <select id="bdx-categorie"><option value="">Toutes</option><option value="aucune">Sans catégorie</option></select>
+                </label>
+                <div class="bdx-tris-pied">
+                  <span class="bdx-total" id="bdx-total" aria-live="polite"></span>
+                  <button class="bdx-lien" id="bdx-effacer-filtres" type="button" hidden>Effacer les filtres</button>
+                  <button class="bdx-lien" id="bdx-gerer-categories" type="button">Gérer les catégories</button>
+                </div>
+              </div>
               <ul class="bdx-liste" id="bdx-liste" aria-label="Étiquettes"></ul>
               <button class="btn btn-secondary btn-sm bdx-plus" id="bdx-plus" type="button" hidden>Plus d'étiquettes</button>
             </div>
@@ -155,6 +182,23 @@
         </div>
       </div>
 </main>
+
+<!-- les categories : creer, renommer, recolorer, supprimer (les etiquettes restent) -->
+<div class="bdx-fenetre" id="bdx-fenetre-categories" hidden>
+  <div class="bdx-fenetre-fond" data-bdx-ferme></div>
+  <section class="bdx-fenetre-carte" role="dialog" aria-modal="true" aria-labelledby="bdx-categories-titre">
+    <header class="bdx-fenetre-tete">
+      <h2 id="bdx-categories-titre">Catégories</h2>
+      <button class="bdx-outil" type="button" data-bdx-ferme aria-label="Fermer"><svg class="icon"><use href="#i-x"/></svg></button>
+    </header>
+    <p class="bdx-fenetre-info">Un classement à part : rien n'est écrit dans les étiquettes. Supprimer une catégorie garde ses étiquettes, simplement sans catégorie.</p>
+    <ul class="bdx-categories" id="bdx-categories-liste"></ul>
+    <form class="bdx-categorie-nouvelle" id="bdx-categorie-nouvelle">
+      <input id="bdx-categorie-nom" type="text" maxlength="40" placeholder="Nouvelle catégorie (ex. Retours)" autocomplete="off" />
+      <button class="btn btn-primary btn-sm" type="submit"><svg class="icon"><use href="#i-plus"/></svg><span>Créer</span></button>
+    </form>
+  </section>
+</div>
 
 <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 </body>

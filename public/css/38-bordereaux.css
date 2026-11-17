@@ -405,3 +405,73 @@
   .bdx-zone.is-revele::before, .bdx-zone.is-trouvee::after, .bdx-scan::before { animation: none; }
   .bdx-zone.is-trouvee::before { opacity: 1; transform: none; }
 }
+
+/* --- Tris, filtres et categories ---------------------------------------------------------- */
+.bdx-tris { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; flex-shrink: 0; }
+.bdx-choix { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bdx-choix > span { font: 650 10.5px/1 var(--font-sans); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+.bdx-choix select, .bdx-choix input {
+  width: 100%; height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-2);
+  background: rgb(0 0 0 / 0.25); color: var(--text); font: 550 13px/1 var(--font-sans); color-scheme: dark;
+  transition: border-color var(--t-3), box-shadow var(--t-3);
+}
+.bdx-choix select { appearance: none; padding-right: 26px; background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%); background-position: calc(100% - 15px) 15px, calc(100% - 10px) 15px; background-size: 5px 5px; background-repeat: no-repeat; }
+.bdx-choix select:focus, .bdx-choix input:focus { outline: none; border-color: rgb(var(--violet-300) / 0.55); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.15); }
+.bdx-tris-pied { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 20px; }
+.bdx-total { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; margin-right: auto; }
+.bdx-lien { padding: 0; border: 0; background: none; color: rgb(var(--violet-300)); font: 600 12px/1.4 var(--font-sans); cursor: pointer; }
+@media (hover: hover) { .bdx-lien:hover { color: rgb(var(--violet-200)); text-decoration: underline; } }
+
+.bdx-groupe-tete {
+  position: sticky; top: -2px; z-index: 1; display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 7px 10px;
+  border-radius: 10px; background: rgb(18 16 24 / 0.92); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  font: 650 12px/1 var(--font-sans); letter-spacing: 0.04em; color: rgb(var(--c));
+}
+.bdx-groupe-tete b { margin-left: auto; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.bdx-groupe-tete:first-child { margin-top: 0; }
+
+.bdx-cat {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin-top: 2px; padding: 2px 7px 2px 6px;
+  border-radius: var(--r-pill); background: rgb(var(--c) / 0.14); color: rgb(var(--c)); font: 650 10.5px/1.3 var(--font-sans);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bdx-cat::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+
+.bdx-p-categorie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bdx-p-categorie select {
+  flex: 1; min-width: 150px; height: 36px; padding: 0 10px; border-radius: 11px; border: 1px solid var(--line-2);
+  background: rgb(0 0 0 / 0.25); color: var(--text); font: 550 13px/1 var(--font-sans); color-scheme: dark;
+}
+
+/* la fenetre « Catégories » */
+.bdx-fenetre { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; }
+.bdx-fenetre-fond { position: absolute; inset: 0; background: rgb(5 4 8 / 0.6); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: bdx-apparait-fond var(--t-3) var(--ease-out) both; }
+@keyframes bdx-apparait-fond { from { opacity: 0; } }
+.bdx-fenetre-carte {
+  position: relative; width: min(560px, 100%); max-height: min(640px, 90dvh); display: flex; flex-direction: column; gap: 12px; padding: 20px;
+  border-radius: 24px; border: 1px solid rgb(255 255 255 / 0.1); background: rgb(22 20 30 / 0.9);
+  -webkit-backdrop-filter: blur(26px) saturate(170%); backdrop-filter: blur(26px) saturate(170%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 40px 90px -30px rgb(0 0 0 / 0.95), 0 0 0 1px rgb(var(--accent-rgb) / 0.12);
+  animation: modal-in 420ms var(--ease-spring) both;
+}
+.bdx-fenetre-tete { display: flex; align-items: center; justify-content: space-between; }
+.bdx-fenetre-tete h2 { font: 740 20px/1.1 var(--font-display); letter-spacing: -0.02em; }
+.bdx-fenetre-info { font-size: 13px; line-height: 1.45; color: var(--text-3); }
+.bdx-categories { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bdx-categorie {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "p nom n x" "p couleurs couleurs x"; align-items: center; gap: 6px 10px;
+  padding: 10px 8px 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: rgb(255 255 255 / 0.025);
+}
+.bdx-categorie-pastille { grid-area: p; width: 12px; height: 12px; border-radius: 50%; background: rgb(var(--c)); box-shadow: 0 0 10px rgb(var(--c) / 0.8); }
+.bdx-categorie-nom { grid-area: nom; min-width: 0; height: 32px; padding: 0 8px; border-radius: 9px; border: 1px solid transparent; background: transparent; color: var(--text); font: 600 14px/1 var(--font-sans); }
+.bdx-categorie-nom:hover { border-color: var(--line-2); }
+.bdx-categorie-nom:focus { outline: none; border-color: rgb(var(--violet-300) / 0.55); background: rgb(0 0 0 / 0.25); }
+.bdx-categorie-n { grid-area: n; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.bdx-categorie > .bdx-outil { grid-area: x; }
+.bdx-categorie-couleurs { grid-area: couleurs; display: flex; gap: 6px; padding-left: 8px; }
+.bdx-couleur { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid transparent; background: rgb(var(--c)); cursor: pointer; transition: transform var(--t-3) var(--ease-spring), border-color var(--t-2); }
+.bdx-couleur:hover { transform: scale(1.15); }
+.bdx-couleur.is-on { border-color: #fff; box-shadow: 0 0 0 2px rgb(var(--c) / 0.5), 0 0 12px rgb(var(--c) / 0.8); }
+.bdx-categorie-nouvelle { display: flex; gap: 8px; }
+.bdx-categorie-nouvelle input { flex: 1; min-width: 0; height: 38px; padding: 0 12px; border-radius: 11px; border: 1px solid var(--line-2); background: rgb(0 0 0 / 0.25); color: var(--text); font: 550 14px/1 var(--font-sans); }
+.bdx-categorie-nouvelle input:focus { outline: none; border-color: rgb(var(--violet-300) / 0.55); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.15); }

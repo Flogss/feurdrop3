@@ -242,7 +242,7 @@ function detail(colisId) {
   const f = lien && lien.file_id === colis.file_id && lien.empreinte ? base.fichier(lien.empreinte) : null;
   const resume = resumeColis(colis);
   const analyse = f && f.version === VERSION_ANALYSE ? vueAnalyse(f, colis, resume.suivi) : { etat: lien?.erreur ? "echec" : "attente", erreur: lien?.erreur || null };
-  return { colis: resume, note: colis.note || null, annotation: base.annotation(colis.id), analyse };
+  return { colis: resume, note: colis.note || null, annotation: base.annotation(colis.id), categorie: base.categoriesDesColis().get(colis.id) || null, analyse };
 }
 
 async function analyseEtDetail(colisId, options) {
@@ -285,31 +285,95 @@ function etatIndex(c, liens, resumes, fichiers) {
   return { etat: "analyse", pages: f.pages, lisibles: r.lisibles || 0, illisibles: r.illisibles || 0 };
 }
 
-/** Les etiquettes, de la plus recente a la plus ancienne, par pages de `limite`. */
-function liste({ filtre = "tous", q = "", avant = null, limite = 60 } = {}) {
-  const clause = FILTRES[filtre] ?? "";
+const TRIS = {
+  recent: "id DESC",
+  ancien: "id ASC",
+  // par transporteur (nom affiche), puis du plus recent au plus ancien
+  transporteur: "transporteur_tri ASC, id DESC",
+};
+
+const JOUR = /^\d{4}-\d{2}-\d{2}$/;
+
+// Les conditions communes a la liste et a ses compteurs.
+function conditions({ filtre = "tous", q = "", transporteur = null, depuis = null, jusqua = null, categorie = null } = {}) {
+  let sql = ` WHERE file_id IS NOT NULL AND file_id != ''${FILTRES[filtre] ?? ""}`;
   const params = [];
-  let sql = `SELECT * FROM colis WHERE file_id IS NOT NULL AND file_id != ''${clause}`;
   const texte = String(q || "").trim();
   if (texte) {
     sql += " AND (sender_name LIKE ? ESCAPE '\\' OR file_name LIKE ? ESCAPE '\\' OR caption LIKE ? ESCAPE '\\')";
     const motif = `%${texte.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
     params.push(motif, motif, motif);
   }
-  if (Number.isInteger(avant) && avant > 0) {
-    sql += " AND id < ?";
-    params.push(avant);
+  if (transporteur === "aucun") sql += " AND (carrier IS NULL OR carrier = '')";
+  else if (transporteur) {
+    sql += " AND carrier = ?";
+    params.push(String(transporteur).slice(0, 20));
   }
-  sql += " ORDER BY id DESC LIMIT ?";
-  params.push(limite + 1);
-  const lignes = db.prepare(sql).all(...params);
-  const suite = lignes.length > limite ? lignes[limite - 1].id : null;
+  // les jours sont ceux de Paris (une etiquette recue a 0 h 30 compte pour ce jour-la)
+  if (JOUR.test(depuis || "")) {
+    sql += " AND jour_paris(created_at) >= ?";
+    params.push(depuis);
+  }
+  if (JOUR.test(jusqua || "")) {
+    sql += " AND jour_paris(created_at) <= ?";
+    params.push(jusqua);
+  }
+  if (categorie === "aucune") {
+    sql += " AND id NOT IN (SELECT value FROM json_each(?))";
+    params.push(JSON.stringify(base.colisClasses()));
+  } else if (Number.isInteger(categorie) && categorie > 0) {
+    sql += " AND id IN (SELECT value FROM json_each(?))";
+    params.push(JSON.stringify(base.colisDeLaCategorie(categorie)));
+  }
+  return { sql, params };
+}
+
+/**
+ * Les etiquettes, par pages de `limite` : filtrees (etape, texte,
+ * transporteur, a partir d'un jour, categorie) et triees (plus recentes,
+ * plus anciennes, par transporteur). `decalage` : la suite (`avant`, l'ancien
+ * curseur par id, reste compris pour le tri par defaut).
+ */
+function liste(options = {}) {
+  const { avant = null, limite = 60, tri = "recent" } = options;
+  const decalage = Number.isInteger(options.decalage) && options.decalage > 0 ? options.decalage : 0;
+  const ordre = TRIS[tri] || TRIS.recent;
+  const { sql: ou, params } = conditions(options);
+  let sql = ou;
+  const p = [...params];
+  if (Number.isInteger(avant) && avant > 0 && tri === "recent" && !decalage) {
+    sql += " AND id < ?";
+    p.push(avant);
+  }
+  // le nom du transporteur (pas son code) pour le tri : « Chronopost » avant « DPD »
+  const noms = Object.fromEntries(db.prepare("SELECT DISTINCT carrier FROM colis WHERE carrier IS NOT NULL").all().map((r) => [r.carrier, carrierLabel(r.carrier)]));
+  const casNom = Object.keys(noms).length
+    ? `CASE carrier ${Object.keys(noms).map(() => "WHEN ? THEN ?").join(" ")} ELSE 'zzz' END`
+    : "'zzz'";
+  const pNoms = Object.entries(noms).flat();
+  const lignes = db
+    .prepare(`SELECT *, ${casNom} AS transporteur_tri FROM colis${sql} ORDER BY ${ordre} LIMIT ? OFFSET ?`)
+    .all(...pNoms, ...p, limite + 1, decalage);
+  const plus = lignes.length > limite;
+  const page = lignes.slice(0, limite);
   const liens = new Map(base.tousLesLiens().map((l) => [l.colis_id, l]));
   const resumes = new Map(base.resumeCodes().map((r) => [r.empreinte, r]));
   const fichiers = new Map(base.resumeFichiers().map((f) => [f.empreinte, f]));
+  const classees = base.categoriesDesColis();
+  // les transporteurs presents (avec les autres filtres) : le choix du filtre
+  const sansTransporteur = conditions({ ...options, transporteur: null });
+  const transporteurs = db
+    .prepare(`SELECT carrier, COUNT(*) AS n FROM colis${sansTransporteur.sql} GROUP BY carrier ORDER BY n DESC`)
+    .all(...sansTransporteur.params)
+    .map((r) => ({ code: r.carrier || "aucun", nom: r.carrier ? carrierLabel(r.carrier) : "Sans transporteur", n: r.n }));
   return {
-    bordereaux: lignes.slice(0, limite).map((c) => ({ ...resumeColis(c), index: etatIndex(c, liens, resumes, fichiers) })),
-    suite,
+    bordereaux: page.map((c) => ({ ...resumeColis(c), categorie: classees.get(c.id) || null, index: etatIndex(c, liens, resumes, fichiers) })),
+    // la suite : un decalage (tous les tris), et l'ancien curseur pour le tri par defaut
+    suite: plus ? (tri === "recent" && !decalage ? page[page.length - 1].id : null) : null,
+    decalageSuivant: plus ? decalage + limite : null,
+    total: db.prepare(`SELECT COUNT(*) AS n FROM colis${ou}`).get(...params).n,
+    transporteurs,
+    categories: base.categories(),
   };
 }
 
@@ -486,6 +550,15 @@ function etat() {
 // --- Notes d'etude ---------------------------------------------------------------------
 // Une note a cote d'une etiquette : gardee dans l'index, jamais dans le PDF.
 
+/** Classe une etiquette dans une categorie (null : aucune). */
+function classe(colisId, categorieId) {
+  const colis = getColisById(colisId);
+  if (!colis || !colis.file_id) return { status: 404, erreur: "Étiquette introuvable." };
+  const c = base.classe(colis.id, categorieId);
+  if (c === undefined) return { status: 404, erreur: "Catégorie introuvable." };
+  return { categorie: c };
+}
+
 function annote(colisId, texte) {
   const colis = getColisById(colisId);
   if (!colis || !colis.file_id) return null;
@@ -503,6 +576,13 @@ module.exports = {
   recherche,
   etat,
   annote,
+  classe,
+  categories: base.categories,
+  creeCategorie: base.creeCategorie,
+  modifieCategorie: base.modifieCategorie,
+  supprimeCategorie: base.supprimeCategorie,
+  COULEURS: base.COULEURS,
+  TRIS,
   roleDu,
   demarreIndexation,
   arreteIndexation,
