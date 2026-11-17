@@ -32,6 +32,7 @@ function creeApp() {
   const portail = require("./routes/portail");
   const depots = require("./routes/depots");
   const itineraireRouter = require("./routes/itineraire");
+  const bordereauxRouter = require("./routes/bordereaux");
   const auth = require("./auth");
   const { DOMAINE_PORTAIL } = require("./portail");
   const { gestionErreurs } = require("./http");
@@ -87,12 +88,21 @@ function creeApp() {
   app.use("/api/special", specialRouter);
   app.use("/api/suivi", suiviRouter);
   app.use("/api/itineraire", itineraireRouter);
+  app.use("/api/bordereaux", bordereauxRouter);
   app.use("/api", (req, res) => res.status(404).json({ error: "Introuvable" }));
 
   // --- 3. les pages et fichiers du dashboard : session obligatoire ------------------
   app.use(auth.exigeSessionPage);
   // /app.js : assemble depuis public/js/ (voir assemblage.js)
   app.use(servirPaquets({ seulement: ["app.js"] }));
+  // la visionneuse des bordereaux : pdf.js tel qu'installe (node_modules),
+  // deux fichiers et ses polices standard, rien d'autre du paquet
+  const PDFJS = path.dirname(require.resolve("pdfjs-dist/package.json"));
+  app.get("/vendor/pdfjs/:fichier(pdf.min.mjs|pdf.worker.min.mjs)", (req, res) => {
+    res.set("Cache-Control", "no-cache");
+    res.sendFile(path.join(PDFJS, "build", req.params.fichier));
+  });
+  app.use("/vendor/pdfjs/standard_fonts", express.static(path.join(PDFJS, "standard_fonts"), { cacheControl: false, setHeaders: (r) => r.set("Cache-Control", "no-cache") }));
   app.use(express.static(PUBLIC, { setHeaders: entetesFichier, cacheControl: false }));
   // en dernier : une erreur imprevue devient une reponse JSON, jamais un arret
   app.use(gestionErreurs);

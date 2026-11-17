@@ -29,6 +29,7 @@ const PAQUETS = {
       "js/72-heures-drop.js", // heures de drop (a cote de « En direct »)
       "js/75-depots.js", // controle des depots
       "js/77-itineraire.js", // itineraire boites jaunes (carte Leaflet chargee a la demande)
+      "js/78-bordereaux.js", // etude des bordereaux (pdf.js charge a la demande)
       "js/80-locker.js",
       "js/90-demarrage.js",
     ],
@@ -42,6 +43,7 @@ const PAQUETS = {
       "css/30-pages.css", // Imprime, Stats, Reglages, locker, suivi
       "css/35-depots.css", // controle des depots
       "css/37-itineraire.css", // itineraire boites jaunes
+      "css/38-bordereaux.css", // etude des bordereaux
       "css/40-retours.css", // toasts, feuille de confirmation
       "css/50-adaptations.css", // petits ecrans, bureau, mouvement reduit
       "css/60-historique.css",

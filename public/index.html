@@ -328,6 +328,14 @@
             </span>
             <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
           </button>
+          <button class="tool" id="bordereaux-link" type="button">
+            <span class="tool-icon tool-icon-violet"><svg class="icon"><use href="#i-barcode"/></svg></span>
+            <span class="tool-text">
+              <span class="tool-title">Bordereaux</span>
+              <span class="tool-sub" id="bordereaux-link-sub">Étude des codes · recherche d'un numéro</span>
+            </span>
+            <svg class="icon tool-chev"><use href="#i-chevron-right"/></svg>
+          </button>
           <button class="tool" id="depots-link" type="button">
             <span class="tool-icon tool-icon-teal"><svg class="icon"><use href="#i-flag"/></svg></span>
             <span class="tool-text">
@@ -885,6 +893,100 @@
             <span>Choisis ton départ, la zone et le nombre de boîtes : la tournée s'affiche ici.</span>
           </div>
         </article>
+      </div>
+    </section>
+
+    <!-- ===================================================== BORDEREAUX -->
+    <!-- Les etiquettes deja dans FeurDrop (fichiers Telegram des colis), leurs
+         codes-barres et QR codes lus et indexes par le serveur. La visionneuse
+         (pdf.js, charge a la premiere ouverture) affiche le fichier d'origine
+         tel quel : rien n'y est jamais ecrit. -->
+    <section id="view-bordereaux" class="view sub-view" aria-label="Bordereaux">
+      <header class="page-head bdx-tete">
+        <button class="back" id="bordereaux-back" type="button">
+          <svg class="icon"><use href="#i-arrow-left"/></svg><span>Dashboard</span>
+        </button>
+        <div class="page-titles">
+          <h1>Bordereaux</h1>
+          <p class="page-sub bdx-etat" id="bdx-etat"><span class="bdx-etat-point" aria-hidden="true"></span><span id="bdx-etat-texte">Étude des étiquettes et de leurs codes</span></p>
+        </div>
+        <div class="segmented bdx-onglets" role="tablist" aria-label="Bordereaux">
+          <button type="button" role="tab" class="seg is-on" id="bdx-onglet-etude" data-bdx-onglet="etude" aria-selected="true" aria-controls="bdx-gauche-etude"><svg class="icon"><use href="#i-file"/></svg>Étude des bordereaux</button>
+          <button type="button" role="tab" class="seg" id="bdx-onglet-recherche" data-bdx-onglet="recherche" aria-selected="false" aria-controls="bdx-gauche-recherche"><svg class="icon"><use href="#i-search"/></svg>Recherche / modifications</button>
+        </div>
+      </header>
+
+      <div class="bdx-espace" id="bdx-espace" data-onglet="etude">
+        <label class="bdx-grande-recherche" id="bdx-grande-recherche" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="bdx-q" type="search" placeholder="Rechercher un numéro de suivi…" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" aria-label="Rechercher un numéro de suivi" aria-controls="bdx-resultats" />
+          <kbd class="bdx-touche" aria-hidden="true">/</kbd>
+        </label>
+
+        <div class="bdx-colonnes">
+          <!-- a gauche : les etiquettes (Etude) ou les resultats (Recherche) -->
+          <aside class="card bdx-gauche" aria-label="Étiquettes">
+            <div class="bdx-gauche-etude" id="bdx-gauche-etude" role="tabpanel" aria-labelledby="bdx-onglet-etude">
+              <label class="bdx-filtre-champ">
+                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                <input id="bdx-filtre" type="search" placeholder="Expéditeur ou fichier" autocomplete="off" spellcheck="false" aria-label="Filtrer les étiquettes" />
+              </label>
+              <div class="bdx-puces" id="bdx-filtres" role="radiogroup" aria-label="Étape">
+                <button type="button" role="radio" class="bdx-puce is-on" data-filtre="tous" aria-checked="true">Toutes</button>
+                <button type="button" role="radio" class="bdx-puce" data-filtre="a_imprimer" aria-checked="false">À imprimer</button>
+                <button type="button" role="radio" class="bdx-puce" data-filtre="imprimes" aria-checked="false">Imprimées</button>
+                <button type="button" role="radio" class="bdx-puce" data-filtre="deposes" aria-checked="false">Déposées</button>
+              </div>
+              <ul class="bdx-liste" id="bdx-liste" aria-label="Étiquettes"></ul>
+              <button class="btn btn-secondary btn-sm bdx-plus" id="bdx-plus" type="button" hidden>Plus d'étiquettes</button>
+            </div>
+            <div class="bdx-gauche-recherche" id="bdx-gauche-recherche" role="tabpanel" aria-labelledby="bdx-onglet-recherche" hidden>
+              <p class="bdx-recherche-info" id="bdx-recherche-info">Tape au moins 3 caractères : le numéro entier, son début, sa fin, ou avec une faute de frappe.</p>
+              <ul class="bdx-resultats" id="bdx-resultats" role="listbox" aria-label="Étiquettes trouvées"></ul>
+            </div>
+          </aside>
+
+          <!-- au centre : la visionneuse -->
+          <article class="bdx-visionneuse" id="bdx-visionneuse" aria-label="Visionneuse">
+            <div class="bdx-scene" id="bdx-scene" tabindex="0" aria-label="Étiquette (glisser pour déplacer, Ctrl + molette pour zoomer)">
+              <div class="bdx-feuille" id="bdx-feuille" hidden>
+                <canvas class="bdx-canvas" id="bdx-canvas"></canvas>
+                <img class="bdx-image" id="bdx-image" alt="" hidden />
+                <div class="bdx-scan" aria-hidden="true"></div>
+                <div class="bdx-zones" id="bdx-zones"></div>
+              </div>
+            </div>
+            <div class="bdx-barre" id="bdx-barre" role="toolbar" aria-label="Affichage" hidden>
+              <div class="bdx-groupe bdx-pages" id="bdx-pages">
+                <button class="bdx-outil" id="bdx-page-prec" type="button" aria-label="Page précédente"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+                <span class="bdx-page-texte" id="bdx-page-texte" aria-live="polite">1 / 1</span>
+                <button class="bdx-outil" id="bdx-page-suiv" type="button" aria-label="Page suivante"><svg class="icon"><use href="#i-arrow-right"/></svg></button>
+              </div>
+              <div class="bdx-groupe">
+                <button class="bdx-outil" id="bdx-zoom-moins" type="button" aria-label="Dézoomer"><svg class="icon"><use href="#i-minus"/></svg></button>
+                <button class="bdx-zoom-valeur" id="bdx-zoom-valeur" type="button" aria-label="Zoom (cliquer pour 100 %)">100 %</button>
+                <button class="bdx-outil" id="bdx-zoom-plus" type="button" aria-label="Zoomer"><svg class="icon"><use href="#i-plus"/></svg></button>
+              </div>
+              <div class="bdx-groupe">
+                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-largeur" type="button" aria-pressed="true" title="Ajuster à la largeur (0)">Largeur</button>
+                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-page" type="button" aria-pressed="false" title="Page entière (1)">Page</button>
+              </div>
+              <div class="bdx-groupe">
+                <button class="bdx-outil bdx-outil-texte" id="bdx-zones-toutes" type="button" aria-pressed="false" title="Montrer toutes les zones (Z)"><svg class="icon"><use href="#i-barcode"/></svg>Zones</button>
+              </div>
+            </div>
+            <div class="bdx-vide" id="bdx-vide">
+              <span class="bdx-vide-icone"><svg class="icon"><use href="#i-barcode"/></svg></span>
+              <b>Choisis une étiquette</b>
+              <span>Ses codes-barres et QR codes s'allument au survol : leur valeur, leur format, leur rôle.</span>
+            </div>
+            <div class="bdx-message" id="bdx-message" hidden></div>
+            <div class="bdx-bulle" id="bdx-bulle" role="tooltip" hidden></div>
+          </article>
+
+          <!-- a droite : l'etiquette, ses codes, ses actions -->
+          <aside class="card bdx-panneau" id="bdx-panneau" aria-label="Détails de l'étiquette" hidden></aside>
+        </div>
       </div>
     </section>
 

@@ -67,3 +67,6 @@ require("./controle/depots").demarreControleAuto();
 // la copie des boites aux lettres de rue (itineraire boites jaunes) : verifiee
 // un peu apres le demarrage, puis chaque jour
 require("./itineraire/boites").demarreActualisation();
+// l'index des codes des etiquettes recentes (etude des bordereaux) : lu en
+// fond, doucement, une etiquette a la fois
+require("./bordereaux").demarreIndexation();
