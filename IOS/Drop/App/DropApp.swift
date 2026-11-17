@@ -66,6 +66,17 @@ struct DropApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands { DropCommands(app: app) }
 
+        // Les bordereaux : une fenetre a part (Cmd B, ou le bouton de la barre)
+        Window("Bordereaux", id: MacWindow.bordereaux) {
+            BordereauxFenetre()
+                .environment(app)
+                .preferredColorScheme(.dark)
+                .tint(Theme.violet)
+                .frame(minWidth: 1100, minHeight: 680)
+        }
+        .defaultSize(width: 1500, height: 940)
+        .windowStyle(.hiddenTitleBar)
+
         // Reglages : Drop > Reglages... (Cmd ,)
         Settings {
             MacSettingsView()

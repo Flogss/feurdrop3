@@ -147,7 +147,9 @@ enum MacCapture {
                 let contenu = try await SCShareableContent.currentProcess
                 let liste = contenu.windows.map { "\($0.windowID) \($0.title ?? "-") \($0.frame) layer=\($0.windowLayer) visible=\($0.isOnScreen)" }.joined(separator: "\n")
                 try? liste.write(toFile: chemin + ".fenetres.txt", atomically: true, encoding: .utf8)
-                let principale = NSApp.windows.first { $0.isVisible && $0.frame.width > 600 }
+                // `-DropCaptureFenetre Bordereaux` : cette fenetre-la plutot que la principale
+                let titre = UserDefaults.standard.string(forKey: "DropCaptureFenetre")
+                let principale = NSApp.windows.first { $0.isVisible && $0.frame.width > 600 && (titre == nil || $0.title == titre) }
                 guard let fenetre = contenu.windows.first(where: { $0.windowID == CGWindowID(principale?.windowNumber ?? -1) })
                         ?? contenu.windows.filter({ $0.windowLayer == 0 && $0.isOnScreen }).max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else { return }
                 let filtre = SCContentFilter(desktopIndependentWindow: fenetre)
@@ -180,7 +182,8 @@ enum TestSouris {
         let sortie = reglages.string(forKey: "DropTestSortie") ?? "/tmp/drop-test-souris.txt"
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(reglages.double(forKey: "DropTestDelai").nonZero ?? 5))
-            guard let fenetre = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 }),
+            let titre = reglages.string(forKey: "DropCaptureFenetre")
+            guard let fenetre = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 600 && (titre == nil || $0.title == titre) }),
                   let racine = fenetre.contentView else { return }
             let hauteur = racine.bounds.height
             @MainActor func envoie(_ type: NSEvent.EventType, _ x: CGFloat, _ yHaut: CGFloat) {

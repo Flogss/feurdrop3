@@ -5,6 +5,8 @@ import DropKit
 
 enum MacWindow {
     static let principale = "principale"
+    /// les bordereaux : une fenetre a part
+    static let bordereaux = "bordereaux"
 }
 
 /// Les pages de la fenetre : trois onglets (comme le site), et les outils
@@ -75,6 +77,7 @@ enum MacPage: String, CaseIterable, Identifiable, Hashable {
 /// d'ou l'on vient.
 struct MacRootView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @State private var booted = false
     @State private var sens: CGFloat = 1
     /// la meteorite du lancement, puis le logo qui rejoint la marque
@@ -160,6 +163,14 @@ struct MacRootView: View {
         .task { await demarre() }
         #if DEBUG || PERF_HOOKS
         .task { await parcoursDeMesure() }
+        #endif
+        #if DEBUG
+        // verification : `-DropOuvreBordereaux 1` ouvre la fenetre Bordereaux au lancement
+        .task {
+            guard UserDefaults.standard.bool(forKey: "DropOuvreBordereaux") else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            openWindow(id: MacWindow.bordereaux)
+        }
         #endif
         .task(id: app.pageMac) { await boucle() }
         // « Tout vérifier » lance ailleurs : ce Mac lit les pages officielles
@@ -388,11 +399,22 @@ struct DropCommands: Commands {
                 .keyboardShortcut(page.raccourci, modifiers: .command)
             }
             Divider()
+            OuvreBordereaux()
+            Divider()
             Button("Actualiser") {
                 Task { await app.refreshVisible() }
             }
             .keyboardShortcut("r", modifiers: .command)
         }
+    }
+}
+
+/// « Bordereaux » (Cmd B) : la fenetre a part.
+private struct OuvreBordereaux: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Bordereaux") { openWindow(id: MacWindow.bordereaux) }
+            .keyboardShortcut("b", modifiers: .command)
     }
 }
 

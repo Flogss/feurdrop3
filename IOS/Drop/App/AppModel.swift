@@ -84,6 +84,10 @@ final class AppModel {
     @ObservationIgnored lazy var depots = DepotsModel(app: self)
     @ObservationIgnored lazy var itineraire = ItineraireModel(app: self)
     #if os(macOS)
+    /// la fenetre « Bordereaux » (a part de la fenetre Drop)
+    @ObservationIgnored lazy var bordereaux = BordereauxModel(app: self)
+    #endif
+    #if os(macOS)
     /// Ce Mac lit les pages officielles (Mondial Relay, GLS...) : tout seul,
     /// tant que l'app est ouverte -- sa veille est lancee au demarrage
     /// (AppDelegate), pas par une fenetre.

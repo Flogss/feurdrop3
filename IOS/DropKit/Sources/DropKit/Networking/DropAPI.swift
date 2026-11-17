@@ -349,6 +349,52 @@ public struct DropAPI: Sendable {
         return r.lieu
     }
 
+    // MARK: - Bordereaux
+
+    /// Les etiquettes, de la plus recente a la plus ancienne (`avant` : la suite).
+    public func bordereaux(filtre: String = "tous", texte: String = "", avant: Int? = nil) async throws -> BordereauxListe {
+        var query = [URLQueryItem(name: "filtre", value: filtre)]
+        if !texte.isEmpty { query.append(URLQueryItem(name: "q", value: texte)) }
+        if let avant { query.append(URLQueryItem(name: "avant", value: String(avant))) }
+        return try await client.send(.get, "/api/bordereaux", query: query)
+    }
+
+    public func bordereauxEtat() async throws -> BordereauxEtat {
+        try await client.send(.get, "/api/bordereaux/etat")
+    }
+
+    /// Un numero (entier, debut, fin, morceau, a une faute pres) dans les codes
+    /// lus et les numeros des colis.
+    public func rechercheBordereaux(_ texte: String) async throws -> BordereauxRecherche {
+        try await client.send(.get, "/api/bordereaux/recherche", query: [URLQueryItem(name: "q", value: texte)])
+    }
+
+    /// Une etiquette (sans la relire).
+    public func bordereau(_ id: Int) async throws -> BordereauDetail {
+        try await client.send(.get, "/api/bordereaux/\(id)")
+    }
+
+    private struct CorpsAnalyse: Encodable, Sendable { let force: Bool }
+
+    /// Lire les codes maintenant (`force` : relire une etiquette deja lue).
+    public func analyseBordereau(_ id: Int, force: Bool = false) async throws -> BordereauDetail {
+        try await client.send(.post, "/api/bordereaux/\(id)/analyse", body: CorpsAnalyse(force: force), timeout: 120)
+    }
+
+    /// Le fichier d'origine, tel quel (PDF ou image).
+    public func fichierBordereau(_ id: Int) async throws -> Data {
+        try await client.raw(.get, "/api/bordereaux/\(id)/fichier", timeout: 60)
+    }
+
+    private struct CorpsAnnotation: Encodable, Sendable { let texte: String }
+    private struct ReponseAnnotation: Decodable, Sendable { let annotation: BordereauAnnotation? }
+
+    /// La note d'etude (vide : effacee). Jamais ecrite dans le fichier.
+    public func annoteBordereau(_ id: Int, texte: String) async throws -> BordereauAnnotation? {
+        let r: ReponseAnnotation = try await client.send(.put, "/api/bordereaux/\(id)/annotation", body: CorpsAnnotation(texte: texte))
+        return r.annotation
+    }
+
     // MARK: - Heures de drop
 
     private struct CorpsHeureDrop: Encodable, Sendable {

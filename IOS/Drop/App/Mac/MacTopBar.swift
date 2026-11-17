@@ -15,6 +15,7 @@ struct MacTopBar: View {
     var marquePosee = true
     var surCadreMarque: (CGRect) -> Void = { _ in }
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
     /// la largeur de la barre : en dessous d'un seuil, l'heure de drop se
     /// resserre (l'horloge et l'heure seules) pour ne pas mordre sur le menu
     /// du centre
@@ -39,6 +40,16 @@ struct MacTopBar: View {
                         HeureDropBouton(compact: largeur < 1440)
                         outil(.tracking, aide: "Suivi des colis (⌘4)")
                         outil(.itineraire, aide: "Créer un itinéraire — boîtes jaunes (⌘9)")
+                        // une fenetre a part, pas une page de celle-ci
+                        Button { openWindow(id: MacWindow.bordereaux) } label: {
+                            Image(systemName: "barcode.viewfinder")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.text2)
+                                .frame(width: 40, height: 40)
+                        }
+                        .buttonStyle(VerreRond(actif: false))
+                        .help("Bordereaux — étude des codes et recherche d'un numéro, dans une fenêtre à part (⌘B)")
+                        .accessibilityLabel("Bordereaux")
                         outil(.depots, aide: "Contrôle des dépôts (⌘7)", pastille: app.depots.resume?.attention ?? 0, teinte: Theme.teal)
                         outil(.historique, aide: "Historique (⌘8)")
                         outil(.locker, aide: "Mode locker (⌘5)", pastille: app.locker.pairs.count)
