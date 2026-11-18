@@ -402,3 +402,5 @@
    glisser la teintait) ; un texte en cours d'edition, si */
 .ed-scene, .ed-feuille, .ed-panneau .ed-calques { -webkit-user-select: none; user-select: none; }
 .ed-texte[contenteditable] { -webkit-user-select: text; user-select: text; }
+/* un code de l'etiquette qui n'est pas celui du transporteur : modifiable */
+.ed-libre { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 9px; border-radius: 10px; font-size: 11.5px; color: var(--text-3); background: rgb(255 255 255 / 0.03); border: 1px dashed var(--line-2); }

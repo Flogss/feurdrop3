@@ -82,6 +82,23 @@ function valeurRefusee(format, valeur, colis) {
   return null;
 }
 
+// Un code de l'etiquette d'origine dont la valeur peut changer : seulement
+// ce qui n'est ni le numero de suivi, ni un numero qui en a la forme, ni un
+// code qui le contient (tri, lien de suivi), ni des donnees d'expedition --
+// une reference de commande, le lien d'une boutique... Le role vient de
+// l'analyse (index.js), et la valeur lue repasse par les memes refus qu'un
+// code ajoute.
+const ROLES_MODIFIABLES = new Set(["autre", "lien"]);
+function codeModifiable(lu, colis) {
+  if (!lu || !lu.lisible || !ROLES_MODIFIABLES.has(lu.role)) return false;
+  if (lu.role === "lien" && lu.contientSuivi) return false;
+  return !valeurRefusee(lu.format, lu.valeur, colis);
+}
+
+// L'orientation d'un code lu, ramenee a un angle droit (un code tourne de
+// 90 degres sur l'etiquette le reste une fois reecrit).
+const angleDroit = (deg) => G.angle(Math.round((Number(deg) || 0) / 90) * 90);
+
 // --- Generation d'un code (vectoriel) --------------------------------------------------------
 
 // Les modules noirs en rectangles, ligne par ligne (les lignes identiques
@@ -200,6 +217,9 @@ function valideModele(modele) {
           propre.alignement = ["gauche", "centre", "droite"].includes(e.alignement) ? e.alignement : "gauche";
         } else if (e.type === "code") {
           if (!FORMATS.includes(e.format)) throw new ErreurEditeur(`Élément ${e.id} : format inconnu.`);
+          // un code de l'etiquette dont la valeur (ou le format, la couleur)
+          // a change : il se redessine (verifie a l'export, voir verifieCodes)
+          if (propre.origine === "original") propre.reecrit = e.reecrit === true;
           propre.format = e.format;
           propre.valeur = String(e.valeur ?? "").slice(0, 500);
           if (Number.isInteger(e.codeId)) propre.codeId = e.codeId;
@@ -243,6 +263,16 @@ function verifieCodes(modele, colis, codesLus) {
         // un extrait (source) copie les pixels du code : meme illisible, il
         // se deplace tel quel ; regenere (anciens brouillons), il doit avoir ete lu
         if (!lu || (!lu.lisible && !e.source)) throw new ErreurEditeur("Un code d'origine ne correspond à aucun code lu sur l'étiquette.", 422, { protege: true });
+        if (e.reecrit) {
+          // reecrit : seulement un code qui n'est pas celui du transporteur,
+          // et sa nouvelle valeur passe les memes refus qu'un code ajoute
+          if (!codeModifiable(lu, colis)) {
+            throw new ErreurEditeur("Ce code de l'étiquette porte le numéro de suivi ou des données d'expédition : sa valeur est protégée. Réédite le bordereau chez le transporteur.", 422, { protege: true });
+          }
+          const refus = valeurRefusee(e.format, e.valeur, colis);
+          if (refus) throw new ErreurEditeur(refus.raison, 422, { protege: true, transporteur: refus.transporteur || null });
+          continue;
+        }
         if (!lu.lisible) continue;
         if (lu.valeur !== e.valeur || lu.format !== e.format) {
           throw new ErreurEditeur("La valeur d'un code de l'étiquette d'origine est protégée : un numéro de suivi ou des données d'expédition ne se changent pas ici. Réédite le bordereau chez le transporteur.", 422, { protege: true });
@@ -288,7 +318,7 @@ function texteEcrivable(police, texte) {
  */
 function extrait(e) {
   if (e.origine !== "original" || !e.source || !e.depart) return false;
-  if (e.type === "code") return true;
+  if (e.type === "code") return !e.reecrit;
   if (e.type === "texte") return !e.retape;
   if (e.type === "image") return !e.image;
   return false;
@@ -395,11 +425,20 @@ async function exportePdf(octets, modele, { titre = "Bordereau" } = {}) {
         });
       } else if (e.type === "code") {
         const code = await genereCode(e.format, e.valeur, { original: true });
-        const mx = e.l / code.largeur;
-        const my = e.h / code.hauteur;
+        // un code reecrit de l'etiquette garde son orientation (un code
+        // vertical reste vertical) : il se dessine dans son propre repere
+        const q = e.orientation || 0;
+        const travers = Math.abs(q) === 90;
+        const L = travers ? e.h : e.l;
+        const Hc = travers ? e.l : e.h;
+        const m = G.matriceCadre({ x: e.x + e.l / 2 - L / 2, y: e.y + e.h / 2 - Hc / 2, l: L, h: Hc, rotation: q });
+        const mx = L / code.largeur;
+        const my = Hc / code.hauteur;
+        page.pushOperators(pushGraphicsState(), cm(cadreVersPdf(m)));
         for (const [x, y, l, h] of rectangles(code.matrice)) {
-          page.drawRectangle({ x: e.x + x * mx, y: H - e.y - (y + h) * my, width: l * mx, height: h * my, color: couleur(e.couleur || "#000000") });
+          page.drawRectangle({ x: x * mx, y: y * my, width: l * mx, height: h * my, color: couleur(e.couleur || "#000000") });
         }
+        page.pushOperators(popGraphicsState());
       }
     }
   }
@@ -491,10 +530,12 @@ async function exporte(colisId, modele, { telecharge, codesLus }) {
   if (!colis || !colis.file_id) throw new ErreurEditeur("Étiquette introuvable.", 404);
   const propre = valideModele(modele);
   verifieCodes(propre, colis, codesLus);
+  const lus = new Map(codesLus.map((c) => [c.id, c]));
+  for (const p of propre.pages) for (const e of p.elements) if (e.type === "code" && e.reecrit) e.orientation = angleDroit(lus.get(e.codeId)?.orientation);
   const fichier = await telecharge(colis.file_id);
   const nom = String(colis.file_name || `etiquette-${colis.id}`).replace(/\.[a-z0-9]{2,5}$/i, "");
   const { pdf, modifications } = await exportePdf(fichier.octets, propre, { titre: nom });
   return { pdf, nom: `${nom}-modifie.pdf`, modifications };
 }
 
-module.exports = { FORMATS, POLICES, ErreurEditeur, valeurRefusee, genereCode, valideModele, verifieCodes, brouillon, gardeBrouillon, exporte, exportePdf, rectangles, importeImage, orientationJpeg, extrait };
+module.exports = { FORMATS, POLICES, ErreurEditeur, valeurRefusee, codeModifiable, angleDroit, genereCode, valideModele, verifieCodes, brouillon, gardeBrouillon, exporte, exportePdf, rectangles, importeImage, orientationJpeg, extrait };

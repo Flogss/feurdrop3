@@ -95,12 +95,41 @@ function pageModele(n = ed.page) {
 }
 const elements = () => pageModele().elements;
 
+// Le code lu sur l'etiquette d'ou vient un element (ou null).
+function codeLu(e) {
+  if (e.type !== "code" || e.origine !== "original") return null;
+  for (const o of ed.originaux.values()) {
+    const c = o.codes.find((x) => x.id === e.codeId);
+    if (c) return c;
+  }
+  return null;
+}
+
+// La valeur d'un code de l'etiquette peut-elle changer ? (pas celui du transporteur)
+const codeLibre = (e) => Boolean(codeLu(e)?.modifiable);
+
+// Un code de l'etiquette est-il reecrit (autre valeur, format ou couleur) ?
+// Le panneau montre « Valeur d'origine » des la frappe, sans etre redessine
+// (le curseur reste dans le champ).
+function marqueReecrit(e) {
+  const lu = codeLu(e);
+  if (!lu) return;
+  e.reecrit = !(e.valeur === lu.valeur && e.format === lu.format && (e.couleur || "#000000").toLowerCase() === "#000000");
+  marqueModifie(e);
+  const note = document.querySelector("#ed-proprietes .ed-libre");
+  if (note) {
+    const bouton = note.querySelector('[data-action="valeur-origine"]');
+    if (e.reecrit && !bouton) note.insertAdjacentHTML("beforeend", '<button class="ed-petit" type="button" data-action="valeur-origine">Valeur d\'origine</button>');
+    else if (!e.reecrit) bouton?.remove();
+  }
+}
+
 // Un element de l'etiquette rendu tel quel (ses pixels, pas une copie
 // redessinee) : un code, un texte deplace sans etre retape, une image pas
 // remplacee. Meme regle que l'export (src/bordereaux/editeur.js).
 function estExtrait(e) {
   if (e.origine !== "original" || !e.source || !e.depart) return false;
-  if (e.type === "code") return true;
+  if (e.type === "code") return !e.reecrit;
   if (e.type === "texte") return !e.retape;
   if (e.type === "image") return !e.image && !ed.apercus.has(e.id);
   return false;
@@ -267,7 +296,13 @@ function svgCode(e) {
     codeDe(e.format, e.valeur, e.origine === "original" ? e.codeId : null).then(() => rendElements(), () => rendElements());
     return `<span class="ed-code-attente">${c instanceof Promise ? "…" : "Code impossible"}</span>`;
   }
-  return `<svg viewBox="0 0 ${c.largeur} ${c.hauteur}" preserveAspectRatio="none" aria-hidden="true"><path d="${c.chemin}" fill="${escapeAttr(e.couleur || "#000000")}" shape-rendering="crispEdges"/></svg>`;
+  // un code reecrit de l'etiquette garde l'orientation de l'original (comme a l'export)
+  const q = codeLu(e)?.orientation || 0;
+  const travers = Math.abs(q) === 90;
+  const style = q
+    ? ` style="position:absolute;left:50%;top:50%;width:${(((travers ? e.h : e.l) / e.l) * 100).toFixed(4)}%;height:${(((travers ? e.l : e.h) / e.h) * 100).toFixed(4)}%;transform:translate(-50%,-50%) rotate(${q}deg)"`
+    : "";
+  return `<svg viewBox="0 0 ${c.largeur} ${c.hauteur}" preserveAspectRatio="none" aria-hidden="true"${style}><path d="${c.chemin}" fill="${escapeAttr(e.couleur || "#000000")}"/></svg>`;
 }
 
 // --- Rendu --------------------------------------------------------------------------------
@@ -598,8 +633,10 @@ function rendProprietes() {
         ${[["gauche", "À gauche"], ["centre", "Centré"], ["droite", "À droite"]].map(([v, t]) => `<button type="button" class="seg${e.alignement === v ? " is-on" : ""}" data-alignement="${v}" role="radio" aria-checked="${e.alignement === v}">${t}</button>`).join("")}
       </div></section>`;
   } else if (e.type === "code") {
-    const formats = e.origine === "original" ? [e.format] : FORMATS_2D.includes(e.format) ? FORMATS_2D : FORMATS_BARRES;
-    const protege = e.origine === "original";
+    // le code du transporteur : verrouille ; un autre code de l'etiquette
+    // (reference, lien de boutique) : modifiable, comme un code ajoute
+    const protege = e.origine === "original" && !codeLibre(e);
+    const formats = protege ? [e.format] : FORMATS_2D.includes(e.format) ? FORMATS_2D : FORMATS_BARRES;
     propres = `<section class="ed-bloc"><h3>${NOMS_FORMAT[e.format] || e.format}</h3>
       <label class="ed-champ is-large"><span>Format</span><select data-prop="format"${protege ? " disabled" : ""}>${formats.map((f) => `<option value="${f}"${f === e.format ? " selected" : ""}>${NOMS_FORMAT[f]}</option>`).join("")}</select></label>
       <label class="ed-champ is-large ed-champ-valeur"><span>Contenu décodé</span>
@@ -607,7 +644,11 @@ function rendProprietes() {
       ${
         protege
           ? `<p class="ed-protege"><svg class="icon"><use href="#i-lock"/></svg><span>Valeur du transporteur</span></p>`
-          : `<p class="ed-message" id="ed-message-code"></p>`
+          : `<p class="ed-message" id="ed-message-code"></p>${
+              e.origine === "original"
+                ? `<p class="ed-libre"><span>Code de l'étiquette · pas un numéro de suivi</span>${e.reecrit ? '<button class="ed-petit" type="button" data-action="valeur-origine">Valeur d\'origine</button>' : ""}</p>`
+                : ""
+            }`
       }
       <label class="ed-champ ed-champ-couleur"><span>Couleur</span><input type="color" data-prop="couleur" value="${e.couleur || "#000000"}"${protege ? " disabled" : ""} /></label>
       </section>`;
@@ -2061,6 +2102,9 @@ function codesOriginaux(n) {
     format: c.format,
     valeur: c.valeur,
     lisible: c.lisible,
+    // decide par le serveur : jamais le code du transporteur
+    modifiable: c.modifiable === true,
+    orientation: Math.round((c.orientation || 0) / 90) * 90,
     x: c.zone.x0 * ed.W,
     y: c.zone.y0 * ed.H,
     l: (c.zone.x1 - c.zone.x0) * ed.W,
@@ -2077,7 +2121,7 @@ $("ed-proprietes").addEventListener("input", (evt) => {
   if (!prop || !e) return;
   if (["x", "y", "l", "h"].includes(prop)) return; // a la validation (change)
   if (prop === "valeur") {
-    if (e.origine === "original") return;
+    if (e.origine === "original" && !codeLibre(e)) return;
     // le code se redessine a la frappe
     clearTimeout(minuteurValeur);
     minuteurValeur = setTimeout(() => appliqueValeur(e, evt.target.value, null, { silencieux: true }), 90);
@@ -2097,6 +2141,12 @@ $("ed-proprietes").addEventListener("input", (evt) => {
     ajusteTexte(e);
   }
   if (prop === "couleur") e.couleur = evt.target.value;
+  if (prop === "couleur" && e.type === "code" && e.origine === "original") {
+    if (!codeLibre(e)) return;
+    marqueReecrit(e);
+    rendElements();
+    return;
+  }
   if (prop === "fond") e.fond = evt.target.value;
   if (prop === "zoom-contenu" && e.type === "image") {
     // le contenu de l'image grandit dans son cadre, autour de son centre
@@ -2169,8 +2219,9 @@ let minuteurHistoriqueCode = null;
 async function appliqueValeur(e, valeur, libelle = null, { silencieux = false } = {}) {
   const message = $("ed-message-code");
   try {
-    await codeDe(e.format, valeur);
+    await codeDe(e.format, valeur, e.origine === "original" ? e.codeId : null);
     e.valeur = valeur;
+    if (e.origine === "original") marqueReecrit(e);
     if (message) {
       message.textContent = "";
       message.className = "ed-message";
@@ -2297,6 +2348,14 @@ function faitAction(action, cible = null) {
   }
   if (action === "ajouter-image") return choisitFichier((f) => ajouteImage(f));
   if (action === "panneau") return basculePanneau();
+  if (action === "valeur-origine" && e?.type === "code") {
+    const lu = codeLu(e);
+    if (!lu) return;
+    Object.assign(e, { valeur: lu.valeur, format: lu.format, couleur: "#000000", reecrit: false });
+    engage(`Valeur d'origine ${nomElement(e)}`);
+    rendTout();
+    return;
+  }
   if (action === "supprimer") return supprime();
   if (action === "dupliquer") return duplique();
   if (action === "devant" || action === "derriere") return ordre(action);

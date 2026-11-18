@@ -303,3 +303,82 @@ test("la geometrie commune : cadrage borne, coins, extrait identique a l'origine
   assert.equal(G.angle(450), 90);
   assert.equal(G.angle(-270), 90);
 });
+
+test("les codes de l'etiquette : le numero de suivi reste verrouille, une reference se reecrit (orientation gardee)", async () => {
+  // une etiquette : le numero de suivi La Poste, une reference de commande
+  // tournee de 90 degres, et un lien de boutique
+  const page = {
+    taille: [288, 432],
+    codes: [
+      { texte: "6A99887766554", format: "Code128", x: 20, y: 330, largeur: 230, hauteur: 70 },
+      { texte: "CMD-2026-0042", format: "Code128", x: 20, y: 60, largeur: 180, hauteur: 50 },
+      { texte: "https://boutique.test/commande/42", format: "QRCode", x: 200, y: 180, largeur: 70, hauteur: 70 },
+    ],
+  };
+  const pdf = await etiquettePdf([page]);
+  const colis = colisAvecFichier(pdf);
+  await app.appel(`/api/bordereaux/${colis.id}/analyse`, { methode: "POST", corps: {} });
+  const codes = (await app.appel(`/api/bordereaux/${colis.id}`)).json.analyse.pages[0].codes;
+  const suivi = codes.find((c) => c.valeur === "6A99887766554");
+  const ref = codes.find((c) => c.valeur === "CMD-2026-0042");
+  const lien = codes.find((c) => c.format === "QRCode");
+  assert.equal(suivi.modifiable, false, "le numero de suivi : verrouille");
+  assert.equal(ref.modifiable, true, "une reference de commande : modifiable");
+  assert.equal(lien.modifiable, true, "le lien d'une boutique : modifiable");
+
+  const zone = (c) => ({ x: c.zone.x0 * 288, y: c.zone.y0 * 432, l: (c.zone.x1 - c.zone.x0) * 288, h: (c.zone.y1 - c.zone.y0) * 432 });
+  const element = (c, valeur, extra = {}) => {
+    const z = zone(c);
+    const masque = { x: z.x - 2, y: z.y - 2, l: z.l + 4, h: z.h + 4 };
+    return { id: `c${c.id}`, type: "code", origine: "original", modifie: true, reecrit: true, codeId: c.id, format: c.format, valeur, ...z, masque, source: masque, depart: { ...z, rotation: 0 }, ...extra };
+  };
+
+  // le numero de suivi : ni en apercu, ni a l'export, meme vers une valeur anodine
+  const apercu = await app.appel(`/api/bordereaux/${colis.id}/code`, { methode: "POST", corps: { format: "Code128", valeur: "AUTRE-CHOSE", codeId: suivi.id } });
+  assert.equal(apercu.status, 422);
+  const r1 = await exporte(colis.id, { pages: [{ page: 1, elements: [element(suivi, "AUTRE-CHOSE")] }] });
+  assert.equal(r1.status, 422);
+  assert.match(JSON.parse(r1.octets.toString()).error, /protégée/);
+  // ... ni « reecrit » vers sa propre valeur pour contourner le controle
+  assert.equal((await exporte(colis.id, { pages: [{ page: 1, elements: [element(suivi, suivi.valeur)] }] })).status, 422);
+
+  // une reference : vers un numero de suivi, refuse ; vers une autre reference, permis
+  assert.equal((await app.appel(`/api/bordereaux/${colis.id}/code`, { methode: "POST", corps: { format: "Code128", valeur: "6A11122233344", codeId: ref.id } })).status, 422);
+  assert.equal((await exporte(colis.id, { pages: [{ page: 1, elements: [element(ref, "6A11122233344")] }] })).status, 422);
+  assert.equal((await app.appel(`/api/bordereaux/${colis.id}/code`, { methode: "POST", corps: { format: "Code128", valeur: "CMD-2026-0099", codeId: ref.id } })).status, 200);
+  const r2 = await exporte(colis.id, { pages: [{ page: 1, elements: [element(ref, "CMD-2026-0099"), element(lien, "https://boutique.test/commande/99")] }] });
+  assert.equal(r2.status, 200, r2.octets.toString());
+  const relus = (await analyseFichier(r2.octets)).pages[0].codes;
+  const valeurs = relus.map((c) => c.valeur);
+  assert.ok(valeurs.includes("CMD-2026-0099"), "la nouvelle reference");
+  assert.ok(!valeurs.includes("CMD-2026-0042"), "l'ancienne est masquee");
+  assert.ok(valeurs.includes("https://boutique.test/commande/99"));
+  assert.ok(valeurs.includes("6A99887766554"), "le numero de suivi n'a pas bouge");
+  // a la meme place, dans le meme sens
+  const nouvelle = relus.find((c) => c.valeur === "CMD-2026-0099");
+  assert.ok(Math.abs(nouvelle.x0 - ref.zone.x0) < 0.03 && Math.abs(nouvelle.y0 - ref.zone.y0) < 0.03, "a la place de l'ancienne");
+  assert.equal(Math.round(nouvelle.orientation / 90), Math.round(ref.orientation / 90), "meme orientation");
+});
+
+test("un code tourne de l'etiquette, reecrit : il reste tourne", async () => {
+  const doc = await PDFDocument.create();
+  const p = doc.addPage([288, 432]);
+  const png = await doc.embedPng(await codePng("LOT-778899", "Code128"));
+  p.drawImage(png, { x: 60, y: 60, width: 150, height: 40, rotate: degrees(90) });
+  const pdf = await doc.save();
+  const colis = colisAvecFichier(pdf);
+  await app.appel(`/api/bordereaux/${colis.id}/analyse`, { methode: "POST", corps: {} });
+  const lu = (await app.appel(`/api/bordereaux/${colis.id}`)).json.analyse.pages[0].codes[0];
+  assert.equal(lu.modifiable, true);
+  assert.equal(Math.abs(Math.round(lu.orientation)), 90, "lu vertical");
+  const z = { x: lu.zone.x0 * 288, y: lu.zone.y0 * 432, l: (lu.zone.x1 - lu.zone.x0) * 288, h: (lu.zone.y1 - lu.zone.y0) * 432 };
+  assert.ok(z.h > z.l * 2, "zone verticale");
+  const masque = { x: z.x - 2, y: z.y - 2, l: z.l + 4, h: z.h + 4 };
+  const e = { id: "t", type: "code", origine: "original", modifie: true, reecrit: true, codeId: lu.id, format: "Code128", valeur: "LOT-112233", ...z, masque, source: masque, depart: { ...z, rotation: 0 } };
+  const r = await exporte(colis.id, { pages: [{ page: 1, elements: [e] }] });
+  assert.equal(r.status, 200, r.octets.toString());
+  const c = (await analyseFichier(r.octets)).pages[0].codes.find((x) => x.valeur === "LOT-112233");
+  assert.ok(c, "lisible");
+  assert.equal(Math.abs(Math.round(c.orientation)), 90, "toujours vertical");
+  assert.ok((c.y1 - c.y0) * 432 > (c.x1 - c.x0) * 288 * 2, "dans sa zone verticale, pas ecrase");
+});

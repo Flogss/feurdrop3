@@ -216,7 +216,11 @@ function vueAnalyse(f, colis, suivi) {
   }
   for (const c of f.codes) {
     const page = pages[c.page - 1];
-    if (page) page.codes.push({ ...c, ...roleDu(c, colis, suivi) });
+    if (!page) continue;
+    const code = { ...c, ...roleDu(c, colis, suivi) };
+    // la valeur peut-elle changer dans l'editeur ? (jamais le code du transporteur)
+    code.modifiable = require("./editeur").codeModifiable(code, colis);
+    page.codes.push(code);
   }
   return {
     etat: f.erreur ? "erreur" : "analyse",

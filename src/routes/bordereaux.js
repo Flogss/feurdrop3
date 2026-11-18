@@ -185,6 +185,10 @@ router.post(
       const codeId = Number.isInteger(req.body?.codeId) ? req.body.codeId : null;
       const lu = codeId ? bordereaux.codesDuColis(id).find((c) => c.id === codeId) : null;
       const original = Boolean(lu && lu.lisible && lu.valeur === req.body?.valeur && lu.format === req.body?.format);
+      // une autre valeur pour un code du transporteur : jamais, meme en apercu
+      if (lu && !original && !editeur.codeModifiable(lu, colis)) {
+        return res.status(422).json({ error: "Ce code de l'étiquette porte le numéro de suivi ou des données d'expédition : sa valeur est protégée.", protege: true });
+      }
       const { format, valeur, largeur, hauteur, chemin } = await editeur.genereCode(String(req.body?.format || ""), req.body?.valeur, { colis, original });
       res.json({ format, valeur, largeur, hauteur, chemin });
     } catch (err) {
