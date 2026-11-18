@@ -101,6 +101,18 @@ function ouvre() {
       modele TEXT NOT NULL,
       modifie_le TEXT NOT NULL
     );
+    -- les images posees dans les documents de travail (deposees depuis le
+    -- Finder, ou mises a la place d'une image de l'etiquette) : reconnues a
+    -- leur empreinte, gardees telles quelles pour l'export
+    CREATE TABLE IF NOT EXISTS images_travail (
+      empreinte TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      largeur INTEGER NOT NULL,
+      hauteur INTEGER NOT NULL,
+      octets BLOB NOT NULL,
+      colis_id INTEGER,
+      cree_le TEXT NOT NULL
+    );
   `);
   return base;
 }
@@ -384,6 +396,19 @@ function gardeTravail(colisId, modele) {
 
 const effaceTravail = (colisId) => ouvre().prepare("DELETE FROM travaux WHERE colis_id = ?").run(colisId).changes > 0;
 
+/** Garde une image de document de travail (une seule fois par empreinte). */
+function gardeImage({ empreinte, type, largeur, hauteur, octets, colisId }) {
+  ouvre()
+    .prepare("INSERT OR IGNORE INTO images_travail (empreinte, type, largeur, hauteur, octets, colis_id, cree_le) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(empreinte, type, largeur, hauteur, octets, colisId, maintenant());
+}
+
+/** Une image de document de travail : { type, largeur, hauteur, octets } ou null. */
+function imageTravail(empreinte) {
+  const r = ouvre().prepare("SELECT type, largeur, hauteur, octets FROM images_travail WHERE empreinte = ?").get(String(empreinte || ""));
+  return r ? { ...r, octets: new Uint8Array(r.octets) } : null;
+}
+
 /** L'etat des fichiers lus (`empreintes` : seulement ceux-la). */
 const resumeFichiers = (empreintes = null) => restreint("SELECT empreinte, type, pages, version, erreur, analyse_le FROM fichiers", "empreinte", empreintes);
 
@@ -418,4 +443,6 @@ module.exports = {
   travail,
   gardeTravail,
   effaceTravail,
+  gardeImage,
+  imageTravail,
 };

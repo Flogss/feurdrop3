@@ -36,6 +36,12 @@ const CSS_POLICE = {
 };
 const FORMATS_BARRES = ["Code128", "Code39", "Code93", "EAN13", "EAN8", "UPCA", "ITF", "Codabar"];
 const FORMATS_2D = ["QRCode", "DataMatrix", "PDF417", "Aztec"];
+// la fenetre de l'app Mac (elle pose la classe app-mac des le chargement) :
+// les images deposees depuis le Finder, le menu contextuel, la rotation, le
+// recadrage et l'habillage « verre » n'existent que la
+const APP_MAC = document.documentElement.classList.contains("app-mac") || /FeurDropMac/.test(navigator.userAgent);
+if (APP_MAC) document.documentElement.classList.add("app-mac");
+const G = GeometrieEditeur;
 const NOMS_FORMAT = { Code128: "Code 128", Code39: "Code 39", Code93: "Code 93", EAN13: "EAN-13", EAN8: "EAN-8", UPCA: "UPC-A", ITF: "ITF", Codabar: "Codabar", QRCode: "QR Code", DataMatrix: "Data Matrix", PDF417: "PDF417", Aztec: "Aztec" };
 
 const ed = {
@@ -63,6 +69,12 @@ const ed = {
   sauvegarde: { minuteur: null, enCours: false, sale: false, quand: null, erreur: null },
   geste: null,
   rendu: null,
+  versionPage: 0, // change a chaque nouveau rendu de la page d'origine (les extraits se redessinent)
+  noeuds: new Map(), // id -> { el, cle } : un noeud par element, mis a jour sans tout reconstruire
+  masquesRendus: "",
+  recadrage: null, // l'image dont on regle le contenu (double-clic)
+  apercus: new Map(), // id -> { url, l, h } : une image deposee, montree pendant son envoi
+  urls: new Map(), // empreinte -> adresse locale (l'image deposee, sans attendre le serveur)
 };
 
 const uid = () => `e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -82,6 +94,17 @@ function pageModele(n = ed.page) {
   return p;
 }
 const elements = () => pageModele().elements;
+
+// Un element de l'etiquette rendu tel quel (ses pixels, pas une copie
+// redessinee) : un code, un texte deplace sans etre retape, une image pas
+// remplacee. Meme regle que l'export (src/bordereaux/editeur.js).
+function estExtrait(e) {
+  if (e.origine !== "original" || !e.source || !e.depart) return false;
+  if (e.type === "code") return true;
+  if (e.type === "texte") return !e.retape;
+  if (e.type === "image") return !e.image && !ed.apercus.has(e.id);
+  return false;
+}
 const element = (id) => elements().find((e) => e.id === id) || null;
 const visibles = () => elements().filter((e) => !e.supprime);
 const choisis = () => visibles().filter((e) => ed.selection.has(e.id));
@@ -136,6 +159,8 @@ function vaA(position) {
   if (position < 0 || position >= ed.historique.length || position === ed.position) return;
   ed.position = position;
   ed.modele = JSON.parse(ed.historique[position].etat);
+  migreElements(ed.page);
+  if (ed.recadrage && !element(ed.recadrage)) ed.recadrage = null;
   // les elements choisis qui n'existent plus a cette etape sortent de la selection
   for (const id of [...ed.selection]) if (!element(id) || element(id).supprime) ed.selection.delete(id);
   finEdition(false);
@@ -264,46 +289,170 @@ function dimensionne() {
 }
 
 function rendOriginaux() {
-  const o = ed.originaux.get(ed.page) || { textes: [], codes: [] };
+  const o = ed.originaux.get(ed.page) || { textes: [], codes: [], images: [] };
   // ce qui est deja pris dans le document ne se reprend pas
   const pris = new Set(elements().filter((e) => e.origine === "original").map((e) => e.cle));
   const cible = (k, cle, rect, titre) =>
     pris.has(cle) ? "" : `<div class="ed-original ${k}" data-original="${escapeAttr(cle)}" style="${placement(rect)}" title="${escapeAttr(titre)}"></div>`;
+  // les images dessous : un texte ou un code pose sur une image se prend d'abord
   $("ed-originaux").innerHTML = [
+    ...(o.images || []).map((i) => cible("is-image", i.cle, i.boite, APP_MAC ? "Image de l'étiquette : glisse une image dessus pour la remplacer" : "Image de l'étiquette")),
     ...o.codes.map((c) => cible("is-code", c.cle, c, c.lisible ? `${NOMS_FORMAT[c.format] || c.format} de l'étiquette : ${c.valeur}` : "Code illisible")),
     ...o.textes.map((t) => cible("is-texte", t.cle, t, `Texte de l'étiquette : ${t.texte}`)),
   ].join("");
 }
 
-function rendElements() {
-  const masques = [];
-  const html = [];
-  for (const e of elements()) {
-    if (e.origine === "original" && (e.modifie || e.supprime) && e.masque) masques.push(`<div class="ed-masque" style="${placement(e.masque)}"></div>`);
-    if (e.supprime) continue;
-    const classes = ["ed-el", `is-${e.type}`];
-    if (ed.selection.has(e.id)) classes.push("is-choisi");
-    if (e.verrou) classes.push("is-verrou");
-    if (e.origine === "original") classes.push(e.modifie ? "is-original-modifie" : "is-original");
-    let contenu = "";
-    let style = placement(e);
-    if (e.type === "texte") {
-      // un texte d'origine pas encore modifie : rien n'est redessine, on voit l'original
-      const visible = e.origine !== "original" || e.modifie;
-      const aligne = { gauche: "left", centre: "center", droite: "right" }[e.alignement] || "left";
-      style += `;--taille:${e.taille};color:${e.couleur};text-align:${aligne};font:${CSS_POLICE[e.police] || CSS_POLICE.Helvetica};font-size:calc(var(--taille) * var(--e) * 1px)`;
-      contenu = visible || ed.edition === e.id ? `<div class="ed-texte"${ed.edition === e.id ? ' contenteditable="true" spellcheck="false"' : ""}>${escapeHtml(e.texte)}</div>` : "";
-      if (!visible) classes.push("is-transparent");
-    } else if (e.type === "code") {
-      if (e.origine !== "original" || e.modifie) contenu = svgCode(e);
-      else classes.push("is-transparent");
-    } else if (e.type === "rect") {
-      style += `;background:${e.fond}`;
-    }
-    html.push(`<div class="${classes.join(" ")}" data-id="${e.id}" style="${style}">${contenu}</div>`);
+// L'adresse du contenu d'une image (l'image deposee reste locale tant
+// qu'elle est la : aucun clignotement a l'arrivee de la version du serveur).
+function sourceImage(e) {
+  const a = ed.apercus.get(e.id);
+  if (a) return a;
+  if (!e.image) return null;
+  return { url: ed.urls.get(e.image.ref) || `/api/bordereaux/${ed.colisId}/images/${e.image.ref}`, l: e.image.l, h: e.image.h };
+}
+
+// La page d'origine, telle qu'elle est rendue : la source des extraits.
+function fondPage() {
+  if (ed.type === "image") {
+    const img = $("ed-image");
+    return img.naturalWidth ? { source: img, k: img.naturalWidth / ed.W } : null;
   }
-  $("ed-masques").innerHTML = masques.join("");
-  $("ed-elements").innerHTML = html.join("");
+  const c = $("ed-canvas");
+  return ed.versionPage && c.width > 1 ? { source: c, k: c.width / ed.W } : null;
+}
+
+// Les pixels d'un extrait : la zone d'origine, a la resolution du rendu.
+function dessineExtrait(canvas, e) {
+  const fond = fondPage();
+  if (!fond) return;
+  const s = e.source;
+  canvas.width = Math.max(1, Math.round(s.l * fond.k));
+  canvas.height = Math.max(1, Math.round(s.h * fond.k));
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(fond.source, s.x * fond.k, s.y * fond.k, s.l * fond.k, s.h * fond.k, 0, 0, canvas.width, canvas.height);
+}
+
+// Ou poser l'extrait dans son cadre : la meme matrice que l'export, en
+// pourcentages (le zoom ne change rien, les pixels suivent le cadre).
+function placeExtrait(canvas, e) {
+  const s = e.source;
+  const m = G.matriceExtrait(e.depart, e);
+  const o = G.applique(m, s.x, s.y);
+  canvas.style.width = `${((s.l / e.l) * 100).toFixed(5)}%`;
+  canvas.style.height = `${((s.h / e.h) * 100).toFixed(5)}%`;
+  canvas.style.transform = `translate(${((o.x / s.l) * 100).toFixed(5)}%, ${((o.y / s.h) * 100).toFixed(5)}%) matrix(${m.slice(0, 4).map((v) => v.toFixed(6)).join(",")},0,0)`;
+}
+
+// Le contenu d'une image dans son cadre, en pourcentages du cadre.
+function placeImage(img, e, src) {
+  const c = G.contenuImage(e.l, e.h, src.l, src.h, e.cadrage);
+  img.style.left = `${((c.x / e.l) * 100).toFixed(4)}%`;
+  img.style.top = `${((c.y / e.h) * 100).toFixed(4)}%`;
+  img.style.width = `${((c.l / e.l) * 100).toFixed(4)}%`;
+  img.style.height = `${((c.h / e.h) * 100).toFixed(4)}%`;
+}
+
+function classesDe(e) {
+  const classes = ["ed-el", `is-${e.type}`];
+  if (ed.selection.has(e.id)) classes.push("is-choisi");
+  if (e.verrou) classes.push("is-verrou");
+  if (e.origine === "original") classes.push(e.modifie ? "is-original-modifie" : "is-original");
+  if (estExtrait(e)) classes.push("is-extrait");
+  if (ed.recadrage === e.id) classes.push("is-recadrage");
+  if (ed.apercus.has(e.id)) classes.push("is-envoi");
+  return classes.join(" ");
+}
+
+// Un element : son noeud est garde d'un rendu a l'autre. Seul ce qui change
+// est touche -- deplacer ne fait que bouger le cadre (aucune image refaite,
+// rien qui clignote, meme avec beaucoup d'elements).
+function majNoeud(n, e) {
+  const el = n.el;
+  const cls = classesDe(e);
+  if (el.className !== cls) el.className = cls;
+  let style = placement(e);
+  if (e.rotation) style += `;transform:rotate(${e.rotation}deg)`;
+  // un element de l'etiquette pas encore touche : on voit l'original
+  const intact = e.origine === "original" && !e.modifie;
+  const editant = ed.edition === e.id;
+  let cle = "";
+  if (intact && !editant) {
+    cle = "intact";
+  } else if (estExtrait(e) && !editant) {
+    cle = `x|${ed.versionPage}|${e.source.x},${e.source.y},${e.source.l},${e.source.h}`;
+  } else if (e.type === "texte") {
+    const aligne = { gauche: "left", centre: "center", droite: "right" }[e.alignement] || "left";
+    style += `;--taille:${e.taille};color:${e.couleur};text-align:${aligne};font:${CSS_POLICE[e.police] || CSS_POLICE.Helvetica};font-size:calc(var(--taille) * var(--e) * 1px)`;
+    cle = `t|${ed.edition === e.id}|${e.texte}`;
+  } else if (e.type === "code") {
+    const c = ed.codes.get(`${e.format}|${e.valeur}`);
+    cle = `c|${e.format}|${e.valeur}|${e.couleur}|${c && !(c instanceof Promise) ? 1 : 0}`;
+  } else if (e.type === "image") {
+    const src = sourceImage(e);
+    cle = `i|${src?.url || ""}|${ed.recadrage === e.id}`;
+  } else if (e.type === "rect") {
+    style += `;background:${e.fond}`;
+    cle = "r";
+  }
+  if (el.getAttribute("style") !== style) el.setAttribute("style", style);
+  if (n.cle !== cle) {
+    n.cle = cle;
+    if (cle === "intact" || cle === "r") el.innerHTML = "";
+    else if (cle.startsWith("x|")) {
+      el.innerHTML = '<canvas class="ed-extrait"></canvas>';
+      dessineExtrait(el.firstChild, e);
+    } else if (cle.startsWith("t|")) {
+      el.innerHTML = `<div class="ed-texte"${ed.edition === e.id ? ' contenteditable="true" spellcheck="false"' : ""}>${escapeHtml(e.texte)}</div>`;
+    } else if (cle.startsWith("c|")) el.innerHTML = svgCode(e);
+    else if (cle.startsWith("i|")) {
+      const src = sourceImage(e);
+      // en recadrage : l'image entiere, voilee, autour du cadre
+      el.innerHTML = src
+        ? `${ed.recadrage === e.id ? `<img class="ed-img-fantome" alt="" draggable="false" src="${escapeAttr(src.url)}" />` : ""}<span class="ed-img-cadre"><img class="ed-img" alt="" draggable="false" src="${escapeAttr(src.url)}" /></span>`
+        : "";
+    }
+  }
+  if (cle.startsWith("x|")) placeExtrait(el.firstChild, e);
+  else if (cle.startsWith("i|")) {
+    const src = sourceImage(e);
+    if (src) for (const img of el.querySelectorAll("img")) placeImage(img, e, src);
+  }
+}
+
+function rendElements() {
+  const masques = elements()
+    .filter((e) => e.origine === "original" && (e.modifie || e.supprime) && e.masque)
+    .map((e) => `<div class="ed-masque" style="${placement(e.masque)}"></div>`)
+    .join("");
+  if (masques !== ed.masquesRendus) {
+    $("ed-masques").innerHTML = masques;
+    ed.masquesRendus = masques;
+  }
+  const conteneur = $("ed-elements");
+  const vus = new Set();
+  let precedent = null;
+  for (const e of elements()) {
+    if (e.supprime) continue;
+    vus.add(e.id);
+    let n = ed.noeuds.get(e.id);
+    if (!n) {
+      n = { el: document.createElement("div"), cle: null };
+      n.el.dataset.id = e.id;
+      ed.noeuds.set(e.id, n);
+    }
+    majNoeud(n, e);
+    // l'ordre des calques : le premier tout au fond
+    const attendu = precedent ? precedent.nextSibling : conteneur.firstChild;
+    if (attendu !== n.el) conteneur.insertBefore(n.el, attendu);
+    precedent = n.el;
+  }
+  for (const [id, n] of ed.noeuds) {
+    if (!vus.has(id)) {
+      n.el.remove();
+      ed.noeuds.delete(id);
+    }
+  }
   if (ed.edition) {
     const champ = document.querySelector(`.ed-el[data-id="${ed.edition}"] .ed-texte`);
     if (champ && document.activeElement !== champ) {
@@ -317,29 +466,60 @@ function rendElements() {
   rendSelection();
 }
 
+// tout redessiner (une autre page, un autre zoom de la page d'origine)
+function oublieNoeuds() {
+  for (const n of ed.noeuds.values()) n.el.remove();
+  ed.noeuds.clear();
+  ed.masquesRendus = "";
+}
+
 function boiteDe(liste) {
   if (!liste.length) return null;
-  const x0 = Math.min(...liste.map((e) => e.x));
-  const y0 = Math.min(...liste.map((e) => e.y));
-  const x1 = Math.max(...liste.map((e) => e.x + e.l));
-  const y1 = Math.max(...liste.map((e) => e.y + e.h));
+  const b = liste.map((e) => G.boite(e));
+  const x0 = Math.min(...b.map((e) => e.x));
+  const y0 = Math.min(...b.map((e) => e.y));
+  const x1 = Math.max(...b.map((e) => e.x + e.l));
+  const y1 = Math.max(...b.map((e) => e.y + e.h));
   return { x: x0, y: y0, l: x1 - x0, h: y1 - y0 };
+}
+
+// Les poignees d'un element : les extraits (code, texte, image de
+// l'etiquette) ne se deforment jamais -- les coins seulement, proportions
+// gardees ; une image (cadre) a ses huit poignees, les coins gardent ses
+// proportions, les cotes recadrent.
+function poigneesDe(e) {
+  if (fige(e)) return [];
+  if (estExtrait(e)) return ["nw", "ne", "se", "sw"];
+  return ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 }
 
 function rendSelection() {
   const s = $("ed-selection");
   const liste = choisis();
-  const b = boiteDe(liste);
+  const unSeul = liste.length === 1 ? liste[0] : null;
+  const b = unSeul ? { x: unSeul.x, y: unSeul.y, l: unSeul.l, h: unSeul.h } : boiteDe(liste);
   if (!b) {
     s.hidden = true;
+    s.dataset.pour = "";
     return;
   }
+  const pour = liste.map((e) => e.id).join(",");
+  // une nouvelle selection apparait en douceur ; la meme, qui bouge, suit
+  if (s.hidden || s.dataset.pour !== pour) {
+    s.classList.remove("is-apparition");
+    void s.offsetWidth;
+    s.classList.add("is-apparition");
+  }
+  s.dataset.pour = pour;
   s.hidden = false;
-  s.setAttribute("style", placement(b));
-  const unSeul = liste.length === 1 ? liste[0] : null;
-  const poignees = unSeul && !fige(unSeul) ? ["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((p) => `<span class="ed-poignee is-${p}" data-poignee="${p}"></span>`).join("") : "";
-  s.innerHTML = `${poignees}<span class="ed-dimensions">${liste.length > 1 ? `${liste.length} éléments · ` : ""}${enMm(b.l)} × ${enMm(b.h)} mm</span>`;
+  s.setAttribute("style", placement(b) + (unSeul?.rotation ? `;transform:rotate(${unSeul.rotation}deg)` : ""));
+  const poignees = unSeul ? poigneesDe(unSeul).map((p) => `<span class="ed-poignee is-${p}" data-poignee="${p}"></span>`).join("") : "";
+  const tourne = APP_MAC && unSeul && unSeul.type === "image" && !unSeul.verrou ? '<span class="ed-rotation" data-rotation title="Faire pivoter (Maj : par 15°)"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg></span>' : "";
+  const angle = unSeul?.rotation ? ` · ${Math.round(unSeul.rotation * 10) / 10}°` : "";
+  const html = `${tourne}${poignees}<span class="ed-dimensions">${liste.length > 1 ? `${liste.length} éléments · ` : ""}${enMm(b.l)} × ${enMm(b.h)} mm${angle}</span>`;
+  if (s.innerHTML !== html) s.innerHTML = html;
   s.classList.toggle("is-verrou", Boolean(unSeul?.verrou));
+  s.classList.toggle("is-recadrage", Boolean(unSeul && ed.recadrage === unSeul.id));
 }
 
 function rendTout() {
@@ -431,6 +611,38 @@ function rendProprietes() {
       }
       <label class="ed-champ ed-champ-couleur"><span>Couleur</span><input type="color" data-prop="couleur" value="${e.couleur || "#000000"}"${protege ? " disabled" : ""} /></label>
       </section>`;
+  } else if (e.type === "image") {
+    const src = sourceImage(e);
+    const c = G.cadrage(e.cadrage);
+    propres = `<section class="ed-bloc ed-bloc-image"><h3>${e.origine === "original" && !e.image ? "Image de l'étiquette" : "Image"}</h3>
+      ${
+        src
+          ? `<div class="ed-vignette"><img alt="" src="${escapeAttr(src.url)}" /><span>${src.l} × ${src.h} px</span></div>`
+          : `<p class="ed-aide">${APP_MAC ? "Glisse une image du Finder sur ce cadre pour la remplacer : le cadre reste le même." : "Partie de l'étiquette d'origine."}</p>`
+      }
+      ${
+        APP_MAC
+          ? `<div class="ed-ligne-boutons"><button class="ed-petit is-principal" type="button" data-action="remplacer-image">Remplacer…</button>${
+              src ? `<button class="ed-petit${ed.recadrage === e.id ? " is-on" : ""}" type="button" data-action="recadrer">${ed.recadrage === e.id ? "Terminer le recadrage" : "Recadrer"}</button>` : ""
+            }</div>`
+          : ""
+      }
+      ${
+        src && APP_MAC
+          ? `<div class="segmented ed-cadrage" role="radiogroup" aria-label="Cadrage">
+              ${[["remplir", "Remplir"], ["ajuster", "Ajuster"]].map(([v, t]) => `<button type="button" class="seg${c.mode === v ? " is-on" : ""}" data-cadrage="${v}" role="radio" aria-checked="${c.mode === v}">${t}</button>`).join("")}
+            </div>
+            <label class="ed-champ is-large ed-curseur"><span>Zoom du contenu</span><input type="range" min="100" max="${G.ZOOM_MAX * 100}" step="1" data-prop="zoom-contenu" value="${Math.round(c.zoom * 100)}" /><b>${Math.round(c.zoom * 100)} %</b></label>
+            <div class="ed-ligne-boutons"><button class="ed-petit" type="button" data-action="centrer-contenu">Centrer le contenu</button><button class="ed-petit" type="button" data-action="reinitialiser-cadrage">Réinitialiser</button></div>`
+          : ""
+      }
+      ${
+        APP_MAC
+          ? `<div class="ed-grille-champs"><label class="ed-champ"><span>Rotation</span><input type="number" step="1" data-prop="rotation" value="${Math.round((e.rotation || 0) * 100) / 100}"${e.verrou ? " disabled" : ""} /><em>°</em></label>
+              <button class="ed-petit ed-pivote" type="button" data-action="pivoter"${e.verrou ? " disabled" : ""}>Pivoter de 90°</button></div>`
+          : ""
+      }
+      </section>`;
   } else if (e.type === "rect") {
     propres = `<section class="ed-bloc"><h3>Rectangle</h3>
       <label class="ed-champ ed-champ-couleur"><span>Fond</span><input type="color" data-prop="fond" value="${e.fond}" /></label></section>`;
@@ -441,7 +653,16 @@ function rendProprietes() {
 function nomElement(e) {
   if (e.type === "texte") return `« ${e.texte.slice(0, 28)}${e.texte.length > 28 ? "…" : ""} »`;
   if (e.type === "code") return `${NOMS_FORMAT[e.format] || e.format} · ${String(e.valeur).slice(0, 18)}`;
+  if (e.type === "image") return e.origine === "original" && !e.image ? "Image de l'étiquette" : "Image";
   return "Rectangle";
+}
+
+function vignetteCalque(e) {
+  if (e.type === "image") {
+    const src = sourceImage(e);
+    return src ? `<img alt="" src="${escapeAttr(src.url)}" />` : "▣";
+  }
+  return { texte: "T", code: e.format && FORMATS_2D.includes(e.format) ? "QR" : "|||", rect: "▭" }[e.type] || "?";
 }
 
 function rendCalques() {
@@ -452,9 +673,9 @@ function rendCalques() {
     ? `<ul class="ed-calques">${liste
         .map(
           (e) => `<li class="ed-calque-ligne${ed.selection.has(e.id) ? " is-on" : ""}" data-calque="${e.id}">
-        <span class="ed-calque-type">${{ texte: "T", code: e.format && FORMATS_2D.includes(e.format) ? "QR" : "|||", rect: "▭" }[e.type]}</span>
+        <span class="ed-calque-type">${vignetteCalque(e)}</span>
         <span class="ed-calque-nom">${escapeHtml(nomElement(e))}${e.origine === "original" ? `<em>${e.modifie ? "étiquette · modifié" : "étiquette"}</em>` : ""}</span>
-        <button class="bdx-outil" type="button" data-calque-action="monter" aria-label="Monter"><svg class="icon"><use href="#i-chevron-down"/></svg></button>
+        <span class="ed-calque-ordre"><button class="bdx-outil" type="button" data-calque-action="monter" aria-label="Monter d'un cran" title="Monter d'un cran"><svg class="icon"><use href="#i-chevron-down"/></svg></button><button class="bdx-outil" type="button" data-calque-action="descendre" aria-label="Descendre d'un cran" title="Descendre d'un cran"><svg class="icon"><use href="#i-chevron-down"/></svg></button></span>
         <button class="bdx-outil${e.verrou ? " is-on" : ""}" type="button" data-calque-action="verrou" aria-label="${e.verrou ? "Déverrouiller" : "Verrouiller"}"><svg class="icon"><use href="#i-cadenas"/></svg></button>
       </li>`
         )
@@ -480,10 +701,18 @@ function prendOriginal(cle) {
   const t = o.textes.find((x) => x.cle === cle);
   const c = o.codes.find((x) => x.cle === cle);
   let e = null;
+  const i = (o.images || []).find((x) => x.cle === cle);
+  // la zone copiee (source) est celle qu'on masque : ce qui part de sa place
+  // est exactement ce qui arrive ailleurs
   if (t) {
-    e = { id: uid(), type: "texte", origine: "original", modifie: false, cle, x: t.x, y: t.y, l: t.l, h: t.h, texte: t.texte, taille: t.taille, police: t.police, couleur: "#000000", alignement: "gauche", masque: { x: t.x - 0.8, y: t.y - 0.6, l: t.l + 1.6, h: t.h + 1.2 } };
+    const masque = { x: t.x - 0.8, y: t.y - 0.6, l: t.l + 1.6, h: t.h + 1.2 };
+    e = { id: uid(), type: "texte", origine: "original", modifie: false, retape: false, cle, x: t.x, y: t.y, l: t.l, h: t.h, texte: t.texte, taille: t.taille, police: t.police, couleur: "#000000", alignement: "gauche", masque, source: masque, depart: { x: t.x, y: t.y, l: t.l, h: t.h, rotation: 0 } };
   } else if (c) {
-    e = { id: uid(), type: "code", origine: "original", modifie: false, cle, codeId: c.id, x: c.x, y: c.y, l: c.l, h: c.h, format: c.format, valeur: c.valeur || "", couleur: "#000000", lisible: c.lisible, masque: { x: c.x - 2, y: c.y - 2, l: c.l + 4, h: c.h + 4 } };
+    const masque = { x: c.x - 2, y: c.y - 2, l: c.l + 4, h: c.h + 4 };
+    e = { id: uid(), type: "code", origine: "original", modifie: false, cle, codeId: c.id, x: c.x, y: c.y, l: c.l, h: c.h, format: c.format, valeur: c.valeur || "", couleur: "#000000", lisible: c.lisible, masque, source: masque, depart: { x: c.x, y: c.y, l: c.l, h: c.h, rotation: 0 } };
+  } else if (i) {
+    const masque = { x: i.boite.x - 0.5, y: i.boite.y - 0.5, l: i.boite.l + 1, h: i.boite.h + 1 };
+    e = { id: uid(), type: "image", origine: "original", modifie: false, cle, x: i.x, y: i.y, l: i.l, h: i.h, rotation: i.rotation, image: null, cadrage: G.cadrage(), masque, source: masque, depart: { x: i.x, y: i.y, l: i.l, h: i.h, rotation: i.rotation } };
   }
   if (e) elements().push(e);
   return e;
@@ -505,6 +734,13 @@ function marqueModifie(e) {
   if (e.origine === "original") e.modifie = true;
 }
 
+// un texte de l'etiquette dont on change le contenu ou le style : il n'est
+// plus un extrait, il s'ecrit (dans une police standard)
+function marqueRetape(e) {
+  if (e.type === "texte" && e.origine === "original") e.retape = true;
+  marqueModifie(e);
+}
+
 function supprime() {
   const liste = choisis().filter((e) => !e.verrou);
   if (!liste.length) return;
@@ -521,14 +757,22 @@ function supprime() {
 }
 
 function duplique() {
-  const liste = choisis();
-  if (!liste.length) return;
+  // une image de l'etiquette pas encore remplacee n'est qu'un morceau de la
+  // page : elle ne se copie pas (une image deposee, si)
+  const liste = choisis().filter((e) => !(e.type === "image" && !e.image));
+  if (!liste.length) {
+    if (choisis().length) toast("Remplace d'abord cette image pour pouvoir la dupliquer.", "info");
+    return;
+  }
   const nouveaux = liste.map((e) => {
     const copie = JSON.parse(JSON.stringify(e));
     Object.assign(copie, { id: uid(), origine: "ajout", modifie: true, x: e.x + 8, y: e.y + 8, verrou: false });
     delete copie.cle;
     delete copie.masque;
     delete copie.codeId;
+    delete copie.source;
+    delete copie.depart;
+    delete copie.retape;
     return copie;
   });
   // une copie d'un code de l'etiquette est un code ajoute : le serveur
@@ -658,7 +902,7 @@ function finEdition(garder = true) {
     if (texte !== e.texte) {
       e.texte = texte;
       ajusteTexte(e);
-      marqueModifie(e);
+      marqueRetape(e);
       engage(`Modifier le texte ${nomElement(e)}`);
     }
   }
@@ -678,8 +922,9 @@ function lignesAimant(exclus) {
   const ys = [0, ed.H / 2, ed.H];
   for (const e of visibles()) {
     if (exclus.has(e.id)) continue;
-    xs.push(e.x, e.x + e.l / 2, e.x + e.l);
-    ys.push(e.y, e.y + e.h / 2, e.y + e.h);
+    const b = G.boite(e);
+    xs.push(b.x, b.x + b.l / 2, b.x + b.l);
+    ys.push(b.y, b.y + b.h / 2, b.y + b.h);
   }
   return { xs, ys };
 }
@@ -699,7 +944,13 @@ function grilleDe(v) {
   return ed.grille ? Math.round(v / GRILLE_PT) * GRILLE_PT : v;
 }
 
+// les guides ne se redessinent que s'ils changent (sinon leur apparition
+// en fondu repartirait a chaque mouvement de la souris)
+let guidesMontres = "";
 function montreGuides(gx, gy) {
+  const cle = `${gx}|${gy}`;
+  if (cle === guidesMontres) return;
+  guidesMontres = cle;
   $("ed-guides").innerHTML = [
     ...(gx != null ? [`<span class="ed-guide is-v" style="left:${pc(gx, ed.W)}"></span>`] : []),
     ...(gy != null ? [`<span class="ed-guide is-h" style="top:${pc(gy, ed.H)}"></span>`] : []),
@@ -729,6 +980,20 @@ scene.addEventListener("pointerdown", (evt) => {
     commenceCreation(evt, p);
     return;
   }
+  // le recadrage d'une image : glisser deplace son contenu dans le cadre
+  if (ed.recadrage) {
+    const r = element(ed.recadrage);
+    if (r && evt.target.closest(`.ed-el[data-id="${r.id}"]`)) {
+      if (doubleClic(evt, r.id)) return finRecadrage();
+      capture(evt, { type: "recadre", e: r, depart: p, avant: G.cadrage(r.cadrage), bouge: false });
+      return;
+    }
+    finRecadrage();
+  }
+  if (evt.target.closest("[data-rotation]")) {
+    commenceRotation(evt, p);
+    return;
+  }
   const poignee = evt.target.closest("[data-poignee]");
   if (poignee) {
     commenceRedimension(evt, poignee.dataset.poignee, p);
@@ -746,6 +1011,12 @@ scene.addEventListener("pointerdown", (evt) => {
   }
   if (cible) {
     const id = cible.dataset.id;
+    // le double-clic, reconnu ici : le geste capture le pointeur, et WebKit
+    // envoie alors « dblclick » a la scene, pas a l'element
+    if (doubleClic(evt, id)) {
+      ouvreElement(id);
+      return;
+    }
     if (evt.shiftKey || evt.metaKey || evt.ctrlKey) {
       if (ed.selection.has(id)) ed.selection.delete(id);
       else ed.selection.add(id);
@@ -771,7 +1042,8 @@ function capture(evt, geste) {
 
 // un code de l'etiquette qui n'a pas pu etre lu ne se redessine pas : il se
 // masque (supprimer), il ne se deplace pas
-const fige = (e) => e.verrou || (e.type === "code" && e.origine === "original" && !e.valeur);
+// (un extrait, lui, se deplace tel quel, meme illisible)
+const fige = (e) => e.verrou || (e.type === "code" && e.origine === "original" && !e.valeur && !e.source);
 
 function commenceDeplacement(evt, p) {
   const liste = choisis().filter((e) => !fige(e));
@@ -783,7 +1055,27 @@ function commenceRedimension(evt, poignee, p) {
   const e = choisis()[0];
   if (!e || fige(e)) return;
   const carre = e.type === "code" && FORMATS_2D.includes(e.format) && e.format !== "PDF417";
-  capture(evt, { type: "redimensionne", poignee, depart: p, e, avant: { x: e.x, y: e.y, l: e.l, h: e.h }, carre, bouge: false });
+  capture(evt, { type: "redimensionne", poignee, depart: p, e, avant: { x: e.x, y: e.y, l: e.l, h: e.h, rotation: e.rotation || 0 }, carre, bouge: false });
+}
+
+function commenceRotation(evt, p) {
+  const e = choisis()[0];
+  if (!e || e.verrou) return;
+  const c = { x: e.x + e.l / 2, y: e.y + e.h / 2 };
+  capture(evt, { type: "tourne", e, centre: c, a0: Math.atan2(p.y - c.y, p.x - c.x), avant: e.rotation || 0, bouge: false });
+}
+
+// des que le geste part vraiment, un element de l'etiquette devient un
+// extrait : ses pixels suivent le cadre pendant le geste (et non apres)
+function detache(liste) {
+  let change = false;
+  for (const e of liste) {
+    if (e.origine === "original" && !e.modifie) {
+      marqueModifie(e);
+      change = true;
+    }
+  }
+  if (change) rendOriginaux();
 }
 
 function commenceLasso(evt, p, ajoute) {
@@ -832,13 +1124,14 @@ scene.addEventListener("pointermove", (evt) => {
     let dx = p.x - g.depart.x;
     let dy = p.y - g.depart.y;
     if (!g.bouge && Math.hypot(dx, dy) * echelle() < 3) return;
+    if (!g.bouge) detache(g.avant.map((a) => a.e));
     g.bouge = true;
     // Maj : seulement a l'horizontale ou a la verticale
     if (evt.shiftKey) {
       if (Math.abs(dx) > Math.abs(dy)) dy = 0;
       else dx = 0;
     }
-    const b0 = boiteDe(g.avant.map((a) => ({ x: a.x, y: a.y, l: a.e.l, h: a.e.h })));
+    const b0 = boiteDe(g.avant.map((a) => ({ x: a.x, y: a.y, l: a.e.l, h: a.e.h, rotation: a.e.rotation })));
     let gx = null;
     let gy = null;
     if (ed.magnetisme && !evt.altKey) {
@@ -866,37 +1159,88 @@ scene.addEventListener("pointermove", (evt) => {
   }
   if (g.type === "redimensionne") {
     const { e, avant, poignee } = g;
+    if (!g.bouge) detache([e]);
     g.bouge = true;
-    let { x, y, l, h } = avant;
-    const dx = p.x - g.depart.x;
-    const dy = p.y - g.depart.y;
-    if (poignee.includes("e")) l = avant.l + dx;
-    if (poignee.includes("s")) h = avant.h + dy;
+    // le geste dans les axes de l'element (s'il est tourne)
+    const r = G.rotation(-avant.rotation);
+    const d = G.applique(r, p.x - g.depart.x, p.y - g.depart.y);
+    let x0 = 0;
+    let y0 = 0;
+    let l = avant.l;
+    let h = avant.h;
+    if (poignee.includes("e")) l = avant.l + d.x;
+    if (poignee.includes("s")) h = avant.h + d.y;
     if (poignee.includes("w")) {
-      x = avant.x + dx;
-      l = avant.l - dx;
+      x0 = d.x;
+      l = avant.l - d.x;
     }
     if (poignee.includes("n")) {
-      y = avant.y + dy;
-      h = avant.h - dy;
+      y0 = d.y;
+      h = avant.h - d.y;
     }
-    // un QR code reste carre ; Maj garde les proportions de tout element
-    if (g.carre || evt.shiftKey) {
+    // proportions gardees : un QR code, un extrait de l'etiquette (jamais
+    // deforme), les coins d'une image ; Maj garde celles de tout element
+    const coin = poignee.length === 2;
+    const garde = g.carre || estExtrait(e) || (e.type === "image" && coin ? !evt.shiftKey : evt.shiftKey);
+    if (garde) {
       const ratio = avant.l / avant.h;
       if (poignee === "n" || poignee === "s") l = h * ratio;
-      else h = l / ratio;
-      if (poignee.includes("w")) x = avant.x + avant.l - l;
-      if (poignee.includes("n")) y = avant.y + avant.h - h;
+      else if (poignee === "e" || poignee === "w") h = l / ratio;
+      else if (Math.abs(l / avant.l) > Math.abs(h / avant.h)) h = l / ratio;
+      else l = h * ratio;
+      if (poignee.includes("w")) x0 = avant.l - l;
+      if (poignee.includes("n")) y0 = avant.h - h;
+      if (poignee === "n" || poignee === "s") x0 = (avant.l - l) / 2;
+      if (poignee === "e" || poignee === "w") y0 = (avant.h - h) / 2;
     }
     const min = 2;
-    e.x = x;
-    e.y = y;
-    e.l = Math.max(min, l);
-    e.h = Math.max(min, h);
-    if (ed.grille) {
+    if (l < min) {
+      if (poignee.includes("w")) x0 -= min - l;
+      l = min;
+    }
+    if (h < min) {
+      if (poignee.includes("n")) y0 -= min - h;
+      h = min;
+    }
+    // le nouveau centre, ramene sur la page
+    const dc = G.applique(G.rotation(avant.rotation), x0 + l / 2 - avant.l / 2, y0 + h / 2 - avant.h / 2);
+    const cx = avant.x + avant.l / 2 + dc.x;
+    const cy = avant.y + avant.h / 2 + dc.y;
+    e.l = l;
+    e.h = h;
+    e.x = cx - l / 2;
+    e.y = cy - h / 2;
+    if (ed.grille && !avant.rotation && !garde) {
       if (poignee.includes("e")) e.l = Math.max(min, grilleDe(e.x + e.l) - e.x);
       if (poignee.includes("s")) e.h = Math.max(min, grilleDe(e.y + e.h) - e.y);
     }
+    if (e.type === "image") e.cadrage = cadrageBorne(e, e.cadrage);
+    rendElements();
+    return;
+  }
+  if (g.type === "tourne") {
+    const { e, centre } = g;
+    if (!g.bouge) detache([e]);
+    g.bouge = true;
+    let a = g.avant + ((Math.atan2(p.y - centre.y, p.x - centre.x) - g.a0) * 180) / Math.PI;
+    // Maj : par 15° ; sinon, les angles droits attirent a 3° pres
+    if (evt.shiftKey) a = Math.round(a / 15) * 15;
+    else {
+      const droit = Math.round(a / 90) * 90;
+      if (Math.abs(a - droit) < 3) a = droit;
+    }
+    e.rotation = G.angle(a);
+    rendElements();
+    return;
+  }
+  if (g.type === "recadre") {
+    const { e } = g;
+    const src = sourceImage(e);
+    if (!src) return;
+    const d = G.applique(G.rotation(-(e.rotation || 0)), p.x - g.depart.x, p.y - g.depart.y);
+    if (!g.bouge && Math.hypot(d.x, d.y) * echelle() < 2) return;
+    g.bouge = true;
+    e.cadrage = cadrageBorne(e, { ...g.avant, dx: g.avant.dx + d.x / e.l, dy: g.avant.dy + d.y / e.h });
     rendElements();
     return;
   }
@@ -905,7 +1249,12 @@ scene.addEventListener("pointermove", (evt) => {
     const l = $("ed-lasso");
     l.hidden = false;
     l.setAttribute("style", placement(b));
-    const dedans = visibles().filter((e) => e.x < b.x + b.l && e.x + e.l > b.x && e.y < b.y + b.h && e.y + e.h > b.y).map((e) => e.id);
+    const dedans = visibles()
+      .filter((e) => {
+        const r = G.boite(e);
+        return r.x < b.x + b.l && r.x + r.l > b.x && r.y < b.y + b.h && r.y + r.h > b.y;
+      })
+      .map((e) => e.id);
     ed.selection = new Set([...(g.ajoute ? g.deja : []), ...dedans]);
     rendElements();
     return;
@@ -940,6 +1289,13 @@ function finGeste(evt) {
     marqueModifie(g.e);
     engage(`Redimensionner ${nomElement(g.e)}`);
     rendTout();
+  } else if (g.type === "tourne" && g.bouge) {
+    engage(`Faire pivoter ${nomElement(g.e)}`);
+    rendTout();
+  } else if (g.type === "recadre" && g.bouge) {
+    marqueModifie(g.e);
+    engage("Recadrer l'image");
+    rendProprietes();
   } else if (g.type === "lasso") {
     rendProprietes();
     rendCalques();
@@ -958,10 +1314,22 @@ function finGeste(evt) {
 scene.addEventListener("pointerup", finGeste);
 scene.addEventListener("pointercancel", finGeste);
 
-scene.addEventListener("dblclick", (evt) => {
-  const cible = evt.target.closest(".ed-el.is-texte");
-  if (cible) commenceEdition(cible.dataset.id);
-});
+// Deux appuis sur le meme element, vite et au meme endroit.
+let dernierAppui = null;
+function doubleClic(evt, id) {
+  const t = performance.now();
+  const double = dernierAppui && dernierAppui.id === id && t - dernierAppui.t < 450 && Math.hypot(evt.clientX - dernierAppui.x, evt.clientY - dernierAppui.y) < 6;
+  dernierAppui = double ? null : { id, t, x: evt.clientX, y: evt.clientY };
+  return double;
+}
+
+// le double-clic : un texte s'edite, une image se recadre (app Mac)
+function ouvreElement(id) {
+  const e = element(id);
+  if (!e) return;
+  if (e.type === "texte") commenceEdition(id);
+  else if (e.type === "image" && APP_MAC) entreRecadrage(id);
+}
 
 // le texte edite directement : Entree valide (Maj + Entree : nouvelle ligne), Echap annule
 $("ed-elements").addEventListener("keydown", (evt) => {
@@ -975,6 +1343,465 @@ $("ed-elements").addEventListener("keydown", (evt) => {
     finEdition(false);
   }
 });
+
+// --- Images : deposer, remplacer, recadrer (app Mac) ---------------------------------------
+// Une image deposee depuis le Finder sur un cadre d'image en remplace le
+// CONTENU : le cadre (position, taille, rotation, masque, rang dans les
+// calques) ne bouge pas. Deposee ailleurs, elle s'ajoute. Le contenu remplit
+// son cadre sans etre etire (ou s'y ajuste, au choix), se deplace et se
+// zoome a l'interieur (double-clic : recadrer). Tout passe par l'historique.
+
+function cadrageBorne(e, c) {
+  const src = sourceImage(e);
+  return src ? G.bornePosition(e.l, e.h, src.l, src.h, c) : G.cadrage(c);
+}
+
+function entreRecadrage(id) {
+  const e = element(id);
+  if (!e || e.type !== "image" || !sourceImage(e) || e.verrou) return;
+  ed.recadrage = id;
+  ed.selection = new Set([id]);
+  rendElements();
+  rendProprietes();
+}
+
+function finRecadrage() {
+  if (!ed.recadrage) return;
+  ed.recadrage = null;
+  rendElements();
+  rendProprietes();
+}
+
+// L'orientation EXIF d'un JPEG (1 = droite) : le PDF ne l'applique pas, la
+// photo est donc redressee avant l'envoi (ce qu'on voit = ce qu'on exporte).
+function orientationExif(octets) {
+  const v = new DataView(octets);
+  if (v.byteLength < 4 || v.getUint16(0) !== 0xffd8) return 1;
+  let i = 2;
+  while (i + 4 < v.byteLength && v.getUint8(i) === 0xff) {
+    const marqueur = v.getUint8(i + 1);
+    const longueur = v.getUint16(i + 2);
+    if (marqueur === 0xe1 && v.getUint32(i + 4) === 0x45786966) {
+      const t = i + 10;
+      const le = v.getUint16(t) === 0x4949;
+      const ifd = t + v.getUint32(t + 4, le);
+      if (ifd + 2 > v.byteLength) return 1;
+      const n = v.getUint16(ifd, le);
+      for (let k = 0; k < n; k += 1) {
+        const entree = ifd + 2 + k * 12;
+        if (entree + 12 > v.byteLength) break;
+        if (v.getUint16(entree, le) === 0x0112) return v.getUint16(entree + 8, le);
+      }
+      return 1;
+    }
+    if (marqueur === 0xda) break;
+    i += 2 + longueur;
+  }
+  return 1;
+}
+
+const COTE_MAX = 6000;
+
+// Une image prete (ses dimensions connues). decode() seul peut ne jamais
+// repondre quand la page n'est pas a l'ecran : le chargement suffit aussi.
+function imagePrete(img) {
+  return new Promise((resolve, reject) => {
+    if (img.complete && img.naturalWidth) return resolve();
+    img.addEventListener("load", () => resolve(), { once: true });
+    img.addEventListener("error", () => reject(new Error("image illisible")), { once: true });
+    img.decode?.().then(resolve, () => {});
+  });
+}
+
+// Le fichier depose -> { blob, l, h, url } pret a envoyer : PNG et JPEG droits
+// partent tels quels (qualite intacte) ; le reste (HEIC, WebP, GIF, photo
+// tournee par EXIF, image geante) est redessine une fois, droit.
+async function prepareImage(fichier, { forcer = false } = {}) {
+  const octets = await fichier.arrayBuffer();
+  const url = URL.createObjectURL(new Blob([octets], { type: fichier.type || "application/octet-stream" }));
+  const img = new Image();
+  img.src = url;
+  try {
+    await imagePrete(img);
+  } catch {
+    URL.revokeObjectURL(url);
+    throw new Error("Ce fichier n'est pas une image lisible.");
+  }
+  const l = img.naturalWidth;
+  const h = img.naturalHeight;
+  const type = fichier.type === "image/png" || fichier.type === "image/jpeg" ? fichier.type : null;
+  const droit = type !== "image/jpeg" || orientationExif(octets) === 1;
+  if (!forcer && type && droit && Math.max(l, h) <= COTE_MAX && octets.byteLength <= 14 * 1024 * 1024) {
+    return { blob: new Blob([octets], { type }), l, h, url };
+  }
+  const k = Math.min(1, COTE_MAX / Math.max(l, h));
+  const toile = document.createElement("canvas");
+  toile.width = Math.max(1, Math.round(l * k));
+  toile.height = Math.max(1, Math.round(h * k));
+  toile.getContext("2d").drawImage(img, 0, 0, toile.width, toile.height);
+  const sortie = type === "image/jpeg" ? "image/jpeg" : "image/png";
+  const blob = await new Promise((r) => toile.toBlob(r, sortie, 0.95));
+  URL.revokeObjectURL(url);
+  return { blob, l: toile.width, h: toile.height, url: URL.createObjectURL(blob) };
+}
+
+async function envoieImage(prepa, fichier) {
+  const res = await fetch(`/api/bordereaux/${ed.colisId}/images`, { method: "POST", headers: { "Content-Type": prepa.blob.type }, body: prepa.blob });
+  const corps = await res.json().catch(() => ({}));
+  if (res.ok) return corps;
+  // un format que le serveur ne prend pas tel quel : redessinee, une fois
+  if (corps.reencoder && fichier && !prepa.redessinee) {
+    const autre = await prepareImage(fichier, { forcer: true });
+    autre.redessinee = true;
+    Object.assign(prepa, autre);
+    return envoieImage(prepa, null);
+  }
+  const err = new Error(corps.error || `Envoi impossible (${res.status})`);
+  err.transporteur = corps.transporteur;
+  throw err;
+}
+
+// Remplace le contenu d'un cadre d'image (ou d'une image de l'etiquette) :
+// montre tout de suite, envoie, puis une seule etape d'historique.
+async function remplaceImage(cible, fichier) {
+  let e = cible.id ? element(cible.id) : null;
+  let prise = false;
+  if (!e && cible.cle) {
+    e = prendOriginal(cible.cle);
+    prise = true;
+  }
+  if (!e || e.type !== "image" || e.verrou) return;
+  let prepa;
+  try {
+    prepa = await prepareImage(fichier);
+  } catch (err) {
+    if (prise) elements().splice(elements().indexOf(e), 1);
+    toast(err.message, "error");
+    return;
+  }
+  finRecadrage();
+  ed.selection = new Set([e.id]);
+  ed.apercus.set(e.id, { url: prepa.url, l: prepa.l, h: prepa.h });
+  const avant = { cadrage: e.cadrage, modifie: e.modifie };
+  // le nouveau contenu remplit le cadre, centre (le mode choisi reste)
+  e.cadrage = G.cadrage({ mode: G.cadrage(e.cadrage).mode });
+  marqueModifie(e);
+  rendTout();
+  try {
+    const r = await envoieImage(prepa, fichier);
+    ed.urls.set(r.ref, prepa.url);
+    e.image = { ref: r.ref, l: r.l, h: r.h };
+    ed.apercus.delete(e.id);
+    engage(prise || !avant.modifie ? "Remplacer une image de l'étiquette" : "Remplacer l'image");
+    rendTout();
+    flash(e.id);
+  } catch (err) {
+    ed.apercus.delete(e.id);
+    URL.revokeObjectURL(prepa.url);
+    if (prise) elements().splice(elements().indexOf(e), 1);
+    else Object.assign(e, avant);
+    rendTout();
+    refusImage(err);
+  }
+}
+
+function refusImage(err) {
+  if (err.transporteur?.page) {
+    bandeau(`${escapeHtml(err.message)} <a href="${escapeAttr(err.transporteur.page)}" target="_blank" rel="noopener noreferrer">Site ${escapeHtml(err.transporteur.nom)}</a>`, "erreur");
+  }
+  toast(err.message, "error");
+}
+
+// Une nouvelle image, posee a `point` (sinon au centre de la page) : sa
+// taille naturelle si elle tient, sinon reduite pour tenir dans la page.
+async function ajouteImage(fichier, point = null) {
+  let prepa;
+  try {
+    prepa = await prepareImage(fichier);
+  } catch (err) {
+    toast(err.message, "error");
+    return;
+  }
+  const ratio = prepa.l / prepa.h;
+  let l = Math.min(prepa.l * 0.75, ed.W * 0.5);
+  let h = l / ratio;
+  if (h > ed.H * 0.5) {
+    h = ed.H * 0.5;
+    l = h * ratio;
+  }
+  const c = point || { x: ed.W / 2, y: ed.H / 2 };
+  const e = { id: uid(), type: "image", origine: "ajout", modifie: true, x: c.x - l / 2, y: c.y - h / 2, l, h, rotation: 0, image: null, cadrage: G.cadrage(), verrou: false };
+  elements().push(e);
+  ed.apercus.set(e.id, { url: prepa.url, l: prepa.l, h: prepa.h });
+  ed.selection = new Set([e.id]);
+  changeOutil("selection");
+  rendTout();
+  try {
+    const r = await envoieImage(prepa, fichier);
+    ed.urls.set(r.ref, prepa.url);
+    e.image = { ref: r.ref, l: r.l, h: r.h };
+    ed.apercus.delete(e.id);
+    engage("Ajouter une image");
+    rendTout();
+    flash(e.id);
+  } catch (err) {
+    ed.apercus.delete(e.id);
+    URL.revokeObjectURL(prepa.url);
+    elements().splice(elements().indexOf(e), 1);
+    ed.selection.delete(e.id);
+    rendTout();
+    refusImage(err);
+  }
+}
+
+// un petit eclat sur l'element qui vient de changer
+function flash(id) {
+  const n = ed.noeuds.get(id);
+  if (!n) return;
+  n.el.classList.remove("is-flash");
+  void n.el.offsetWidth;
+  n.el.classList.add("is-flash");
+}
+
+// Le cadre d'image sous le pointeur : un element (pas verrouille) ou une
+// image de l'etiquette pas encore prise.
+function cadreSous(x, y) {
+  for (const el of document.elementsFromPoint(x, y)) {
+    const n = el.closest?.(".ed-el.is-image");
+    if (n) {
+      const e = element(n.dataset.id);
+      if (e && !e.verrou) return { id: e.id, el: n };
+    }
+    const o = el.closest?.(".ed-original.is-image");
+    if (o) return { cle: o.dataset.original, el: o };
+  }
+  return null;
+}
+
+const fichiersDe = (dt) => [...(dt?.files || [])].filter((f) => /^image\//.test(f.type) || /\.(png|jpe?g|heic|heif|webp|gif|tiff?|bmp)$/i.test(f.name));
+const porteFichiers = (dt) => [...(dt?.types || [])].includes("Files");
+
+let survolDepot = null;
+function marqueDepot(cible, surPage) {
+  if (survolDepot?.el !== cible?.el) {
+    survolDepot?.el.classList.remove("is-cible-depot");
+    cible?.el.classList.add("is-cible-depot");
+  }
+  survolDepot = cible;
+  $("ed-feuille").classList.toggle("is-depot", Boolean(!cible && surPage));
+  const etiquette = $("ed-depot-etiquette");
+  if (!etiquette) return;
+  if (cible) {
+    const r = cible.el.getBoundingClientRect();
+    etiquette.textContent = "Remplacer l'image";
+    etiquette.style.left = `${r.left + r.width / 2}px`;
+    etiquette.style.top = `${r.top}px`;
+    etiquette.hidden = false;
+  } else if (surPage) {
+    const r = $("ed-feuille").getBoundingClientRect();
+    etiquette.textContent = "Ajouter l'image";
+    etiquette.style.left = `${r.left + r.width / 2}px`;
+    etiquette.style.top = `${r.top}px`;
+    etiquette.hidden = false;
+  } else etiquette.hidden = true;
+}
+
+if (APP_MAC) {
+  // jamais la page ouverte a la place de l'editeur quand on lache un fichier
+  document.addEventListener("dragover", (evt) => {
+    if (!porteFichiers(evt.dataTransfer)) return;
+    evt.preventDefault();
+    evt.dataTransfer.dropEffect = "copy";
+    if (!ed.W) return;
+    const cible = cadreSous(evt.clientX, evt.clientY);
+    marqueDepot(cible, $("ed-feuille").contains(document.elementFromPoint(evt.clientX, evt.clientY)));
+  });
+  document.addEventListener("dragleave", (evt) => {
+    if (!evt.relatedTarget || !document.documentElement.contains(evt.relatedTarget)) marqueDepot(null, false);
+  });
+  document.addEventListener("drop", (evt) => {
+    if (!porteFichiers(evt.dataTransfer)) return;
+    evt.preventDefault();
+    const fichier = fichiersDe(evt.dataTransfer)[0];
+    const cible = ed.W ? cadreSous(evt.clientX, evt.clientY) : null;
+    const surPage = $("ed-feuille").contains(document.elementFromPoint(evt.clientX, evt.clientY));
+    marqueDepot(null, false);
+    if (!ed.W) return;
+    if (!fichier) {
+      toast("Dépose une image (PNG, JPEG, HEIC…).", "info");
+      return;
+    }
+    if (cible) remplaceImage(cible, fichier);
+    else ajouteImage(fichier, surPage ? pointPage(evt) : null);
+  });
+  // coller une image : elle remplace l'image choisie, sinon elle s'ajoute
+  document.addEventListener("paste", (evt) => {
+    if (evt.target.closest?.("input, textarea, [contenteditable]")) return;
+    const fichier = fichiersDe(evt.clipboardData)[0];
+    if (!fichier || !ed.W) return;
+    evt.preventDefault();
+    const e = choisis().length === 1 ? choisis()[0] : null;
+    if (e && e.type === "image" && !e.verrou) remplaceImage({ id: e.id }, fichier);
+    else ajouteImage(fichier);
+  });
+}
+
+// « Ajouter une image… », « Remplacer… » : le choix d'un fichier
+function choisitFichier(quand) {
+  const champ = document.createElement("input");
+  champ.type = "file";
+  champ.accept = "image/*";
+  champ.addEventListener("change", () => {
+    if (champ.files[0]) quand(champ.files[0]);
+  });
+  champ.click();
+}
+
+// Recadrer : la molette (ou le pincement) zoome le contenu sous le pointeur
+let minuteurZoomContenu = null;
+function zoomeContenu(e, facteur, cx, cy) {
+  const src = sourceImage(e);
+  if (!src) return;
+  const avant = G.cadrage(e.cadrage);
+  const zoom = borne(avant.zoom * facteur, 1, G.ZOOM_MAX);
+  if (zoom === avant.zoom) return;
+  // le point du contenu sous le pointeur y reste
+  const n = ed.noeuds.get(e.id);
+  const r = n.el.getBoundingClientRect();
+  const centreEcran = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  const k = 1 / echelle();
+  const u = G.applique(G.rotation(-(e.rotation || 0)), (cx - centreEcran.x) * k, (cy - centreEcran.y) * k);
+  const pt = { x: u.x + e.l / 2, y: u.y + e.h / 2 };
+  const c0 = G.contenuImage(e.l, e.h, src.l, src.h, avant);
+  const rel = { x: (pt.x - c0.x) / c0.l, y: (pt.y - c0.y) / c0.h };
+  const c1 = G.contenuImage(e.l, e.h, src.l, src.h, { ...avant, zoom, dx: 0, dy: 0 });
+  const centre = { x: pt.x - rel.x * c1.l + c1.l / 2, y: pt.y - rel.y * c1.h + c1.h / 2 };
+  e.cadrage = cadrageBorne(e, { ...avant, zoom, dx: (centre.x - e.l / 2) / e.l, dy: (centre.y - e.h / 2) / e.h });
+  marqueModifie(e);
+  rendElements();
+  const curseur = document.querySelector('#ed-proprietes [data-prop="zoom-contenu"]');
+  if (curseur) {
+    curseur.value = String(Math.round(zoom * 100));
+    curseur.nextElementSibling.textContent = `${Math.round(zoom * 100)} %`;
+  }
+  clearTimeout(minuteurZoomContenu);
+  minuteurZoomContenu = setTimeout(() => engage("Zoom du contenu"), 500);
+}
+
+// --- Menu contextuel (app Mac) ------------------------------------------------------------------
+
+function fermeMenu() {
+  const m = $("ed-menu");
+  if (m && !m.hidden) {
+    m.classList.add("is-sortie");
+    setTimeout(() => {
+      m.hidden = true;
+      m.classList.remove("is-sortie");
+    }, 120);
+  }
+}
+
+function ouvreMenu(x, y) {
+  const m = $("ed-menu");
+  const liste = choisis();
+  const un = liste.length === 1 ? liste[0] : null;
+  const raccourci = (k) => `<kbd>${k}</kbd>`;
+  const items = [];
+  const item = (action, texte, k = "", { danger = false, inactif = false } = {}) =>
+    items.push(`<button type="button" role="menuitem" class="ed-menu-item${danger ? " is-danger" : ""}" data-menu="${action}"${inactif ? " disabled" : ""}><span>${texte}</span>${k ? raccourci(k) : ""}</button>`);
+  const sep = () => items.push('<span class="ed-menu-sep" role="separator"></span>');
+  if (liste.length) {
+    if (un?.type === "image") {
+      item("remplacer-image", "Remplacer l'image…");
+      if (sourceImage(un)) {
+        item("recadrer", ed.recadrage === un.id ? "Terminer le recadrage" : "Recadrer", "↩");
+        const mode = G.cadrage(un.cadrage).mode;
+        item(mode === "remplir" ? "ajuster" : "remplir", mode === "remplir" ? "Ajuster au cadre (image entière)" : "Remplir le cadre");
+      }
+      item("pivoter", "Pivoter de 90°");
+      sep();
+    }
+    item("dupliquer", "Dupliquer", "⌘D", { inactif: liste.every((e) => e.type === "image" && !e.image) });
+    item("devant", "Mettre devant", "]");
+    item("derriere", "Mettre derrière", "[");
+    item("verrou", liste.every((e) => e.verrou) ? "Déverrouiller" : "Verrouiller", "⌘L");
+    if (liste.length > 1) {
+      sep();
+      item("aligner-gauche", "Aligner à gauche");
+      item("aligner-centre-h", "Centrer horizontalement");
+      item("aligner-haut", "Aligner en haut");
+    }
+    sep();
+    item("supprimer", liste.length > 1 ? `Supprimer ${liste.length} éléments` : "Supprimer", "⌫", { danger: true });
+  } else {
+    item("ajouter-image", "Ajouter une image…");
+    item("ajouter-texte", "Ajouter un texte", "T");
+    sep();
+    item("tout", "Tout sélectionner", "⌘A");
+    item("ajuster-vue", "Ajuster à la fenêtre", "⌘0");
+    sep();
+    item("grille", `${ed.grille ? "Masquer" : "Afficher"} la grille`, "G");
+    item("magnetisme", `${ed.magnetisme ? "Désactiver" : "Activer"} le magnétisme`, "M");
+  }
+  m.innerHTML = items.join("");
+  m.hidden = false;
+  m.classList.remove("is-sortie");
+  // dans la fenetre, jamais coupe par un bord
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
+  m.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+  ed.menuPoint = pointPage({ clientX: x, clientY: y });
+  m.querySelector(".ed-menu-item:not(:disabled)")?.focus({ preventScroll: true });
+}
+
+function actionMenu(action) {
+  fermeMenu();
+  const e = choisis()[0];
+  const direct = {
+    dupliquer: () => duplique(),
+    devant: () => ordre("devant"),
+    derriere: () => ordre("derriere"),
+    verrou: () => basculeVerrou(),
+    supprimer: () => supprime(),
+    "aligner-gauche": () => aligne("gauche"),
+    "aligner-centre-h": () => aligne("centre-h"),
+    "aligner-haut": () => aligne("haut"),
+    tout: () => choisit(visibles().map((x) => x.id)),
+    "ajuster-vue": () => ajusteVue(),
+    grille: () => bascule("grille"),
+    magnetisme: () => bascule("magnetisme"),
+    "ajouter-texte": () => ajoute("texte", ed.menuPoint.x, ed.menuPoint.y, 110, 18),
+    "ajouter-image": () => choisitFichier((f) => ajouteImage(f, ed.menuPoint)),
+  };
+  if (direct[action]) return direct[action]();
+  faitAction(action, e);
+}
+
+if (APP_MAC) {
+  scene.addEventListener("contextmenu", (evt) => {
+    evt.preventDefault();
+    if (ed.edition) finEdition(true);
+    // le clic droit choisit ce qu'il touche (comme dans le Finder)
+    const cible = evt.target.closest(".ed-el");
+    const original = !cible && evt.target.closest("[data-original]");
+    if (cible && !ed.selection.has(cible.dataset.id)) choisit([cible.dataset.id]);
+    else if (original) {
+      const e = prendOriginal(original.dataset.original);
+      if (e) {
+        rendOriginaux();
+        choisit([e.id]);
+      }
+    } else if (!cible && !evt.target.closest("#ed-selection")) choisit([]);
+    ouvreMenu(evt.clientX, evt.clientY);
+  });
+  document.addEventListener("pointerdown", (evt) => {
+    if (!evt.target.closest("#ed-menu")) fermeMenu();
+  }, true);
+  document.addEventListener("click", (evt) => {
+    const b = evt.target.closest("[data-menu]");
+    if (b) actionMenu(b.dataset.menu);
+  });
+}
 
 // --- Zoom et vue ---------------------------------------------------------------------------
 
@@ -1013,12 +1840,37 @@ function ajusteVue() {
 scene.addEventListener(
   "wheel",
   (evt) => {
-    if (!(evt.ctrlKey || evt.metaKey) || !ed.W) return;
+    if (!ed.W) return;
+    const delta = evt.deltaMode === 1 ? evt.deltaY * 16 : evt.deltaY;
+    // en recadrage, la molette zoome le contenu de l'image, sous le pointeur
+    if (ed.recadrage && !(evt.ctrlKey || evt.metaKey) && evt.target.closest(`.ed-el[data-id="${ed.recadrage}"]`)) {
+      evt.preventDefault();
+      zoomeContenu(element(ed.recadrage), Math.exp(-delta * 0.0025), evt.clientX, evt.clientY);
+      return;
+    }
+    if (!(evt.ctrlKey || evt.metaKey)) return;
     evt.preventDefault();
-    zoomeA(ed.zoom * Math.exp(-(evt.deltaMode === 1 ? evt.deltaY * 16 : evt.deltaY) * 0.0022), evt.clientX, evt.clientY);
+    zoomeA(ed.zoom * Math.exp(-delta * 0.0022), evt.clientX, evt.clientY);
   },
   { passive: false }
 );
+// le pincement du trackpad du Mac (WebKit) : zoom ancre sous les doigts
+let pincementMac = null;
+scene.addEventListener("gesturestart", (evt) => {
+  evt.preventDefault();
+  pincementMac = { zoom: ed.zoom, x: evt.clientX, y: evt.clientY };
+});
+scene.addEventListener("gesturechange", (evt) => {
+  evt.preventDefault();
+  if (!pincementMac || !ed.W) return;
+  if (ed.recadrage) zoomeContenu(element(ed.recadrage), 1 + (evt.scale - (pincementMac.dernier || 1)), evt.clientX, evt.clientY);
+  else zoomeA(pincementMac.zoom * evt.scale, pincementMac.x, pincementMac.y);
+  pincementMac.dernier = evt.scale;
+});
+scene.addEventListener("gestureend", (evt) => {
+  evt.preventDefault();
+  pincementMac = null;
+});
 $("ed-zoom-plus").addEventListener("click", () => zoomeA(PAS_ZOOM.find((p) => p > ed.zoom * 1.01) ?? ED_ZOOM_MAX));
 $("ed-zoom-moins").addEventListener("click", () => zoomeA([...PAS_ZOOM].reverse().find((p) => p < ed.zoom * 0.99) ?? ED_ZOOM_MIN));
 $("ed-zoom").addEventListener("click", ajusteVue);
@@ -1070,6 +1922,8 @@ async function rendCanvas() {
   tampon.id = "ed-canvas";
   tampon.className = actuel.className;
   actuel.replaceWith(tampon);
+  ed.versionPage += 1;
+  rendElements();
 }
 
 // Les textes de la page d'origine (pdf.js) : ceux qui s'ecrivent a
@@ -1092,6 +1946,77 @@ async function textesDe(page, pdfjs) {
   return textes;
 }
 
+// Les images de la page d'origine (logos, photos...) : leur cadre exact,
+// rotation comprise, d'apres les operations de dessin de la page. Ni le fond
+// d'une etiquette qui serait une seule grande image, ni un code-barres dessine
+// en image (il se prend comme un code).
+async function imagesDe(page, pdfjs, codes) {
+  const vp = page.getViewport({ scale: 1 });
+  const ops = await page.getOperatorList();
+  const O = pdfjs.OPS;
+  const pile = [];
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const mul = pdfjs.Util.transform;
+  const images = [];
+  for (let i = 0; i < ops.fnArray.length; i += 1) {
+    const f = ops.fnArray[i];
+    const a = ops.argsArray[i];
+    if (f === O.save) pile.push(ctm);
+    else if (f === O.restore) ctm = pile.pop() || [1, 0, 0, 1, 0, 0];
+    else if (f === O.transform) ctm = mul(ctm, a);
+    else if (f === O.paintFormXObjectBegin) {
+      pile.push(ctm);
+      if (Array.isArray(a?.[0]) && a[0].length === 6) ctm = mul(ctm, a[0]);
+    } else if (f === O.paintFormXObjectEnd) ctm = pile.pop() || [1, 0, 0, 1, 0, 0];
+    else if (f === O.paintImageXObject || f === O.paintInlineImageXObject || f === O.paintImageMaskXObject) {
+      const m = mul(vp.transform, ctm);
+      const p = (x, y) => ({ x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] });
+      // le haut de l'image est en y = 1 dans son carre unite
+      const hg = p(0, 1);
+      const hd = p(1, 1);
+      const bg = p(0, 0);
+      const l = Math.hypot(hd.x - hg.x, hd.y - hg.y);
+      const h = Math.hypot(bg.x - hg.x, bg.y - hg.y);
+      if (l < 6 || h < 6) continue;
+      const rotation = G.angle((Math.atan2(hd.y - hg.y, hd.x - hg.x) * 180) / Math.PI);
+      const c = p(0.5, 0.5);
+      const cadre = { x: c.x - l / 2, y: c.y - h / 2, l, h, rotation };
+      const boite = G.boite(cadre);
+      if (boite.l * boite.h > vp.width * vp.height * 0.7) continue;
+      const surCode = codes.some((k) => {
+        const ix = Math.max(0, Math.min(boite.x + boite.l, k.x + k.l) - Math.max(boite.x, k.x));
+        const iy = Math.max(0, Math.min(boite.y + boite.h, k.y + k.h) - Math.max(boite.y, k.y));
+        return ix * iy > 0.5 * Math.min(boite.l * boite.h, k.l * k.h);
+      });
+      if (surCode) continue;
+      images.push({ cle: `i${i}`, ...cadre, boite });
+      if (images.length >= 60) break;
+    }
+  }
+  return images;
+}
+
+// Les anciens brouillons (avant les extraits) : chaque element de l'etiquette
+// retrouve sa zone d'origine. Un texte dont le contenu ou le style avait
+// change reste retape ; un texte seulement deplace redevient un extrait.
+function migreElements(n) {
+  const o = ed.originaux.get(n);
+  const p = ed.modele.pages.find((x) => x.page === n);
+  if (!o || !p) return;
+  for (const e of p.elements) {
+    if (e.origine !== "original" || (e.source && e.depart)) continue;
+    const t = o.textes.find((x) => x.cle === e.cle);
+    const c = o.codes.find((x) => x.cle === e.cle);
+    const zone = t || c;
+    if (!zone) continue;
+    e.depart = { x: zone.x, y: zone.y, l: zone.l, h: zone.h, rotation: 0 };
+    e.source = e.masque || { ...e.depart };
+    if (t && e.retape === undefined) {
+      e.retape = e.texte !== t.texte || e.police !== t.police || Math.abs(e.taille - t.taille) > 0.05 || e.couleur !== "#000000" || (e.alignement || "gauche") !== "gauche";
+    }
+  }
+}
+
 async function allerPage(n) {
   if (n < 1 || n > ed.nbPages || (n === ed.page && ed.W)) return;
   finEdition(true);
@@ -1105,14 +2030,20 @@ async function allerPage(n) {
     ed.H = vp.height;
     if (!ed.originaux.has(n)) {
       const textes = await textesDe(ed.pdfPage, pdfjs).catch(() => []);
-      ed.originaux.set(n, { textes, codes: codesOriginaux(n) });
+      const codes = codesOriginaux(n);
+      const images = await imagesDe(ed.pdfPage, pdfjs, codes).catch(() => []);
+      ed.originaux.set(n, { textes, codes, images });
     }
+    ed.versionPage = 0;
   } else {
     const img = $("ed-image");
     ed.W = img.naturalWidth;
     ed.H = img.naturalHeight;
-    if (!ed.originaux.has(n)) ed.originaux.set(n, { textes: [], codes: codesOriginaux(n) });
+    if (!ed.originaux.has(n)) ed.originaux.set(n, { textes: [], codes: codesOriginaux(n), images: [] });
+    ed.versionPage = 1;
   }
+  migreElements(n);
+  oublieNoeuds();
   $("ed-pages").hidden = ed.nbPages <= 1;
   $("ed-page-texte").textContent = `${n} / ${ed.nbPages}`;
   $("ed-page-prec").disabled = n <= 1;
@@ -1155,7 +2086,7 @@ $("ed-proprietes").addEventListener("input", (evt) => {
   if (prop === "texte") {
     e.texte = evt.target.value;
     ajusteTexte(e);
-    marqueModifie(e);
+    marqueRetape(e);
     rendElements();
     clearTimeout(minuteurValeur);
     minuteurValeur = setTimeout(() => engage(`Modifier le texte ${nomElement(e)}`), 700);
@@ -1167,7 +2098,17 @@ $("ed-proprietes").addEventListener("input", (evt) => {
   }
   if (prop === "couleur") e.couleur = evt.target.value;
   if (prop === "fond") e.fond = evt.target.value;
-  marqueModifie(e);
+  if (prop === "zoom-contenu" && e.type === "image") {
+    // le contenu de l'image grandit dans son cadre, autour de son centre
+    e.cadrage = cadrageBorne(e, { ...G.cadrage(e.cadrage), zoom: Number(evt.target.value) / 100 });
+    if (evt.target.nextElementSibling) evt.target.nextElementSibling.textContent = `${evt.target.value} %`;
+    marqueModifie(e);
+    rendElements();
+    return;
+  }
+  if (prop === "rotation") return;
+  if (e.type === "texte") marqueRetape(e);
+  else marqueModifie(e);
   rendElements();
 });
 
@@ -1178,10 +2119,12 @@ $("ed-proprietes").addEventListener("change", (evt) => {
   if (["x", "y", "l", "h"].includes(prop)) {
     const v = depuisMm(Number(evt.target.value));
     if (!Number.isFinite(v)) return;
+    const ratio = e.l / e.h;
     e[prop] = prop === "l" || prop === "h" ? Math.max(2, v) : v;
-    if (e.type === "code" && FORMATS_2D.includes(e.format) && e.format !== "PDF417") {
-      if (prop === "l") e.h = e.l;
-      if (prop === "h") e.l = e.h;
+    if ((e.type === "code" && FORMATS_2D.includes(e.format) && e.format !== "PDF417") || estExtrait(e)) {
+      // un QR code reste carre, un extrait de l'etiquette ne se deforme pas
+      if (prop === "l") e.h = e.l / (estExtrait(e) ? ratio : 1);
+      if (prop === "h") e.l = e.h * (estExtrait(e) ? ratio : 1);
     }
     marqueModifie(e);
     engage(`Position de ${nomElement(e)}`);
@@ -1191,7 +2134,7 @@ $("ed-proprietes").addEventListener("change", (evt) => {
   if (prop === "police") {
     e.police = evt.target.value;
     ajusteTexte(e);
-    marqueModifie(e);
+    marqueRetape(e);
     engage("Changer la police");
     rendTout();
     return;
@@ -1204,6 +2147,18 @@ $("ed-proprietes").addEventListener("change", (evt) => {
   }
   if (["taille", "couleur", "fond"].includes(prop)) {
     engage({ taille: "Taille du texte", couleur: "Couleur", fond: "Couleur du fond" }[prop]);
+    rendTout();
+  }
+  if (prop === "zoom-contenu") {
+    engage("Zoom du contenu");
+    rendTout();
+  }
+  if (prop === "rotation") {
+    const v = Number(evt.target.value);
+    if (!Number.isFinite(v)) return;
+    e.rotation = G.angle(v);
+    marqueModifie(e);
+    engage("Faire pivoter");
     rendTout();
   }
 });
@@ -1246,9 +2201,15 @@ $("ed-proprietes").addEventListener("click", (evt) => {
   if (al) {
     const e = choisis()[0];
     e.alignement = al.dataset.alignement;
-    marqueModifie(e);
+    marqueRetape(e);
     engage("Aligner le texte");
     rendTout();
+    return;
+  }
+  const cadrage = evt.target.closest("[data-cadrage]");
+  if (cadrage) {
+    const e = choisis()[0];
+    if (e?.type === "image" && G.cadrage(e.cadrage).mode !== cadrage.dataset.cadrage) faitAction(cadrage.dataset.cadrage, e);
     return;
   }
   const a = evt.target.closest("[data-aligne]");
@@ -1263,6 +2224,7 @@ $("ed-calques").addEventListener("click", (evt) => {
   const id = ligne.dataset.calque;
   const action = evt.target.closest("[data-calque-action]")?.dataset.calqueAction;
   if (action === "monter") return bougeOrdre(id, 1);
+  if (action === "descendre") return bougeOrdre(id, -1);
   if (action === "verrou") {
     const e = element(id);
     e.verrou = !e.verrou;
@@ -1294,13 +2256,47 @@ document.querySelectorAll("[data-onglet]").forEach((b) =>
 
 // --- La barre d'outils -------------------------------------------------------------------------
 
+// le panneau de droite se replie : toute la largeur pour la page (⌘\)
+function basculePanneau(force = null) {
+  const cache = force ?? !document.body.classList.contains("is-panneau-cache");
+  document.body.classList.toggle("is-panneau-cache", cache);
+  document.querySelector('[data-action="panneau"]')?.setAttribute("aria-pressed", String(!cache));
+  try {
+    localStorage.setItem("editeur.panneau", cache ? "cache" : "ouvert");
+  } catch {}
+}
+
+function changeCadrage(e, c, libelle) {
+  e.cadrage = cadrageBorne(e, c);
+  marqueModifie(e);
+  engage(libelle);
+  rendTout();
+}
+
 function changeOutil(outil) {
   ed.outil = outil;
   document.querySelectorAll("[data-outil]").forEach((b) => b.classList.toggle("is-on", b.dataset.outil === outil));
   scene.dataset.outil = outil;
 }
 
-function faitAction(action) {
+function faitAction(action, cible = null) {
+  const e = cible || (choisis().length === 1 ? choisis()[0] : null);
+  if (e?.type === "image") {
+    if (action === "remplacer-image") return choisitFichier((f) => remplaceImage({ id: e.id }, f));
+    if (action === "recadrer") return ed.recadrage === e.id ? finRecadrage() : entreRecadrage(e.id);
+    if (action === "remplir" || action === "ajuster") return changeCadrage(e, { mode: action, zoom: 1, dx: 0, dy: 0 }, action === "remplir" ? "Remplir le cadre" : "Ajuster au cadre");
+    if (action === "centrer-contenu") return changeCadrage(e, { ...G.cadrage(e.cadrage), dx: 0, dy: 0 }, "Centrer le contenu");
+    if (action === "reinitialiser-cadrage") return changeCadrage(e, { mode: "remplir" }, "Réinitialiser le cadrage");
+    if (action === "pivoter" && !e.verrou) {
+      detache([e]);
+      e.rotation = G.angle((e.rotation || 0) + 90);
+      engage("Pivoter de 90°");
+      rendTout();
+      return;
+    }
+  }
+  if (action === "ajouter-image") return choisitFichier((f) => ajouteImage(f));
+  if (action === "panneau") return basculePanneau();
   if (action === "supprimer") return supprime();
   if (action === "dupliquer") return duplique();
   if (action === "devant" || action === "derriere") return ordre(action);
@@ -1331,6 +2327,12 @@ $("ed-outils").addEventListener("click", (evt) => {
   const b = evt.target.closest("[data-bascule]");
   if (b) bascule(b.dataset.bascule);
 });
+$("ed-bascule-panneau").addEventListener("click", () => basculePanneau());
+if (APP_MAC) {
+  try {
+    if (localStorage.getItem("editeur.panneau") === "cache") basculePanneau(true);
+  } catch {}
+}
 $("ed-annuler").addEventListener("click", annule);
 $("ed-retablir").addEventListener("click", retablit);
 $("ed-page-prec").addEventListener("click", () => allerPage(ed.page - 1));
@@ -1367,6 +2369,11 @@ document.addEventListener("keydown", (evt) => {
     duplique();
     return;
   }
+  if (mod && evt.key === "\\" && APP_MAC) {
+    evt.preventDefault();
+    basculePanneau();
+    return;
+  }
   if (mod && k === "a") {
     evt.preventDefault();
     choisit(visibles().map((e) => e.id));
@@ -1399,9 +2406,17 @@ document.addEventListener("keydown", (evt) => {
     return;
   }
   if (evt.key === "Escape") {
+    if (!$("ed-menu")?.hidden) return fermeMenu();
+    if (ed.recadrage) return finRecadrage();
     choisit([]);
     changeOutil("selection");
     return;
+  }
+  if (evt.key === "Enter" && APP_MAC) {
+    const e = choisis().length === 1 ? choisis()[0] : null;
+    if (ed.recadrage) return finRecadrage();
+    if (e?.type === "image") return entreRecadrage(e.id);
+    if (e?.type === "texte") return commenceEdition(e.id);
   }
   if (evt.key.startsWith("Arrow")) {
     const liste = choisis().filter((e) => !e.verrou);
@@ -1424,6 +2439,7 @@ document.addEventListener("keydown", (evt) => {
   }
   const outils = { v: "selection", h: "main", t: "texte", b: "barres", q: "qr", r: "rect" };
   if (outils[k]) return changeOutil(outils[k]);
+  if (k === "i" && APP_MAC) return choisitFichier((f) => ajouteImage(f));
   if (k === "g") return bascule("grille");
   if (k === "m") return bascule("magnetisme");
   if (evt.key === "]") return ordre("devant");
@@ -1536,7 +2552,7 @@ async function demarreEditeur() {
     } else if (type.startsWith("image/")) {
       const img = $("ed-image");
       img.src = URL.createObjectURL(await res.blob());
-      await img.decode();
+      await imagePrete(img);
       img.hidden = false;
       $("ed-canvas").hidden = true;
       ed.type = "image";

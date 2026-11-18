@@ -42,6 +42,18 @@ struct PageSiteFenetre: View {
     }
 }
 
+/// La vue de la page. En verification (`-DropScenario`), le premier clic
+/// compte meme quand l'app n'est pas au premier plan : les evenements du
+/// scenario arrivent sans voler le clavier a l'utilisateur.
+final class VueSite: WKWebView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "DropScenario") != nil { return true }
+        #endif
+        return super.acceptsFirstMouse(for: event)
+    }
+}
+
 private struct PageSite: NSViewRepresentable {
     let chemin: String
     let serveur: URL
@@ -57,7 +69,14 @@ private struct PageSite: NSViewRepresentable {
         // les cookies de cette fenetre durent (72 h au plus, fixe par le serveur)
         reglages.websiteDataStore = .default()
         reglages.preferences.isElementFullscreenEnabled = true
-        let vue = WKWebView(frame: .zero, configuration: reglages)
+        // la page sait qu'elle est dans l'app Mac (des le premier dessin) : les
+        // images deposees depuis le Finder, le menu contextuel, la rotation,
+        // le recadrage et l'habillage de verre n'existent que la
+        reglages.applicationNameForUserAgent = "FeurDropMac/1"
+        reglages.userContentController.addUserScript(WKUserScript(
+            source: "document.documentElement.classList.add('app-mac')",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let vue = VueSite(frame: .zero, configuration: reglages)
         vue.navigationDelegate = context.coordinator
         vue.uiDelegate = context.coordinator
         vue.allowsMagnification = false
@@ -152,6 +171,9 @@ private struct PageSite: NSViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             parent.chargement = false
             if webView.url?.path() != "/connexion" { parent.erreur = nil }
+            #if DEBUG
+            if webView.url?.path().hasPrefix("/bordereaux") == true { ScenarioPage.lanceSiDemande(webView) }
+            #endif
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { echec(error) }

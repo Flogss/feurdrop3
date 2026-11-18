@@ -77,6 +77,8 @@
   <symbol id="i-cadenas" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
   <symbol id="i-calques" viewBox="0 0 24 24"><path d="m12 4 8.5 4.5L12 13 3.5 8.5z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5M3.5 16.5 12 21l8.5-4.5"/></symbol>
   <symbol id="i-comparer" viewBox="0 0 24 24"><rect x="3.5" y="4" width="7.5" height="16" rx="1.5"/><rect x="13" y="4" width="7.5" height="16" rx="1.5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 16-5-5-8.5 8.5"/></symbol>
+  <symbol id="i-panneau" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
   <symbol id="i-telecharger" viewBox="0 0 24 24"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 19.5h14"/></symbol>
 </svg>
 <div class="bdx-fond" aria-hidden="true"></div>
@@ -104,6 +106,7 @@
     <span id="ed-page-texte">1 / 1</span>
     <button class="ed-bouton" id="ed-page-suiv" type="button" aria-label="Page suivante"><svg class="icon"><use href="#i-arrow-right"/></svg></button>
   </div>
+  <button class="ed-bouton ed-bouton-seul mac-seul" id="ed-bascule-panneau" data-action="panneau" type="button" title="Afficher / masquer le panneau (⌘\)" aria-label="Panneau" aria-pressed="true"><svg class="icon"><use href="#i-panneau"/></svg></button>
   <a class="btn btn-secondary btn-sm" id="ed-comparer" href="#" target="_blank" rel="noopener"><svg class="icon"><use href="#i-comparer"/></svg><span>Comparer</span></a>
   <button class="btn btn-primary btn-sm" id="ed-exporter" type="button"><svg class="icon"><use href="#i-telecharger"/></svg><span>Exporter le PDF</span></button>
 </header>
@@ -119,6 +122,7 @@
     <button class="ed-outil" data-outil="barres" type="button" title="Ajouter un code-barres (B)" aria-label="Ajouter un code-barres"><svg class="icon"><use href="#i-barcode"/></svg></button>
     <button class="ed-outil" data-outil="qr" type="button" title="Ajouter un QR code (Q)" aria-label="Ajouter un QR code"><svg class="icon"><use href="#i-qr"/></svg></button>
     <button class="ed-outil" data-outil="rect" type="button" title="Ajouter un rectangle (R) — pour masquer une zone" aria-label="Ajouter un rectangle"><svg class="icon"><use href="#i-carre"/></svg></button>
+    <button class="ed-outil mac-seul" data-action="ajouter-image" type="button" title="Ajouter une image (I) — ou glisse-la depuis le Finder" aria-label="Ajouter une image"><svg class="icon"><use href="#i-image"/></svg></button>
     <span class="ed-outils-sep"></span>
     <button class="ed-outil" data-action="dupliquer" type="button" title="Dupliquer (⌘D / Ctrl+D)" aria-label="Dupliquer"><svg class="icon"><use href="#i-dupliquer"/></svg></button>
     <button class="ed-outil" data-action="supprimer" type="button" title="Supprimer (Suppr)" aria-label="Supprimer"><svg class="icon"><use href="#i-trash"/></svg></button>
@@ -159,6 +163,8 @@
   </aside>
 </main>
 
+<div class="ed-menu" id="ed-menu" role="menu" hidden></div>
+<div class="ed-depot-etiquette" id="ed-depot-etiquette" hidden></div>
 <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 </body>
 </html>

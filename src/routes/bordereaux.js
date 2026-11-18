@@ -139,10 +139,12 @@ router.get(
 //   DELETE /:id/travail          repartir de l'original
 //   POST   /:id/code             { format, valeur } : un code regenere (apercu)
 //   POST   /:id/travail/export   { modele } : le NOUVEAU PDF (l'original ne bouge pas)
+//   POST   /:id/images           une image (PNG ou JPEG, corps brut) -> { ref, l, h }
+//   GET    /:id/images/:ref      cette image
 
 function repondEditeur(res, err) {
   if (err instanceof editeur.ErreurEditeur) {
-    return res.status(err.status).json({ error: err.message, protege: err.protege || false, transporteur: err.transporteur || null });
+    return res.status(err.status).json({ error: err.message, protege: err.protege || false, transporteur: err.transporteur || null, reencoder: err.reencoder || false });
   }
   if (err instanceof ErreurLecteur) return res.status(503).json({ error: err.message });
   console.error("[editeur]", err);
@@ -209,6 +211,32 @@ router.post(
     }
   })
 );
+
+// Les images du document de travail (deposees depuis le Finder) : envoyees
+// telles quelles (PNG ou JPEG), verifiees, gardees a leur empreinte.
+router.post(
+  "/:id/images",
+  express.raw({ type: ["image/png", "image/jpeg"], limit: "15mb" }),
+  routeAsync(async (req, res) => {
+    const id = idDe(req);
+    if (!id || !bordereaux.detail(id)) return res.status(404).json({ error: "Étiquette introuvable." });
+    if (!Buffer.isBuffer(req.body)) return res.status(415).json({ error: "Envoie une image PNG ou JPEG.", reencoder: true });
+    try {
+      res.status(201).json(await editeur.importeImage(id, new Uint8Array(req.body.buffer, req.body.byteOffset, req.body.byteLength)));
+    } catch (err) {
+      repondEditeur(res, err);
+    }
+  })
+);
+
+router.get("/:id/images/:ref", (req, res) => {
+  const ref = /^[0-9a-f]{64}$/.test(req.params.ref) ? req.params.ref : null;
+  const i = ref && require("../bordereaux/base").imageTravail(ref);
+  if (!i) return res.status(404).json({ error: "Image introuvable." });
+  // le contenu ne change jamais sous une meme empreinte
+  res.set({ "Content-Type": i.type === "png" ? "image/png" : "image/jpeg", "Cache-Control": "private, max-age=31536000, immutable", "Content-Length": String(i.octets.length) });
+  res.end(Buffer.from(i.octets.buffer, i.octets.byteOffset, i.octets.byteLength));
+});
 
 router.put("/:id/categorie", (req, res) => {
   const id = idDe(req);

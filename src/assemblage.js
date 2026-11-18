@@ -43,7 +43,8 @@ const PAQUETS = {
   // l'editeur de bordereaux (/bordereaux/editeur), a part lui aussi
   "editeur.js": {
     type: "application/javascript; charset=UTF-8",
-    morceaux: ["js/bdx/00-outils.js", "js/bdx/20-editeur.js"],
+    // (05-geometrie.js sert aussi au serveur, pour l'export : memes calculs)
+    morceaux: ["js/bdx/00-outils.js", "js/bdx/05-geometrie.js", "js/bdx/20-editeur.js"],
   },
   // le comparateur de bordereaux (/bordereaux/comparer)
   "comparateur.js": {
