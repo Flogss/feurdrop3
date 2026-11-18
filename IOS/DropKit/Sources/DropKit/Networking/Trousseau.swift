@@ -19,8 +19,14 @@ public enum Trousseau {
         var resultat: CFTypeRef?
         var statut = SecItemCopyMatching(requete as CFDictionary, &resultat)
         #if os(macOS)
-        if statut == errSecMissingEntitlement {
+        // Sans le droit au trousseau moderne, l'ecriture le refuse (« droit
+        // manquant ») et part dans le trousseau classique -- mais la LECTURE,
+        // elle, y repond « introuvable ». Ne retomber que sur « droit manquant »
+        // laissait le jeton dans le trousseau classique sans jamais le relire :
+        // le mot de passe redemande a chaque ouverture de l'app.
+        if statut == errSecMissingEntitlement || statut == errSecItemNotFound {
             requete.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+            resultat = nil
             statut = SecItemCopyMatching(requete as CFDictionary, &resultat)
         }
         #endif
