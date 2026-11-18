@@ -218,7 +218,7 @@ function vueAnalyse(f, colis, suivi) {
     const page = pages[c.page - 1];
     if (!page) continue;
     const code = { ...c, ...roleDu(c, colis, suivi) };
-    // la valeur peut-elle changer dans l'editeur ? (jamais le code du transporteur)
+    // format et couleur modifiables dans l'editeur ; la valeur est geree separement
     code.modifiable = require("./editeur").codeModifiable(code, colis);
     page.codes.push(code);
   }

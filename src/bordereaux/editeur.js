@@ -24,12 +24,10 @@ const G = require("../../public/js/bdx/05-geometrie.js");
 //     masques (ce qui a ete deplace ou supprime), les textes et les codes
 //     (regeneres en vectoriel) : un NOUVEAU PDF. Le fichier d'origine, sur
 //     Telegram, et l'impression de FeurDrop ne changent pas ;
-//   - les codes lus sur l'etiquette du transporteur gardent leur valeur
-//     (verifie ici, jamais confie a la page) : un numero de suivi ou des
-//     donnees d'expedition ne se changent pas en redessinant un code. Un
-//     nouveau code au format d'un numero de suivi, ou portant des donnees
-//     d'expedition (« [)> »), est refuse : il faut une reedition officielle
-//     du bordereau chez le transporteur.
+//   - les codes lus sur l'etiquette du transporteur restent lies a leur code
+//     d'origine (verifie ici, jamais confie a la page) : leur valeur peut etre
+//     remplacee, mais leur format et leur couleur restent proteges. Les codes
+//     ajoutes restent soumis aux refus des numeros de suivi et donnees transporteur.
 
 const FORMATS = ["Code128", "Code39", "Code93", "EAN13", "EAN8", "UPCA", "ITF", "Codabar", "QRCode", "DataMatrix", "PDF417", "Aztec"];
 const POLICES = {
@@ -82,12 +80,10 @@ function valeurRefusee(format, valeur, colis) {
   return null;
 }
 
-// Un code de l'etiquette d'origine dont la valeur peut changer : seulement
+// Un code d'origine dont le format et la couleur peuvent changer : seulement
 // ce qui n'est ni le numero de suivi, ni un numero qui en a la forme, ni un
-// code qui le contient (tri, lien de suivi), ni des donnees d'expedition --
-// une reference de commande, le lien d'une boutique... Le role vient de
-// l'analyse (index.js), et la valeur lue repasse par les memes refus qu'un
-// code ajoute.
+// code qui le contient (tri, lien de suivi), ni des donnees d'expedition.
+// La valeur de tous les codes d'origine lisibles est geree separement.
 const ROLES_MODIFIABLES = new Set(["autre", "lien"]);
 function codeModifiable(lu, colis) {
   if (!lu || !lu.lisible || !ROLES_MODIFIABLES.has(lu.role)) return false;
@@ -264,13 +260,22 @@ function verifieCodes(modele, colis, codesLus) {
         // se deplace tel quel ; regenere (anciens brouillons), il doit avoir ete lu
         if (!lu || (!lu.lisible && !e.source)) throw new ErreurEditeur("Un code d'origine ne correspond à aucun code lu sur l'étiquette.", 422, { protege: true });
         if (e.reecrit) {
-          // reecrit : seulement un code qui n'est pas celui du transporteur,
-          // et sa nouvelle valeur passe les memes refus qu'un code ajoute
-          if (!codeModifiable(lu, colis)) {
-            throw new ErreurEditeur("Ce code de l'étiquette porte le numéro de suivi ou des données d'expédition : sa valeur est protégée. Réédite le bordereau chez le transporteur.", 422, { protege: true });
+          if (!lu.lisible) {
+            throw new ErreurEditeur("Ce code d'origine ne peut pas être régénéré car sa valeur n'a pas pu être lue.", 422, { protege: true });
           }
-          const refus = valeurRefusee(e.format, e.valeur, colis);
-          if (refus) throw new ErreurEditeur(refus.raison, 422, { protege: true, transporteur: refus.transporteur || null });
+
+          // Pour les codes transporteur, seule la valeur est éditable :
+          // le format et la couleur restent protégés. La nouvelle valeur
+          // n'est volontairement pas comparée aux règles des codes ajoutés.
+          if (!codeModifiable(lu, colis)) {
+            if (e.format !== lu.format || (e.couleur || "#000000").toLowerCase() !== "#000000") {
+              throw new ErreurEditeur("Le format et la couleur de ce code transporteur sont protégés.", 422, { protege: true });
+            }
+            continue;
+          }
+
+          // Toute valeur d'un code d'origine lisible peut être remplacée,
+          // quel que soit son rôle. Les refus restent applicables aux codes ajoutés.
           continue;
         }
         if (!lu.lisible) continue;

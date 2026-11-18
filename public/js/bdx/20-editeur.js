@@ -105,7 +105,7 @@ function codeLu(e) {
   return null;
 }
 
-// La valeur d'un code de l'etiquette peut-elle changer ? (pas celui du transporteur)
+// Le format et la couleur de ce code d'origine peuvent-ils changer ?
 const codeLibre = (e) => Boolean(codeLu(e)?.modifiable);
 
 // Un code de l'etiquette est-il reecrit (autre valeur, format ou couleur) ?
@@ -2157,7 +2157,7 @@ function codesOriginaux(n) {
     format: c.format,
     valeur: c.valeur,
     lisible: c.lisible,
-    // decide par le serveur : jamais le code du transporteur
+    // decide par le serveur : autorise le changement de format/couleur
     modifiable: c.modifiable === true,
     orientation: Math.round((c.orientation || 0) / 90) * 90,
     x: c.zone.x0 * ed.W,

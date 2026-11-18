@@ -185,12 +185,22 @@ router.post(
       // le code de l'etiquette elle-meme (deplace ou redimensionne) : verifie
       // contre ce qui a ete lu, jamais d'apres la page
       const codeId = Number.isInteger(req.body?.codeId) ? req.body.codeId : null;
-      const lu = codeId ? bordereaux.codesDuColis(id).find((c) => c.id === codeId) : null;
-      const original = Boolean(lu && lu.lisible && lu.valeur === req.body?.valeur && lu.format === req.body?.format);
-      // une autre valeur pour un code du transporteur : jamais, meme en apercu
-      if (lu && !original && !editeur.codeModifiable(lu, colis)) {
-        return res.status(422).json({ error: "Ce code de l'étiquette porte le numéro de suivi ou des données d'expédition : sa valeur est protégée.", protege: true });
+      const lu = codeId !== null ? bordereaux.codesDuColis(id).find((c) => c.id === codeId) : null;
+
+      // Un code d'origine doit correspondre à un code réellement lu sur CE colis.
+      if (codeId !== null && (!lu || !lu.lisible)) {
+        return res.status(422).json({ error: "Code d'origine introuvable ou illisible.", protege: true });
       }
+
+      const protege = Boolean(lu && !editeur.codeModifiable(lu, colis));
+      // Pour un code transporteur, la valeur est éditable mais pas le format.
+      if (protege && String(req.body?.format || "") !== lu.format) {
+        return res.status(422).json({ error: "Le format de ce code transporteur est protégé.", protege: true });
+      }
+
+      // Toute valeur d'un code d'origine lisible peut être remplacée,
+      // quel que soit son rôle. Les codes ajoutés restent contrôlés.
+      const original = Boolean(lu && lu.lisible);
       const { format, valeur, largeur, hauteur, chemin } = await editeur.genereCode(String(req.body?.format || ""), req.body?.valeur, { colis, original });
       res.json({ format, valeur, largeur, hauteur, chemin });
     } catch (err) {
