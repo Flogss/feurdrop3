@@ -668,15 +668,11 @@ function rendProprietes() {
     propres = `<section class="ed-bloc"><h3>${NOMS_FORMAT[e.format] || e.format}</h3>
       <label class="ed-champ is-large"><span>Format</span><select data-prop="format"${protege ? " disabled" : ""}>${formats.map((f) => `<option value="${f}"${f === e.format ? " selected" : ""}>${NOMS_FORMAT[f]}</option>`).join("")}</select></label>
       <label class="ed-champ is-large ed-champ-valeur"><span>Contenu décodé</span>
-        <textarea class="ed-zone-texte ed-mono" data-prop="valeur" rows="2"${protege || e.verrou ? " readonly" : ""}>${escapeHtml(e.valeur)}</textarea></label>
-      ${
-        protege
-          ? `<p class="ed-protege"><svg class="icon"><use href="#i-lock"/></svg><span>Valeur du transporteur</span></p>`
-          : `<p class="ed-message" id="ed-message-code"></p>${
-              e.origine === "original"
-                ? `<p class="ed-libre"><span>Code de l'étiquette · pas un numéro de suivi</span>${e.reecrit ? '<button class="ed-petit" type="button" data-action="valeur-origine">Valeur d\'origine</button>' : ""}</p>`
-                : ""
-            }`
+        <textarea class="ed-zone-texte ed-mono" data-prop="valeur" rows="2"${e.verrou ? " readonly" : ""}>${escapeHtml(e.valeur)}</textarea></label>
+      <p class="ed-message" id="ed-message-code"></p>${
+        !protege && e.origine === "original"
+          ? `<p class="ed-libre"><span>Code de l'étiquette · pas un numéro de suivi</span>${e.reecrit ? '<button class="ed-petit" type="button" data-action="valeur-origine">Valeur d\'origine</button>' : ""}</p>`
+          : ""
       }
       <label class="ed-champ ed-champ-couleur"><span>Couleur</span><input type="color" data-prop="couleur" value="${e.couleur || "#000000"}"${protege ? " disabled" : ""} /></label>
       </section>`;
@@ -2181,7 +2177,8 @@ $("ed-proprietes").addEventListener("input", (evt) => {
   if (!prop || !e) return;
   if (["x", "y", "l", "h"].includes(prop)) return; // a la validation (change)
   if (prop === "valeur") {
-    if (e.origine === "original" && !codeLibre(e)) return;
+    // La valeur d’un code transporteur peut aussi être modifiée.
+    // Le verrou manuel de l’élément reste respecté par le champ readonly.
     // le code se redessine a la frappe
     clearTimeout(minuteurValeur);
     minuteurValeur = setTimeout(() => appliqueValeur(e, evt.target.value, null, { silencieux: true }), 90);
