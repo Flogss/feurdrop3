@@ -35,7 +35,7 @@ const bdx = {
   courant: null, // { id, resume, detail, type, doc, pdfPage, nbPages, page, base, cible, analyseEnCours, imageUrl }
   jeton: 0,
   zoom: 1,
-  mode: "largeur", // "largeur" | "page" | "libre"
+  mode: "page", // "page" | "largeur" | "libre" (l'etiquette entiere, d'abord)
   zonesToutes: false,
   selection: null, // id du code choisi
   trouve: null, // id du code trouve par la recherche (il pulse)
@@ -156,9 +156,8 @@ function bdxLigne(b) {
       <span class="bdx-ligne-texte">
         <b>${escapeHtml(b.expediteur || "—")}</b>
         <span class="bdx-ligne-num">${escapeHtml(titre)}</span>
-        ${bdxPuceCategorie(b.categorie)}
       </span>
-      <span class="bdx-ligne-meta">${bdxBadge(b.index)}<time>${escapeHtml(bdxDate(b.recuLe))}</time></span>
+      <span class="bdx-ligne-meta"><span class="bdx-ligne-meta-haut">${bdxPuceCategorie(b.categorie)}${bdxBadge(b.index)}</span><time>${escapeHtml(bdxDate(b.recuLe))}</time></span>
     </button>
   </li>`;
 }
@@ -188,6 +187,11 @@ function bdxRendListe() {
   $("bdx-plus").hidden = bdx.suite == null;
   $("bdx-total").textContent = bdx.total ? pluriel(bdx.total, "étiquette") : "";
   $("bdx-effacer-filtres").hidden = !(bdx.transporteur || bdx.depuis || bdx.categorie || bdx.tri !== "recent");
+  // la premiere etiquette s'ouvre d'elle-meme : jamais un grand vide
+  if (!bdx.courant && !bdx.ouvertureAuto && bdx.liste.length && bdx.onglet === "etude" && innerWidth >= 1100) {
+    bdx.ouvertureAuto = true;
+    bdxOuvre(bdx.liste[0].id);
+  }
 }
 
 async function bdxChargeListe({ suite = false } = {}) {
@@ -226,7 +230,8 @@ function bdxMajLigne(id, detail) {
   }
   if (index.etat === "analyse") document.querySelector(`#bdx-resultats [data-bdx-id="${id}"] .bdx-res-pas-lue`)?.remove();
   const bouton = document.querySelector(`#bdx-liste [data-bdx-ouvre="${id}"] .bdx-ligne-meta`);
-  if (bouton) bouton.innerHTML = `${bdxBadge(index)}<time>${escapeHtml(bdxDate(bdx.liste.find((x) => x.id === id)?.recuLe))}</time>`;
+  const b = bdx.liste.find((x) => x.id === id);
+  if (bouton) bouton.innerHTML = `<span class="bdx-ligne-meta-haut">${bdxPuceCategorie(b?.categorie)}${bdxBadge(index)}</span><time>${escapeHtml(bdxDate(b?.recuLe))}</time>`;
 }
 
 // --- La visionneuse ----------------------------------------------------------------------
@@ -293,9 +298,9 @@ async function bdxInstalleFichier(c, fichier) {
 async function bdxOuvre(id, { page = null, codeId = null, recherche = null, resume = null } = {}) {
   const jeton = ++bdx.jeton;
   bdxFermeDocument();
-  // une autre etiquette s'ouvre en entier, a la largeur (le zoom libre de la
-  // precedente ne lui irait pas)
-  if (bdx.mode === "libre") bdx.mode = "largeur";
+  // une autre etiquette s'ouvre en entier (le zoom libre de la precedente
+  // ne lui irait pas)
+  if (bdx.mode === "libre") bdx.mode = "page";
   bdx.courant = { id, resume: resume || bdx.liste.find((b) => b.id === id) || bdx.resultats.find((b) => b.id === id) || null, detail: null, type: null, doc: null, pdfPage: null, nbPages: 1, page: page || 1, base: null, cible: { page, codeId, recherche }, analyseEnCours: false };
   bdx.selection = codeId;
   bdx.trouve = codeId;
@@ -744,8 +749,14 @@ function bdxRendPanneau() {
       <h2 class="bdx-p-titre">${escapeHtml(r.expediteur || "—")}</h2>
       <p class="bdx-p-fichier" title="${escapeAttr(r.fichier || "")}"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>${escapeHtml(r.fichier || `Colis #${r.id}`)}</p>
     </div>
-    <dl class="bdx-p-infos">${infos.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(v)}</dd></div>`).join("")}</dl>
+    <div class="bdx-p-actions">
+      <a class="btn btn-primary btn-sm" href="/bordereaux/editeur?colis=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-edit"/></svg><span>Modifier</span></a>
+      <a class="btn btn-secondary btn-sm" href="/bordereaux/comparer?a=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-comparer"/></svg><span>Comparer</span></a>
+      <button class="bouton-barre bouton-icone" id="bdx-relire" type="button" title="Relire les codes"${c.analyseEnCours ? " disabled" : ""}><svg class="icon"><use href="#i-refresh"/></svg></button>
+      <a class="bouton-barre bouton-icone" href="/api/bordereaux/${r.id}/fichier?telecharger=1" download title="Télécharger le fichier d'origine"><svg class="icon"><use href="#i-telecharger"/></svg></a>
+    </div>
     <section class="bdx-p-bloc bdx-p-suivi">${suivi}</section>
+    <dl class="bdx-p-infos">${infos.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(v)}</dd></div>`).join("")}</dl>
     <section class="bdx-p-bloc">
       <h3 class="bdx-p-h">Codes détectés${nbCodes !== null ? ` <b>${nbCodes}</b>` : ""}</h3>
       ${codes}
@@ -767,12 +778,10 @@ function bdxRendPanneau() {
       <textarea id="bdx-annotation" rows="2" maxlength="2000" placeholder="Ex. code abîmé, numéro relu à la main…">${escapeHtml(note)}</textarea>
       <button class="btn btn-secondary btn-sm" id="bdx-annotation-ok" type="button" hidden><svg class="icon"><use href="#i-check"/></svg><span>Enregistrer la note</span></button>
     </section>
-    <div class="bdx-p-actions">
-      <a class="btn btn-primary btn-sm" href="/bordereaux/editeur?colis=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-edit"/></svg><span>Modifier dans l'éditeur</span></a>
-      <a class="btn btn-secondary btn-sm" href="/bordereaux/comparer?a=${r.id}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-layers"/></svg><span>Comparer</span></a>
-      <button class="btn btn-secondary btn-sm" id="bdx-relire" type="button"${c.analyseEnCours ? " disabled" : ""}><svg class="icon"><use href="#i-refresh"/></svg><span>Relire les codes</span></button>
-      <a class="btn btn-ghost btn-sm" href="/api/bordereaux/${r.id}/fichier?telecharger=1" download><svg class="icon"><use href="#i-upload"/></svg><span>Fichier d'origine</span></a>
-    </div>`;
+`;
+  // les espaces Modifier / Comparer suivent l'etiquette ouverte
+  document.querySelector('.espace[data-espace="modifier"]').href = `/bordereaux/editeur?colis=${r.id}`;
+  document.querySelector('.espace[data-espace="comparer"]').href = `/bordereaux/comparer?a=${r.id}`;
 }
 
 function bdxItemCode(code, i, plusieursPages) {
@@ -892,7 +901,6 @@ function bdxOnglet(onglet, { focus = true } = {}) {
   });
   $("bdx-gauche-etude").hidden = onglet !== "etude";
   $("bdx-gauche-recherche").hidden = onglet !== "recherche";
-  $("bdx-grande-recherche").hidden = onglet !== "recherche";
   if (onglet === "recherche" && focus) setTimeout(() => $("bdx-q").focus({ preventScroll: true }), 30);
   // la scene change de taille : le zoom « ajuste » suit
   requestAnimationFrame(bdxReajuste);
@@ -1203,6 +1211,7 @@ function bdxReprendFiltres() {
     if (typeof g.categorie === "string") bdx.categorie = g.categorie;
   } catch {}
   $("bdx-depuis").value = bdx.depuis;
+  $("bdx-depuis").classList.toggle("is-vide", !bdx.depuis);
   $("bdx-tri").value = bdx.tri;
 }
 
@@ -1222,14 +1231,101 @@ function bdxRendChoixTransporteurs() {
 
 function bdxMetCategories(liste) {
   bdx.categories = liste;
-  const sel = $("bdx-categorie");
-  sel.innerHTML = `<option value="">Toutes</option><option value="aucune">Sans catégorie</option>${liste
-    .map((c) => `<option value="${c.id}">${escapeHtml(c.nom)} (${entier(c.etiquettes)})</option>`)
-    .join("")}`;
   if (bdx.categorie && bdx.categorie !== "aucune" && !liste.some((c) => String(c.id) === bdx.categorie)) bdx.categorie = "";
-  sel.value = bdx.categorie;
+  bdxRendBoutonCategories();
+  if (!$("bdx-categories-menu").hidden) bdxRendMenuCategories();
   if (!$("bdx-fenetre-categories").hidden) bdxRendCategories();
 }
+
+// Le bouton « Catégories » de la barre : ses couleurs, et la categorie filtree
+function bdxRendBoutonCategories() {
+  const choisie = bdx.categories.find((c) => String(c.id) === bdx.categorie);
+  $("bdx-categories-libelle").textContent = choisie ? choisie.nom : bdx.categorie === "aucune" ? "Sans catégorie" : "Catégories";
+  $("bdx-categories-bouton").classList.toggle("is-on", Boolean(bdx.categorie));
+  $("bdx-categories-pastilles").innerHTML = (choisie ? [choisie] : bdx.categories.slice(0, 4))
+    .map((c) => `<i style="--c: ${BDX_COULEURS[c.couleur] || BDX_COULEURS.gris}"></i>`)
+    .join("");
+  const filtre = $("bdx-filtre-categorie");
+  filtre.hidden = !bdx.categorie;
+  if (bdx.categorie) filtre.innerHTML = choisie ? bdxPuceCategorie(choisie) : `<span class="bdx-puce-categorie">Sans catégorie</span>`;
+}
+
+// Le menu : filtrer la liste, classer l'etiquette ouverte, creer, gerer
+function bdxRendMenuCategories() {
+  const ouverte = bdx.courant?.detail ? bdx.courant : null;
+  const classee = ouverte?.detail?.categorie?.id ?? null;
+  const ligne = (valeur, contenu, compte, on) =>
+    `<button type="button" role="menuitemradio" class="menu-item${on ? " is-on" : ""}" data-filtre-categorie="${valeur}" aria-checked="${on}">${contenu}<span class="menu-compte">${compte ?? ""}</span>${on ? '<svg class="icon menu-coche"><use href="#i-check"/></svg>' : ""}</button>`;
+  const pastille = (c) => `<i class="menu-pastille" style="--c: ${BDX_COULEURS[c.couleur] || BDX_COULEURS.gris}"></i>`;
+  $("bdx-categories-menu").innerHTML = `
+    <p class="menu-titre">Afficher</p>
+    ${ligne("", '<i class="menu-pastille is-toutes"></i><span>Toutes les étiquettes</span>', "", !bdx.categorie)}
+    ${bdx.categories.map((c) => ligne(String(c.id), `${pastille(c)}<span>${escapeHtml(c.nom)}</span>`, entier(c.etiquettes), bdx.categorie === String(c.id))).join("")}
+    ${ligne("aucune", '<i class="menu-pastille is-vide"></i><span>Sans catégorie</span>', "", bdx.categorie === "aucune")}
+    ${
+      ouverte
+        ? `<span class="menu-sep"></span><p class="menu-titre">Classer « ${escapeHtml(ouverte.detail.colis?.expediteur || ouverte.resume?.expediteur || "cette étiquette")} »</p>
+           <div class="menu-classer">${bdx.categories
+             .map((c) => `<button type="button" class="menu-puce${classee === c.id ? " is-on" : ""}" data-classe="${c.id}" style="--c: ${BDX_COULEURS[c.couleur] || BDX_COULEURS.gris}">${escapeHtml(c.nom)}</button>`)
+             .join("")}${classee !== null ? '<button type="button" class="menu-puce is-retire" data-classe="">Retirer</button>' : ""}</div>`
+        : ""
+    }
+    <span class="menu-sep"></span>
+    <form class="menu-nouvelle" id="bdx-menu-nouvelle"><svg class="icon"><use href="#i-plus"/></svg><input id="bdx-menu-nouvelle-nom" maxlength="40" placeholder="Nouvelle catégorie…" autocomplete="off" aria-label="Nouvelle catégorie" /></form>
+    <button type="button" class="menu-item" data-gerer-categories><svg class="icon"><use href="#i-settings"/></svg><span>Gérer les catégories…</span></button>`;
+}
+
+function bdxOuvreMenuCategories(ouvrir = $("bdx-categories-menu").hidden) {
+  const menu = $("bdx-categories-menu");
+  if (ouvrir) bdxRendMenuCategories();
+  menu.hidden = !ouvrir;
+  $("bdx-categories-bouton").setAttribute("aria-expanded", String(ouvrir));
+}
+$("bdx-categories-bouton").addEventListener("click", (e) => {
+  e.stopPropagation();
+  bdxOuvreMenuCategories();
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!$("bdx-categories-menu").hidden && !e.target.closest(".menu-ancre")) bdxOuvreMenuCategories(false);
+});
+$("bdx-categories-menu").addEventListener("click", async (e) => {
+  const f = e.target.closest("[data-filtre-categorie]");
+  if (f) {
+    bdxOuvreMenuCategories(false);
+    bdxFiltreChange("categorie", f.dataset.filtreCategorie);
+    bdxRendBoutonCategories();
+    return;
+  }
+  const k = e.target.closest("[data-classe]");
+  if (k) {
+    await bdxClasse(k.dataset.classe);
+    bdxRendMenuCategories();
+    return;
+  }
+  if (e.target.closest("[data-gerer-categories]")) {
+    bdxOuvreMenuCategories(false);
+    await bdxChargeCategories();
+    bdxRendCategories();
+    $("bdx-fenetre-categories").hidden = false;
+    setTimeout(() => $("bdx-categorie-nom").focus(), 50);
+  }
+});
+$("bdx-categories-menu").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const champ = $("bdx-menu-nouvelle-nom");
+  const nom = champ.value.trim();
+  if (!nom) return;
+  try {
+    const r = await postJSON("/api/bordereaux/categories", { nom });
+    await bdxChargeCategories();
+    // une etiquette ouverte : elle y est classee tout de suite
+    if (bdx.courant?.detail) await bdxClasse(String(r.categorie.id));
+    toast(`Catégorie « ${r.categorie.nom} » créée`, "info", 2200);
+    bdxRendMenuCategories();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+});
 
 function bdxFiltreChange(cle, valeur) {
   bdx[cle] = valeur;
@@ -1239,14 +1335,18 @@ function bdxFiltreChange(cle, valeur) {
 }
 
 $("bdx-transporteur").addEventListener("change", (e) => bdxFiltreChange("transporteur", e.target.value));
-$("bdx-depuis").addEventListener("change", (e) => bdxFiltreChange("depuis", e.target.value));
+$("bdx-depuis").addEventListener("change", (e) => {
+  e.target.classList.toggle("is-vide", !e.target.value);
+  bdxFiltreChange("depuis", e.target.value);
+});
 $("bdx-tri").addEventListener("change", (e) => bdxFiltreChange("tri", e.target.value));
-$("bdx-categorie").addEventListener("change", (e) => bdxFiltreChange("categorie", e.target.value));
 $("bdx-effacer-filtres").addEventListener("click", () => {
   Object.assign(bdx, { transporteur: "", depuis: "", tri: "recent", categorie: "" });
   $("bdx-depuis").value = "";
+  $("bdx-depuis").classList.add("is-vide");
   $("bdx-tri").value = "recent";
   bdxFiltreChange("categorie", "");
+  bdxRendBoutonCategories();
 });
 
 // classer l'etiquette ouverte (panneau)
@@ -1322,12 +1422,6 @@ async function bdxModifieCategorie(id, corps) {
   }
 }
 
-$("bdx-gerer-categories").addEventListener("click", async () => {
-  await bdxChargeCategories();
-  bdxRendCategories();
-  $("bdx-fenetre-categories").hidden = false;
-  setTimeout(() => $("bdx-categorie-nom").focus(), 50);
-});
 $("bdx-fenetre-categories").addEventListener("click", async (e) => {
   if (e.target.closest("[data-bdx-ferme]")) {
     $("bdx-fenetre-categories").hidden = true;
@@ -1374,9 +1468,25 @@ $("bdx-categorie-nouvelle").addEventListener("submit", async (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("bdx-fenetre-categories").hidden) $("bdx-fenetre-categories").hidden = true;
+  if (e.key === "Escape" && !$("bdx-categories-menu").hidden) bdxOuvreMenuCategories(false);
 });
 
+function bdxBasculePanneau(force = null) {
+  const cache = force ?? !document.body.classList.contains("is-sans-panneau");
+  document.body.classList.toggle("is-sans-panneau", cache);
+  $("bdx-bascule-panneau").setAttribute("aria-pressed", String(!cache));
+  try {
+    localStorage.setItem("bordereaux.panneau", cache ? "cache" : "ouvert");
+  } catch {}
+  requestAnimationFrame(bdxReajuste);
+  setTimeout(bdxReajuste, 280);
+}
+$("bdx-bascule-panneau").addEventListener("click", () => bdxBasculePanneau());
+
 function bdxDemarre() {
+  try {
+    if (localStorage.getItem("bordereaux.panneau") === "cache") bdxBasculePanneau(true);
+  } catch {}
   bdxReprendFiltres();
   bdxMesureHaut();
   bdxChargeEtat();

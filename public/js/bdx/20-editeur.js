@@ -625,9 +625,16 @@ function rendProprietes() {
   const liste = choisis();
   if (!liste.length) {
     const modifs = elements().filter((e) => e.origine === "ajout" || e.modifie || e.supprime).length;
+    const tuile = (outil, icone, titre, touche, extra = "") =>
+      `<button class="ed-tuile${extra}" type="button" data-tuile="${outil}"><svg class="icon"><use href="#i-${icone}"/></svg><span>${titre}</span><kbd>${touche}</kbd></button>`;
     zone.innerHTML = `
-      <section class="ed-bloc"><h3>Page ${ed.page}${ed.nbPages > 1 ? ` sur ${ed.nbPages}` : ""}</h3>
-        <p class="ed-valeur-ligne">${enMm(ed.W)} × ${enMm(ed.H)} mm · ${pluriel(modifs, "modification")}</p></section>`;
+      <section class="ed-bloc ed-bloc-document"><h3>Document</h3>
+        <div class="ed-document"><b>Page ${ed.page}${ed.nbPages > 1 ? ` / ${ed.nbPages}` : ""}</b><span>${enMm(ed.W)} × ${enMm(ed.H)} mm</span><span>${pluriel(modifs, "modification")}</span></div></section>
+      <section class="ed-bloc"><h3>Ajouter</h3>
+        <div class="ed-tuiles">
+          ${tuile("texte", "texte", "Texte", "T")}${tuile("barres", "barcode", "Code-barres", "B")}${tuile("qr", "qr", "QR code", "Q")}${tuile("rect", "carre", "Rectangle", "R")}${APP_MAC ? tuile("image", "image", "Image", "I", " is-large") : ""}
+        </div></section>
+      <p class="ed-astuce">Clique un texte, un code ou une image de l'étiquette pour le prendre ; double-clic pour l'éditer ou le recadrer.</p>`;
     return;
   }
   if (liste.length > 1) {
@@ -1899,9 +1906,13 @@ if (APP_MAC) {
 
 // --- Zoom et vue ---------------------------------------------------------------------------
 
+// La page entiere, la plus grande possible dans la scene (ses marges et la
+// bande de la pilule comprises)
 function zoomAjuste() {
-  const s = scene.getBoundingClientRect();
-  return borne(Math.min((s.width - 80) / (ed.W * PX_PAR_POINT), (s.height - 80) / (ed.H * PX_PAR_POINT)), ED_ZOOM_MIN, ED_ZOOM_MAX);
+  const cs = getComputedStyle(scene);
+  const l = scene.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const h = scene.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  return borne(Math.min(l / (ed.W * PX_PAR_POINT), h / (ed.H * PX_PAR_POINT)), ED_ZOOM_MIN, ED_ZOOM_MAX);
 }
 
 function zoomeA(z, cx = null, cy = null) {
@@ -2311,6 +2322,13 @@ async function appliqueValeur(e, valeur, libelle = null, { silencieux = false } 
 }
 
 $("ed-proprietes").addEventListener("click", (evt) => {
+  const tuile = evt.target.closest("[data-tuile]")?.dataset.tuile;
+  if (tuile === "image") return choisitFichier((f) => ajouteImage(f));
+  if (tuile) {
+    // au centre de la page, a sa taille par defaut
+    const defaut = { texte: [110, 18], barres: [150, 50], qr: [70, 70], rect: [80, 40] }[tuile];
+    return ajoute(tuile, ed.W / 2 - defaut[0] / 2, ed.H / 2 - defaut[1] / 2, defaut[0], defaut[1]);
+  }
   const action = evt.target.closest("[data-action]")?.dataset.action;
   if (action) return faitAction(action);
   const al = evt.target.closest("[data-alignement]");
@@ -2363,7 +2381,7 @@ document.querySelectorAll("[data-onglet]").forEach((b) =>
       x.classList.toggle("is-on", on);
       x.setAttribute("aria-selected", String(on));
     });
-    for (const k of ["proprietes", "calques", "historique"]) $(`ed-${k}`).hidden = k !== b.dataset.onglet;
+    for (const k of ["calques", "historique"]) $(`ed-${k}`).hidden = k !== b.dataset.onglet;
     rendProprietes();
     rendCalques();
     rendHistorique();
@@ -2372,15 +2390,48 @@ document.querySelectorAll("[data-onglet]").forEach((b) =>
 
 // --- La barre d'outils -------------------------------------------------------------------------
 
-// le panneau de droite se replie : toute la largeur pour la page (⌘\)
-function basculePanneau(force = null) {
-  const cache = force ?? !document.body.classList.contains("is-panneau-cache");
-  document.body.classList.toggle("is-panneau-cache", cache);
-  document.querySelector('[data-action="panneau"]')?.setAttribute("aria-pressed", String(!cache));
+// Les panneaux lateraux se replient (toute la largeur pour la page) et
+// s'elargissent en tirant leur bord ; c'est garde sur cet ordinateur.
+function basculeCote(cote, force = null) {
+  const classe = cote === "gauche" ? "is-gauche-cache" : "is-panneau-cache";
+  const cache = force ?? !document.body.classList.contains(classe);
+  document.body.classList.toggle(classe, cache);
+  document.querySelector(`[data-cote="${cote}"]`)?.setAttribute("aria-pressed", String(!cache));
   try {
-    localStorage.setItem("editeur.panneau", cache ? "cache" : "ouvert");
+    localStorage.setItem(`editeur.cote.${cote}`, cache ? "cache" : "ouvert");
   } catch {}
+  // la page se reajuste quand le panneau a fini de bouger
+  setTimeout(() => ed.ajuste && ed.W && ajusteVue(), 320);
 }
+const basculePanneau = (force = null) => basculeCote("droite", force);
+
+function largeurCote(cote, px) {
+  const v = borne(px, cote === "gauche" ? 200 : 260, cote === "gauche" ? 420 : 480);
+  $("ed-espace").style.setProperty(cote === "gauche" ? "--ed-gauche" : "--ed-droite", `${v}px`);
+  return v;
+}
+document.querySelectorAll("[data-poignee-cote]").forEach((p) =>
+  p.addEventListener("pointerdown", (evt) => {
+    const cote = p.dataset.poigneeCote;
+    const panneau = p.parentElement;
+    const depart = { x: evt.clientX, l: panneau.getBoundingClientRect().width };
+    const largeur = (e) => depart.l + (cote === "gauche" ? 1 : -1) * (e.clientX - depart.x);
+    p.setPointerCapture(evt.pointerId);
+    document.body.classList.add("is-redimensionne");
+    const bouge = (e) => largeurCote(cote, largeur(e));
+    const fin = (e) => {
+      p.removeEventListener("pointermove", bouge);
+      document.body.classList.remove("is-redimensionne");
+      try {
+        localStorage.setItem(`editeur.largeur.${cote}`, String(Math.round(largeurCote(cote, largeur(e)))));
+      } catch {}
+      if (ed.ajuste && ed.W) ajusteVue();
+    };
+    p.addEventListener("pointermove", bouge);
+    p.addEventListener("pointerup", fin, { once: true });
+    p.addEventListener("pointercancel", fin, { once: true });
+  })
+);
 
 function changeCadrage(e, c, libelle) {
   e.cadrage = cadrageBorne(e, c);
@@ -2451,12 +2502,16 @@ $("ed-outils").addEventListener("click", (evt) => {
   const b = evt.target.closest("[data-bascule]");
   if (b) bascule(b.dataset.bascule);
 });
-$("ed-bascule-panneau").addEventListener("click", () => basculePanneau());
-if (APP_MAC) {
-  try {
-    if (localStorage.getItem("editeur.panneau") === "cache") basculePanneau(true);
-  } catch {}
-}
+$("ed-bascule-panneau").addEventListener("click", () => basculeCote("droite"));
+$("ed-bascule-gauche").addEventListener("click", () => basculeCote("gauche"));
+$("ed-ajuster").addEventListener("click", ajusteVue);
+try {
+  for (const cote of ["gauche", "droite"]) {
+    if (localStorage.getItem(`editeur.cote.${cote}`) === "cache") basculeCote(cote, true);
+    const l = Number(localStorage.getItem(`editeur.largeur.${cote}`));
+    if (l) largeurCote(cote, l);
+  }
+} catch {}
 $("ed-annuler").addEventListener("click", annule);
 $("ed-retablir").addEventListener("click", retablit);
 $("ed-page-prec").addEventListener("click", () => allerPage(ed.page - 1));
@@ -2657,6 +2712,7 @@ async function demarreEditeur() {
     return;
   }
   $("ed-comparer").href = `/bordereaux/comparer?a=${ed.colisId}`;
+  document.querySelector('.espace[data-espace="etude"]').href = `/bordereaux?colis=${ed.colisId}`;
   try {
     let detail = await fetchJSON(`/api/bordereaux/${ed.colisId}`);
     // les codes doivent etre lus pour etre pris (et proteges)

@@ -111,7 +111,8 @@ final class BordereauxModel {
     /// le code trouve par la recherche (il pulse un moment)
     private(set) var trouve: Int?
     var zonesToutes = false
-    var ajustement: Ajustement = .largeur
+    /// l'etiquette entiere d'abord (rien de coupe), la largeur sur demande
+    var ajustement: Ajustement = .page
     /// le zoom affiche (1 = taille reelle)
     var zoom: Double = 1
     var bulle: Bulle?
@@ -145,6 +146,8 @@ final class BordereauxModel {
         async let e: Void = chargeEtat()
         if liste.isEmpty { await chargeListe() }
         await e
+        // jamais un grand vide : la plus recente s'ouvre d'elle-meme
+        if ouverteId == nil, onglet == .etude, let premiere = liste.first { await ouvre(premiere.id) }
     }
 
     func chargeEtat() async {

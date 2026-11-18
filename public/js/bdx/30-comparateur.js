@@ -23,6 +23,12 @@ const cmp = {
   sync: true,
   pixels: true,
   opacite: 0.5,
+  difference: false, // superposition : mode « différence » (l'identique devient noir)
+  clignote: null, // minuteur du va-et-vient A / B
+  rideau: 0.5, // position du rideau (0..1 de la page)
+  reperes: true,
+  masques: new Set(), // statuts caches (legende)
+  base: 0, // largeur de la page ajustee (zoom 1)
   diff: null,
   survol: null,
   jeton: 0,
@@ -166,19 +172,26 @@ function compare(pa, pb) {
 
 // --- Rendu des pages ---------------------------------------------------------------------------
 
-function largeurCommune() {
-  // les deux pages a la meme largeur a l'ecran : leurs positions (0..1) se comparent a l'oeil
-  const scene = $(cmp.mode === "superpose" ? "cmp-scene-a" : "cmp-scene-b").getBoundingClientRect();
-  return Math.max(200, scene.width - 48);
+// Les deux pages a la meme largeur a l'ecran (leurs positions 0..1 se
+// comparent a l'oeil) ; ajustees, ENTIERES dans leur vue : la plus haute des
+// deux tient en hauteur, la plus large en largeur.
+function largeurAjustee(pa, pb) {
+  const scene = $("cmp-scene-a");
+  const cs = getComputedStyle(scene);
+  const l = scene.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const h = scene.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const ratio = Math.max(pa.H / pa.W, pb.H / pb.W);
+  return Math.max(160, Math.min(l, h / ratio));
 }
 
-async function dessinePage(cote, e, p, largeur) {
+// Chaque rendu dans un canvas NEUF, pose seulement s'il est encore le plus
+// recent : deux rendus pdf.js dans le meme canvas (un changement d'affichage
+// pendant le precedent) melangeaient leurs transformations -- page minuscule,
+// a l'envers, dans un coin.
+async function dessinePage(cote, e, p, largeur, jeton) {
   const feuille = $(`cmp-feuille-${cote}`);
   const hauteur = (largeur * p.H) / p.W;
-  feuille.style.width = `${Math.round(largeur)}px`;
-  feuille.style.height = `${Math.round(hauteur)}px`;
-  feuille.dataset.pret = "";
-  const canvas = feuille.querySelector("canvas");
+  const canvas = document.createElement("canvas");
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(largeur * dpr);
   canvas.height = Math.round(hauteur * dpr);
@@ -191,6 +204,10 @@ async function dessinePage(cote, e, p, largeur) {
   } else {
     ctx.drawImage(e.image, 0, 0, canvas.width, canvas.height);
   }
+  if (jeton !== cmp.jeton) return null;
+  feuille.style.width = `${Math.round(largeur)}px`;
+  feuille.style.height = `${Math.round(hauteur)}px`;
+  feuille.querySelector("canvas:not(.cmp-pixels)").replaceWith(canvas);
   feuille.dataset.pret = "1";
   return canvas;
 }
@@ -206,10 +223,11 @@ function pixelsDifferents(ca, cb) {
   for (let i = 0; i < da.length; i += 4) {
     const d = Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]);
     if (d > 90) {
+      // un rose leger : on voit ce qui change sans perdre le document
       masque.data[i] = 255;
-      masque.data[i + 1] = 60;
-      masque.data[i + 2] = 170;
-      masque.data[i + 3] = 150;
+      masque.data[i + 1] = 40;
+      masque.data[i + 2] = 160;
+      masque.data[i + 3] = 95;
       n += 1;
     }
   }
@@ -229,6 +247,7 @@ function zonesDe(cote) {
   if (!d) return "";
   const html = [];
   const pose = (r, z, genre, i) => {
+    if (cmp.masques.has(r.statut)) return;
     const etiquette = genre === "code" ? `${r.statut === "modifie" && cote === "b" ? "→ " : ""}${(cote === "a" ? r.a : r.b)?.valeur ?? "illisible"}` : (cote === "a" ? r.a : r.b)?.texte;
     html.push(
       `<span class="cmp-zone is-${r.statut} is-${genre}${cmp.survol === `${genre}${i}` ? " is-survol" : ""}" data-diff="${genre}${i}" style="left:${(z.x0 * 100).toFixed(3)}%;top:${(z.y0 * 100).toFixed(3)}%;width:${((z.x1 - z.x0) * 100).toFixed(3)}%;height:${((z.y1 - z.y0) * 100).toFixed(3)}%" title="${escapeAttr(`${STATUTS[r.statut]} · ${etiquette || ""}`)}"></span>`
@@ -268,9 +287,10 @@ async function rendComparaison() {
   const [pa, pb] = await Promise.all([pageDe(A, cmp.page), pageDe(B, cmp.page)]);
   if (jeton !== cmp.jeton) return;
   cmp.diff = compare(pa, pb);
-  const base = largeurCommune() * (cmp.ajuste ? 1 : cmp.zoom);
-  const [ca, cb] = await Promise.all([dessinePage("a", A, pa, base), dessinePage("b", B, pb, base)]);
-  if (jeton !== cmp.jeton) return;
+  cmp.base = largeurAjustee(pa, pb);
+  const base = cmp.base * (cmp.ajuste ? 1 : cmp.zoom);
+  const [ca, cb] = await Promise.all([dessinePage("a", A, pa, base, jeton), dessinePage("b", B, pb, base, jeton)]);
+  if (jeton !== cmp.jeton || !ca || !cb) return;
   const { masque, part } = pixelsDifferents(ca, cb);
   posePixels("a", masque);
   posePixels("b", masque);
@@ -308,8 +328,9 @@ function rendDifferences() {
       </span>
     </li>`;
   const ordre = { modifie: 0, deplace: 1, ajoute: 2, supprime: 3, identique: 4 };
-  const codes = d.codes.map((r, i) => [r, i]).sort((x, y) => ordre[x[0].statut] - ordre[y[0].statut]);
-  const textes = d.textes.map((r, i) => [r, i]).filter(([r]) => r.statut !== "identique").sort((x, y) => ordre[x[0].statut] - ordre[y[0].statut]);
+  const visible = ([r]) => !cmp.masques.has(r.statut);
+  const codes = d.codes.map((r, i) => [r, i]).filter(visible).sort((x, y) => ordre[x[0].statut] - ordre[y[0].statut]);
+  const textes = d.textes.map((r, i) => [r, i]).filter(([r]) => r.statut !== "identique").filter(visible).sort((x, y) => ordre[x[0].statut] - ordre[y[0].statut]);
   const resume = (c) => Object.entries(c).filter(([, n]) => n).map(([k, n]) => `<span class="cmp-cle is-${k}">${n} ${STATUTS[k].toLowerCase()}${n > 1 ? "s" : ""}</span>`).join("");
   $("cmp-differences").innerHTML = `
     <section class="ed-bloc"><h3>Codes-barres et QR codes</h3><div class="cmp-compte">${resume(cc) || '<span class="ed-aide">Aucun code lu</span>'}</div>
@@ -321,21 +342,108 @@ function rendDifferences() {
 
 // --- Modes, zoom, synchro ---------------------------------------------------------------------
 
+// Cote a cote, superposition (transparence, difference, va-et-vient), rideau.
 function appliqueMode() {
-  $("cmp-vues").dataset.mode = cmp.mode;
+  const vues = $("cmp-vues");
+  vues.dataset.mode = cmp.mode;
+  vues.classList.toggle("is-difference", cmp.mode === "superpose" && cmp.difference);
+  vues.classList.toggle("sans-reperes", !cmp.reperes);
   $("cmp-opacite-bloc").hidden = cmp.mode !== "superpose";
-  $("cmp-feuille-b").style.opacity = cmp.mode === "superpose" ? String(cmp.opacite) : "";
-  document.querySelectorAll("[data-mode]").forEach((b) => {
-    const on = b.dataset.mode === cmp.mode;
-    b.classList.toggle("is-on", on);
-    b.setAttribute("aria-checked", String(on));
+  $("cmp-rideau").hidden = cmp.mode !== "rideau";
+  const b = $("cmp-feuille-b");
+  b.style.opacity = cmp.mode === "superpose" && !cmp.difference && !cmp.clignote ? String(cmp.opacite) : "";
+  b.style.clipPath = cmp.mode === "rideau" ? `inset(0 0 0 ${(cmp.rideau * 100).toFixed(2)}%)` : "";
+  placeRideau();
+  if (cmp.mode !== "superpose") arreteClignote();
+  document.querySelectorAll(".cmp-modes [data-mode]").forEach((x) => {
+    const on = x.dataset.mode === cmp.mode;
+    x.classList.toggle("is-on", on);
+    x.setAttribute("aria-checked", String(on));
   });
 }
+
+// le rideau : une poignee verticale sur la page (B a droite, A a gauche)
+function placeRideau() {
+  if (cmp.mode !== "rideau") return;
+  const f = $("cmp-feuille-b").getBoundingClientRect();
+  const v = $("cmp-vues").getBoundingClientRect();
+  const r = $("cmp-rideau");
+  r.style.left = `${f.left - v.left + f.width * cmp.rideau}px`;
+  r.style.top = `${Math.max(0, f.top - v.top)}px`;
+  r.style.height = `${Math.min(v.height, f.height)}px`;
+}
+$("cmp-rideau").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  const r = e.currentTarget;
+  r.setPointerCapture(e.pointerId);
+  r.classList.add("is-tire");
+  const bouge = (ev) => {
+    const f = $("cmp-feuille-b").getBoundingClientRect();
+    cmp.rideau = Math.min(1, Math.max(0, (ev.clientX - f.left) / f.width));
+    $("cmp-feuille-b").style.clipPath = `inset(0 0 0 ${(cmp.rideau * 100).toFixed(2)}%)`;
+    placeRideau();
+  };
+  r.addEventListener("pointermove", bouge);
+  r.addEventListener("pointerup", () => {
+    r.removeEventListener("pointermove", bouge);
+    r.classList.remove("is-tire");
+  }, { once: true });
+});
+
+// le va-et-vient A / B : un battement regulier, B apparait et disparait
+function arreteClignote() {
+  clearInterval(cmp.clignote);
+  cmp.clignote = null;
+  $("cmp-clignote").setAttribute("aria-pressed", "false");
+  if (cmp.mode === "superpose") $("cmp-feuille-b").style.opacity = cmp.difference ? "" : String(cmp.opacite);
+}
+$("cmp-clignote").addEventListener("click", () => {
+  if (cmp.clignote) return arreteClignote();
+  let montre = true;
+  $("cmp-clignote").setAttribute("aria-pressed", "true");
+  cmp.clignote = setInterval(() => {
+    montre = !montre;
+    $("cmp-feuille-b").style.opacity = montre ? "1" : "0";
+  }, 550);
+});
+$("cmp-difference").addEventListener("click", (e) => {
+  cmp.difference = !cmp.difference;
+  e.currentTarget.setAttribute("aria-pressed", String(cmp.difference));
+  arreteClignote();
+  appliqueMode();
+});
+$("cmp-reperes").addEventListener("click", (e) => {
+  cmp.reperes = !cmp.reperes;
+  e.currentTarget.setAttribute("aria-pressed", String(cmp.reperes));
+  appliqueMode();
+});
+$("cmp-legende").addEventListener("click", (e) => {
+  const cle = e.target.closest("[data-statut]");
+  if (!cle) return;
+  const st = cle.dataset.statut;
+  if (cmp.masques.has(st)) cmp.masques.delete(st);
+  else cmp.masques.add(st);
+  cle.setAttribute("aria-pressed", String(!cmp.masques.has(st)));
+  if (cmp.diff) {
+    rendZones();
+    rendDifferences();
+  }
+});
+$("cmp-bascule-panneau").addEventListener("click", (e) => {
+  const cache = !document.body.classList.contains("is-sans-diff");
+  document.body.classList.toggle("is-sans-diff", cache);
+  e.currentTarget.setAttribute("aria-pressed", String(!cache));
+});
+$("cmp-ajuster").addEventListener("click", () => {
+  cmp.ajuste = true;
+  cmp.zoom = 1;
+  rendComparaison();
+});
 
 let synchroEnCours = false;
 function synchronise(source) {
   // superposees, les deux pages bougent toujours ensemble ; cote a cote, selon « Synchro »
-  if (synchroEnCours || (!cmp.sync && cmp.mode !== "superpose")) return;
+  if (synchroEnCours || (!cmp.sync && cmp.mode === "cote")) return;
   const autre = source.id === "cmp-scene-a" ? $("cmp-scene-b") : $("cmp-scene-a");
   synchroEnCours = true;
   const rx = source.scrollLeft / Math.max(1, source.scrollWidth - source.clientWidth);
@@ -345,7 +453,10 @@ function synchronise(source) {
   requestAnimationFrame(() => (synchroEnCours = false));
 }
 for (const id of ["cmp-scene-a", "cmp-scene-b"]) {
-  $(id).addEventListener("scroll", (e) => synchronise(e.currentTarget), { passive: true });
+  $(id).addEventListener("scroll", (e) => {
+    synchronise(e.currentTarget);
+    placeRideau();
+  }, { passive: true });
   $(id).addEventListener(
     "wheel",
     (e) => {
@@ -362,7 +473,7 @@ function changeZoom(z) {
   cmp.ajuste = false;
   cmp.zoom = Math.min(8, Math.max(0.25, z));
   // l'apercu suit tout de suite (etire), le rendu net suit
-  const l = largeurCommune() * cmp.zoom;
+  const l = (cmp.base || 400) * cmp.zoom;
   for (const cote of ["a", "b"]) {
     const f = $(`cmp-feuille-${cote}`);
     const ratio = f.offsetHeight / Math.max(1, f.offsetWidth);
@@ -389,13 +500,16 @@ $("cmp-pixels").addEventListener("click", (e) => {
   e.currentTarget.setAttribute("aria-pressed", String(cmp.pixels));
   document.querySelectorAll(".cmp-pixels").forEach((c) => (c.hidden = !cmp.pixels));
 });
-document.querySelectorAll("[data-mode]").forEach((b) =>
-  b.addEventListener("click", () => {
-    cmp.mode = b.dataset.mode;
-    appliqueMode();
-    rendComparaison();
-  })
-);
+function changeMode(mode) {
+  if (mode === cmp.mode) return;
+  // un fondu court entre deux affichages
+  $("cmp-vues").classList.add("is-transition");
+  setTimeout(() => $("cmp-vues").classList.remove("is-transition"), 260);
+  cmp.mode = mode;
+  appliqueMode();
+  rendComparaison();
+}
+document.querySelectorAll(".cmp-modes [data-mode]").forEach((b) => b.addEventListener("click", () => changeMode(b.dataset.mode)));
 $("cmp-opacite").addEventListener("input", (e) => {
   cmp.opacite = Number(e.target.value) / 100;
   $("cmp-feuille-b").style.opacity = String(cmp.opacite);
@@ -443,6 +557,11 @@ function majPile() {
       </li>`;
     })
     .join("");
+  const ref = cmp.pile[cmp.a];
+  if (ref) {
+    $("cmp-espace-etude").href = `/bordereaux?colis=${ref.id}`;
+    $("cmp-espace-modifier").href = `/bordereaux/editeur?colis=${(cmp.pile[cmp.b] || ref).id}`;
+  }
   const p = new URLSearchParams();
   cmp.pile.forEach((e, i) => p.set(i === 0 ? "a" : i === 1 ? "b" : `e${i}`, String(e.id)));
   history.replaceState(null, "", `?${p}`);
@@ -480,6 +599,26 @@ $("cmp-etiquettes").addEventListener("click", (e) => {
     cmp.b = i;
   } else return;
   rendComparaison();
+});
+
+// raccourcis : 1 2 3 (affichages), 0 (page entiere), D, R, P ; Espace
+// maintenu : A seule (on lache, B revient)
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
+  const modes = { 1: "cote", 2: "superpose", 3: "rideau" };
+  if (modes[e.key]) return changeMode(modes[e.key]);
+  if (e.key === "0") return $("cmp-ajuster").click();
+  if (e.key === "d" || e.key === "D") return cmp.mode === "superpose" && $("cmp-difference").click();
+  if (e.key === "r" || e.key === "R") return $("cmp-reperes").click();
+  if (e.key === "p" || e.key === "P") return $("cmp-pixels").click();
+  if (e.key === " " && !e.repeat && cmp.mode !== "cote") {
+    e.preventDefault();
+    arreteClignote();
+    $("cmp-feuille-b").style.visibility = "hidden";
+  }
+});
+document.addEventListener("keyup", (e) => {
+  if (e.key === " ") $("cmp-feuille-b").style.visibility = "";
 });
 
 // passer d'une etiquette comparee a l'autre : fleches gauche / droite

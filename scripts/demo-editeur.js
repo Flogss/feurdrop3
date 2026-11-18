@@ -34,28 +34,30 @@ process.env.BORDEREAUX_INDEXATION = "0";
     600
   );
 
-  // l'etiquette : textes, un logo (image), un code-barres, un code-barres
-  // tourne de 90 degres, un QR code -- numeros inventes
-  const doc = await PDFDocument.create();
-  const page = doc.addPage([288, 432]);
-  const police = await doc.embedFont(StandardFonts.Helvetica);
-  const gras = await doc.embedFont(StandardFonts.HelveticaBold);
-  page.drawText("EXPEDITEUR : Boutique Test", { x: 18, y: 404, size: 9, font: gras });
-  page.drawText("12 rue de l'Exemple, 75000 Paris", { x: 18, y: 392, size: 8, font: police });
-  page.drawText("DESTINATAIRE", { x: 18, y: 360, size: 9, font: gras });
-  page.drawText("Camille Fictive", { x: 18, y: 346, size: 12, font: gras });
-  page.drawText("3 avenue Imaginaire, 69000 Lyon", { x: 18, y: 332, size: 9, font: police });
-  const imgLogo = await doc.embedPng(logo);
-  page.drawImage(imgLogo, { x: 168, y: 340, width: 100, height: 40 });
-  const barres = await doc.embedPng(await codePngDe("REF-DEMO-12345", "Code128"));
-  page.drawImage(barres, { x: 30, y: 230, width: 228, height: 70 });
-  const tourne = await doc.embedPng(await codePngDe("LOT-778899", "Code128"));
-  // tourne de 90 degres : il monte le long du bord gauche
-  page.drawImage(tourne, { x: 58, y: 40, width: 150, height: 40, rotate: degrees(90) });
-  const qr = await doc.embedPng(await codePngDe("https://example.com/demo", "QRCode"));
-  page.drawImage(qr, { x: 168, y: 60, width: 90, height: 90 });
-  page.drawRectangle({ x: 12, y: 12, width: 264, height: 408, borderColor: rgb(0, 0, 0), borderWidth: 1 });
-  const etiquette = await doc.save();
+  // une etiquette : textes, un logo (image), un code-barres, un code-barres
+  // tourne de 90 degres, un QR code -- numeros inventes. Les variantes
+  // (decalage, valeur changee, code retire ou ajoute) servent au comparateur.
+  const imgLogoOctets = logo;
+  async function fabrique({ nom = "Camille Fictive", ville = "3 avenue Imaginaire, 69000 Lyon", ref = "REF-DEMO-12345", lot = "LOT-778899", qrDx = 0, ajout = null } = {}) {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([288, 432]);
+    const police = await doc.embedFont(StandardFonts.Helvetica);
+    const gras = await doc.embedFont(StandardFonts.HelveticaBold);
+    page.drawText("EXPEDITEUR : Boutique Test", { x: 18, y: 404, size: 9, font: gras });
+    page.drawText("12 rue de l'Exemple, 75000 Paris", { x: 18, y: 392, size: 8, font: police });
+    page.drawText("DESTINATAIRE", { x: 18, y: 360, size: 9, font: gras });
+    page.drawText(nom, { x: 18, y: 346, size: 12, font: gras });
+    page.drawText(ville, { x: 18, y: 332, size: 9, font: police });
+    page.drawImage(await doc.embedPng(imgLogoOctets), { x: 168, y: 340, width: 100, height: 40 });
+    page.drawImage(await doc.embedPng(await codePngDe(ref, "Code128")), { x: 30, y: 230, width: 228, height: 70 });
+    // tourne de 90 degres : il monte le long du bord gauche
+    if (lot) page.drawImage(await doc.embedPng(await codePngDe(lot, "Code128")), { x: 58, y: 40, width: 150, height: 40, rotate: degrees(90) });
+    page.drawImage(await doc.embedPng(await codePngDe("https://example.com/demo", "QRCode")), { x: 168 + qrDx, y: 60, width: 90, height: 90 });
+    if (ajout) page.drawImage(await doc.embedPng(await codePngDe(ajout, "Code128")), { x: 80, y: 170, width: 120, height: 34 });
+    page.drawRectangle({ x: 12, y: 12, width: 264, height: 408, borderColor: rgb(0, 0, 0), borderWidth: 1 });
+    return doc.save();
+  }
+  const etiquette = await fabrique();
 
   // une etiquette en image (PNG), pour le fond image
   const etiquettePng = png(
@@ -98,6 +100,30 @@ process.env.BORDEREAUX_INDEXATION = "0";
   ouvreBase();
   addColis("Boutique Test", { chatId: -1, messageId: 1, fileName: "demo-etiquette.pdf", fileId: "DEMO_PDF", fileKind: "document" });
   addColis("Boutique Test", { chatId: -1, messageId: 2, fileName: "demo-etiquette.png", fileId: "DEMO_PNG", fileKind: "photo" });
+  // de quoi remplir la liste et comparer : des variantes, d'autres expediteurs et transporteurs
+  const variantes = [
+    ["Atelier Nord", "LP", { qrDx: 18, ref: "REF-DEMO-12399", lot: null, ajout: "NEW-0001" }],
+    ["Atelier Nord", "LP", { nom: "Lou Exemple", qrDx: -10 }],
+    ["Maison Sud", "UPS", { nom: "Sam Modele", ville: "8 rue Fictive, 13000 Marseille" }],
+    ["Maison Sud", "UPS", { ref: "REF-MS-4410" }],
+    ["Boutique Test", "DHL", { nom: "Alex Essai", lot: "LOT-000111" }],
+    ["Studio Ouest", "MR", { ref: "REF-SO-77" }],
+    ["Studio Ouest", "MR", { nom: "Dominique Test", qrDx: 6 }],
+    ["Boutique Test", "LP", { ajout: "RETOUR-12" }],
+    ["Maison Sud", "CHRONO", { nom: "Charlie Demo" }],
+    ["Atelier Nord", "LP", { ville: "1 place du Test, 33000 Bordeaux" }],
+    ["Boutique Test", "UPS", { ref: "REF-DEMO-20000" }],
+    ["Studio Ouest", "DHL", { lot: null }],
+  ];
+  for (const [i, [expediteur, carrier, options]] of variantes.entries()) {
+    telegram.fichier(`DEMO_V${i}`, await fabrique(options));
+    addColis(expediteur, { chatId: -1, messageId: 10 + i, carrier, fileName: `demo-${i + 3}.pdf`, fileId: `DEMO_V${i}`, fileKind: "document" });
+  }
+  const base = require(path.join(REPO, "src/bordereaux/base"));
+  const retours = base.creeCategorie("Retours", base.COULEURS[0]);
+  const verifier = base.creeCategorie("À vérifier", base.COULEURS[3] || base.COULEURS[1]);
+  for (const id of [3, 5, 9]) base.classe(id, (retours.categorie || retours).id);
+  for (const id of [4, 11]) base.classe(id, (verifier.categorie || verifier).id);
   require(path.join(REPO, "src/bot")).startBot();
   const { creeApp } = require(path.join(REPO, "src/app"));
   const app = creeApp();

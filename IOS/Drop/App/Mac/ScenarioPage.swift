@@ -97,6 +97,12 @@ enum ScenarioPage {
                 fenetre.sendEvent(e)
             }
         }
+        // `"taille": [1100, 720]` : la fenetre a cette taille (points)
+        if let t = etape["taille"] as? [NSNumber], t.count == 2 {
+            fenetre.setContentSize(NSSize(width: t[0].doubleValue, height: t[1].doubleValue))
+            try await Task.sleep(for: .milliseconds(600))
+            return "\(t)"
+        }
         if let s = etape["attente"] as? Double {
             try await Task.sleep(for: .seconds(s))
             return ""

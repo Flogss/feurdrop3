@@ -12,7 +12,7 @@
      (bordereaux.js, voir src/assemblage.js) ; meme session, memes styles -->
 <script src="bordereaux.js" defer></script>
 </head>
-<body class="page-bdx">
+<body class="page-bdx page-atelier">
 <svg class="sprite" aria-hidden="true" focusable="false">
   <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3.5v10.5M7.5 9.5 12 14l4.5-4.5"/><path d="M4.5 14.5v3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-3"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v10.5a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1V9"/></symbol>
@@ -61,37 +61,58 @@
   <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12z"/></symbol>
   <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5 6 5.5a1.5 1.5 0 0 1 1.4-1h9.2a1.5 1.5 0 0 1 1.4 1l2.5 8"/><path d="M3.5 13.5v5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-5h-5l-1.5 2.5h-4L8.5 13.5z"/></symbol>
   <symbol id="i-party" viewBox="0 0 24 24"><path d="M4 20 8.5 7.5l8 8z"/><path d="M14 4.5c.8 1 .8 2.2 0 3.2M19.5 10c-1-.8-2.2-.8-3.2 0M17.5 3.5v1M20.5 6.5h-1M11 3.5l.5 1"/></symbol>
+  <symbol id="i-comparer" viewBox="0 0 24 24"><rect x="3.5" y="4" width="7.5" height="16" rx="1.5"/><rect x="13" y="4" width="7.5" height="16" rx="1.5"/></symbol>
+  <symbol id="i-ajuster" viewBox="0 0 24 24"><path d="M8 3.5H4.5a1 1 0 0 0-1 1V8M16 3.5h3.5a1 1 0 0 1 1 1V8M8 20.5H4.5a1 1 0 0 1-1-1V16M16 20.5h3.5a1 1 0 0 0 1-1V16"/><rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/></symbol>
+  <symbol id="i-largeur" viewBox="0 0 24 24"><path d="M3.5 12h17M6.5 9l-3 3 3 3M17.5 9l3 3-3 3"/></symbol>
+  <symbol id="i-panneau-g" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></symbol>
+  <symbol id="i-panneau-d" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
+  <symbol id="i-superpose" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="12" height="12" rx="2"/><rect x="8.5" y="8.5" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-rideau" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M12 2.5v19"/><path d="m9.5 10-2 2 2 2M14.5 10l2 2-2 2"/></symbol>
+  <symbol id="i-difference" viewBox="0 0 24 24"><circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/></symbol>
+  <symbol id="i-lien" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></symbol>
+  <symbol id="i-oeil" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-plus-actions" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 16-5-5-8.5 8.5"/></symbol>
+  <symbol id="i-telecharger" viewBox="0 0 24 24"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 19.5h14"/></symbol>
 </svg>
 
 <div class="bdx-fond" aria-hidden="true"></div>
 
-<header class="bdx-haut">
+<header class="bdx-haut atelier-haut">
   <a class="brand" href="/" title="Ouvrir le dashboard Drop">
     <span class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></span>
-    <span class="brand-word">DROP<span class="brand-ext">.ctrl</span></span>
   </a>
-  <span class="bdx-separateur" aria-hidden="true"></span>
   <div class="bdx-titres">
     <h1>Bordereaux</h1>
     <p class="bdx-etat" id="bdx-etat"><span class="bdx-etat-point" aria-hidden="true"></span><span id="bdx-etat-texte">Étude des étiquettes et de leurs codes</span></p>
   </div>
-  <div class="segmented bdx-onglets" role="tablist" aria-label="Bordereaux">
-          <button type="button" role="tab" class="seg is-on" id="bdx-onglet-etude" data-bdx-onglet="etude" aria-selected="true" aria-controls="bdx-gauche-etude"><svg class="icon"><use href="#i-file"/></svg>Étude des bordereaux</button>
-          <button type="button" role="tab" class="seg" id="bdx-onglet-recherche" data-bdx-onglet="recherche" aria-selected="false" aria-controls="bdx-gauche-recherche"><svg class="icon"><use href="#i-search"/></svg>Recherche / modifications</button>
-        </div>
+  <!-- les trois espaces : etudier, modifier, comparer (la meme etiquette suit) -->
+  <nav class="espaces" aria-label="Espaces des bordereaux">
+    <a class="espace is-on" data-espace="etude" href="/bordereaux" aria-current="page"><svg class="icon"><use href="#i-file"/></svg><span>Étude</span></a>
+    <a class="espace" data-espace="modifier" href="/bordereaux/editeur" target="_blank" rel="noopener"><svg class="icon"><use href="#i-edit"/></svg><span>Modifier</span></a>
+    <a class="espace" data-espace="comparer" href="/bordereaux/comparer" target="_blank" rel="noopener"><svg class="icon"><use href="#i-comparer"/></svg><span>Comparer</span></a>
+  </nav>
+  <div class="atelier-droite">
+    <!-- les categories : filtrer, classer, creer, gerer -->
+    <div class="menu-ancre">
+      <button class="bouton-barre" id="bdx-categories-bouton" type="button" aria-haspopup="menu" aria-expanded="false">
+        <svg class="icon"><use href="#i-tag"/></svg><span id="bdx-categories-libelle">Catégories</span><span class="pastilles" id="bdx-categories-pastilles" aria-hidden="true"></span><svg class="icon chevron"><use href="#i-chevron-down"/></svg>
+      </button>
+      <div class="menu-verre" id="bdx-categories-menu" role="menu" hidden></div>
+    </div>
+    <button class="bouton-barre bouton-icone" id="bdx-bascule-panneau" type="button" aria-pressed="true" title="Afficher / masquer le panneau de l'étiquette"><svg class="icon"><use href="#i-panneau-d"/></svg></button>
+  </div>
 </header>
 
 <main class="bdx-page">
       <div class="bdx-espace" id="bdx-espace" data-onglet="etude">
-        <label class="bdx-grande-recherche" id="bdx-grande-recherche" hidden>
-          <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
-          <input id="bdx-q" type="search" placeholder="Rechercher un numéro de suivi…" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" aria-label="Rechercher un numéro de suivi" aria-controls="bdx-resultats" />
-          <kbd class="bdx-touche" aria-hidden="true">/</kbd>
-        </label>
-
         <div class="bdx-colonnes">
           <!-- a gauche : les etiquettes (Etude) ou les resultats (Recherche) -->
           <aside class="card bdx-gauche" aria-label="Étiquettes">
+            <div class="segmented bdx-onglets" role="tablist" aria-label="Liste ou recherche">
+              <button type="button" role="tab" class="seg is-on" id="bdx-onglet-etude" data-bdx-onglet="etude" aria-selected="true" aria-controls="bdx-gauche-etude"><svg class="icon"><use href="#i-inbox"/></svg>Étiquettes</button>
+              <button type="button" role="tab" class="seg" id="bdx-onglet-recherche" data-bdx-onglet="recherche" aria-selected="false" aria-controls="bdx-gauche-recherche"><svg class="icon"><use href="#i-search"/></svg>Numéro de suivi</button>
+            </div>
             <div class="bdx-gauche-etude" id="bdx-gauche-etude" role="tabpanel" aria-labelledby="bdx-onglet-etude">
               <label class="bdx-filtre-champ">
                 <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
@@ -109,10 +130,6 @@
                   <select id="bdx-transporteur"><option value="">Tous</option></select>
                 </label>
                 <label class="bdx-choix">
-                  <span>À partir du</span>
-                  <input id="bdx-depuis" type="date" />
-                </label>
-                <label class="bdx-choix">
                   <span>Tri</span>
                   <select id="bdx-tri">
                     <option value="recent">Plus récentes</option>
@@ -120,20 +137,25 @@
                     <option value="transporteur">Par transporteur</option>
                   </select>
                 </label>
-                <label class="bdx-choix">
-                  <span>Catégorie</span>
-                  <select id="bdx-categorie"><option value="">Toutes</option><option value="aucune">Sans catégorie</option></select>
+                <label class="bdx-choix bdx-choix-date">
+                  <span>Reçues à partir du</span>
+                  <input id="bdx-depuis" type="date" />
                 </label>
-                <div class="bdx-tris-pied">
-                  <span class="bdx-total" id="bdx-total" aria-live="polite"></span>
-                  <button class="bdx-lien" id="bdx-effacer-filtres" type="button" hidden>Effacer les filtres</button>
-                  <button class="bdx-lien" id="bdx-gerer-categories" type="button">Gérer les catégories</button>
-                </div>
+              </div>
+              <div class="bdx-tris-pied">
+                <span class="bdx-total" id="bdx-total" aria-live="polite"></span>
+                <span class="bdx-filtre-categorie" id="bdx-filtre-categorie" hidden></span>
+                <button class="bdx-lien" id="bdx-effacer-filtres" type="button" hidden>Effacer les filtres</button>
               </div>
               <ul class="bdx-liste" id="bdx-liste" aria-label="Étiquettes"></ul>
               <button class="btn btn-secondary btn-sm bdx-plus" id="bdx-plus" type="button" hidden>Plus d'étiquettes</button>
             </div>
             <div class="bdx-gauche-recherche" id="bdx-gauche-recherche" role="tabpanel" aria-labelledby="bdx-onglet-recherche" hidden>
+              <label class="bdx-grande-recherche" id="bdx-grande-recherche">
+                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                <input id="bdx-q" type="search" placeholder="Numéro de suivi…" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" aria-label="Rechercher un numéro de suivi" aria-controls="bdx-resultats" />
+                <kbd class="bdx-touche" aria-hidden="true">/</kbd>
+              </label>
               <p class="bdx-recherche-info" id="bdx-recherche-info"></p>
               <ul class="bdx-resultats" id="bdx-resultats" role="listbox" aria-label="Étiquettes trouvées"></ul>
             </div>
@@ -161,8 +183,8 @@
                 <button class="bdx-outil" id="bdx-zoom-plus" type="button" aria-label="Zoomer"><svg class="icon"><use href="#i-plus"/></svg></button>
               </div>
               <div class="bdx-groupe">
-                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-largeur" type="button" aria-pressed="true" title="Ajuster à la largeur (0)">Largeur</button>
-                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-page" type="button" aria-pressed="false" title="Page entière (1)">Page</button>
+                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-page" type="button" aria-pressed="true" title="Page entière (1)"><svg class="icon"><use href="#i-ajuster"/></svg>Page entière</button>
+                <button class="bdx-outil bdx-outil-texte" id="bdx-ajuste-largeur" type="button" aria-pressed="false" title="Ajuster à la largeur (0)"><svg class="icon"><use href="#i-largeur"/></svg>Largeur</button>
               </div>
               <div class="bdx-groupe">
                 <button class="bdx-outil bdx-outil-texte" id="bdx-zones-toutes" type="button" aria-pressed="false" title="Montrer toutes les zones (Z)"><svg class="icon"><use href="#i-barcode"/></svg>Zones</button>

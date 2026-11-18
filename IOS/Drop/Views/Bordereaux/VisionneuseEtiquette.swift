@@ -71,7 +71,7 @@ final class HoteVisionneuse: NSView {
     private var zones: [Int: ZoneCode] = [:]
     private var signatureZones = ""
     private var dernierZoom: CGFloat = 0
-    var ajustement: BordereauxModel.Ajustement = .largeur {
+    var ajustement: BordereauxModel.Ajustement = .page {
         didSet { if ajustement != oldValue, ajustement != .libre { ajuste(ajustement, enHaut: false) } }
     }
 
@@ -145,7 +145,7 @@ final class HoteVisionneuse: NSView {
             dernierZoom = 0
             styleZones()
         } else {
-            ajuste(ajustement == .libre ? .largeur : ajustement, enHaut: true)
+            ajuste(ajustement == .libre ? .page : ajustement, enHaut: true)
         }
         // la page arrive : elle se precise
         f.alphaValue = 0

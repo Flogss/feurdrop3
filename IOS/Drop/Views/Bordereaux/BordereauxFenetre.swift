@@ -50,28 +50,28 @@ private struct FondBordereaux: View {
 private struct BordereauxContenu: View {
     @Bindable var model: BordereauxModel
 
+    @AppStorage("bordereaux.panneau") private var panneauVisible = true
+
     var body: some View {
-        VStack(spacing: 12) {
-            EnTeteBordereaux(model: model)
-            if model.onglet == .recherche {
-                BarreRecherche(model: model)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            HStack(alignment: .top, spacing: 14) {
+        VStack(spacing: 0) {
+            EnTeteBordereaux(model: model, panneauVisible: $panneauVisible)
+            HStack(alignment: .top, spacing: 12) {
                 ColonneGauche(model: model)
-                    .frame(width: 300)
+                    .frame(width: 330)
                 VisionneuseCadre(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if model.ouverteId != nil {
+                if model.ouverteId != nil && panneauVisible {
                     PanneauEtiquette(model: model)
-                        .frame(width: 340)
+                        .frame(width: 360)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .frame(maxHeight: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 16)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 18)
+        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: panneauVisible)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: model.onglet)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: model.ouverteId != nil)
         .task {
@@ -103,43 +103,48 @@ private struct BordereauxContenu: View {
 
 private struct EnTeteBordereaux: View {
     @Bindable var model: BordereauxModel
+    @Binding var panneauVisible: Bool
 
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Theme.accentGradient)
                     .shadow(color: Theme.violet.opacity(0.7), radius: 10, y: 4)
                 Image(systemName: "barcode.viewfinder")
-                    .font(.system(size: 17, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
             }
-            .frame(width: 36, height: 36)
-            VStack(alignment: .leading, spacing: 2) {
+            .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Bordereaux")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.numberGradient)
                 Text(etatTexte)
-                    .font(.caption.monospacedDigit())
+                    .font(.system(size: 11.5).monospacedDigit())
                     .foregroundStyle(Theme.text2)
+                    .lineLimit(1)
                     .contentTransition(.numericText())
             }
-            Spacer(minLength: 20)
-            Picker("", selection: $model.onglet) {
-                Label("Étude des bordereaux", systemImage: "doc.text.magnifyingglass").tag(BordereauxModel.Onglet.etude)
-                Label("Recherche / modifications", systemImage: "magnifyingglass").tag(BordereauxModel.Onglet.recherche)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            BoutonCategories(model: model)
+            Button { panneauVisible.toggle() } label: {
+                Image(systemName: "sidebar.right").font(.system(size: 15, weight: .semibold)).frame(width: 34, height: 34)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 440)
+            .buttonStyle(BoutonBarre(actif: panneauVisible))
+            .help("Afficher / masquer le panneau de l'étiquette")
+            .disabled(model.ouverteId == nil)
         }
+        .overlay { EspacesBordereaux(id: model.ouverteId, actif: .etude) }
         .padding(.leading, 78) // les trois boutons de la fenetre
-        .padding(.top, 12)
-        .frame(height: 64)
+        .padding(.trailing, 16)
+        .padding(.top, 10)
+        .frame(height: 62)
         .background {
-            // on deplace la fenetre en la tirant par son en-tete
+            // on deplace la fenetre en la tirant par sa barre
             Color.clear.contentShape(.rect).gesture(WindowDragGesture())
         }
+        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
     }
 
     private var etatTexte: String {
@@ -147,6 +152,227 @@ private struct EnTeteBordereaux: View {
         var morceaux = [Format.count(e.etiquettes, "étiquette", "étiquettes"), "\(Format.integer(e.analysees)) lue\(e.analysees > 1 ? "s" : "")", Format.count(e.codes, "code indexé", "codes indexés")]
         if e.indexation.active && e.indexation.restants > 0 { morceaux.append("lecture en fond : \(e.indexation.restants)") }
         return morceaux.joined(separator: " · ")
+    }
+}
+
+/// Les trois espaces des bordereaux : etudier (cette fenetre), modifier et
+/// comparer (les fenetres de l'editeur et du comparateur, sur l'etiquette ouverte).
+struct EspacesBordereaux: View {
+    enum Espace { case etude, modifier, comparer }
+    let id: Int?
+    let actif: Espace
+
+    var body: some View {
+        HStack(spacing: 2) {
+            espace("Étude", "doc.text.magnifyingglass", .etude) {}
+            espace("Modifier", "square.and.pencil", .modifier) {
+                if let id { PagesSite.ouvre("/bordereaux/editeur?colis=\(id)") }
+            }
+            espace("Comparer", "rectangle.split.2x1", .comparer) {
+                if let id { PagesSite.ouvre("/bordereaux/comparer?a=\(id)") }
+            }
+        }
+        .padding(4)
+        .background(.black.opacity(0.3), in: .rect(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.08)) }
+    }
+
+    private func espace(_ titre: String, _ symbole: String, _ e: Espace, action: @escaping () -> Void) -> some View {
+        let on = e == actif
+        return Button(action: action) {
+            Label(titre, systemImage: symbole)
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .foregroundStyle(on ? .white : Theme.text2)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(LinearGradient(colors: [Theme.violet.opacity(0.62), Theme.violet.opacity(0.34)], startPoint: .top, endPoint: .bottom))
+                            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.violetLight.opacity(0.4)) }
+                            .shadow(color: Theme.violet.opacity(0.6), radius: 10, y: 4)
+                    }
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!on && id == nil)
+        .opacity(!on && id == nil ? 0.45 : 1)
+        .help(on ? "" : "Ouvrir l'étiquette dans l'espace « \(titre) »")
+    }
+}
+
+/// Un bouton de barre : du verre, des etats nets (survol, appui, actif).
+struct BoutonBarre: ButtonStyle {
+    var actif = false
+    @State private var survol = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(actif ? Theme.violetPale : Theme.text)
+            .background {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(actif ? AnyShapeStyle(LinearGradient(colors: [Theme.violet.opacity(0.34), Theme.violet.opacity(0.16)], startPoint: .top, endPoint: .bottom))
+                                : AnyShapeStyle(Color.white.opacity(survol ? 0.1 : 0.055)))
+            }
+            .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(actif ? Theme.violetLight.opacity(0.45) : .white.opacity(survol ? 0.16 : 0.09)) }
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .onHover { survol = $0 }
+    }
+}
+
+/// Le bouton « Catégories » de la barre : ses couleurs, et un menu de verre
+/// pour filtrer la liste, classer l'etiquette ouverte, creer et gerer.
+private struct BoutonCategories: View {
+    @Bindable var model: BordereauxModel
+    @State private var ouvert = false
+    @State private var gere = false
+    @State private var nouvelle = ""
+
+    private var choisie: BordereauCategorie? { model.categories.first { String($0.id) == model.categorie } }
+
+    var body: some View {
+        Button { ouvert.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "tag").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text2)
+                Text(choisie?.nom ?? (model.categorie == "aucune" ? "Sans catégorie" : "Catégories"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                HStack(spacing: -4) {
+                    ForEach((choisie.map { [$0] } ?? Array(model.categories.prefix(4)))) { c in
+                        Circle().fill(PuceCategorie.couleur(c.couleur)).frame(width: 10, height: 10)
+                            .overlay { Circle().strokeBorder(Color(red: 0.09, green: 0.08, blue: 0.12), lineWidth: 2) }
+                    }
+                }
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.text3)
+                    .rotationEffect(.degrees(ouvert ? 180 : 0))
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+        }
+        .buttonStyle(BoutonBarre(actif: ouvert || !model.categorie.isEmpty))
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: ouvert)
+        .popover(isPresented: $ouvert, arrowEdge: .bottom) { menu }
+        .sheet(isPresented: $gere) { GestionCategories(model: model) }
+    }
+
+    private var menu: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            titre("Afficher")
+            ligne("Toutes les étiquettes", couleur: nil, compte: nil, on: model.categorie.isEmpty) { model.categorie = "" }
+            ForEach(model.categories) { c in
+                ligne(c.nom, couleur: PuceCategorie.couleur(c.couleur), compte: c.etiquettes, on: model.categorie == String(c.id)) { model.categorie = String(c.id) }
+            }
+            ligne("Sans catégorie", couleur: .clear, compte: nil, on: model.categorie == "aucune") { model.categorie = "aucune" }
+            if let r = model.resume {
+                Divider().padding(.vertical, 5)
+                titre("Classer « \(r.expediteur ?? "cette étiquette") »")
+                FlowPuces(model: model)
+                    .padding(.horizontal, 8).padding(.bottom, 4)
+            }
+            Divider().padding(.vertical, 5)
+            HStack(spacing: 8) {
+                Image(systemName: "plus").foregroundStyle(Theme.violetLight)
+                TextField("Nouvelle catégorie…", text: $nouvelle)
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        let nom = nouvelle.trimmingCharacters(in: .whitespaces)
+                        nouvelle = ""
+                        guard !nom.isEmpty else { return }
+                        Task {
+                            if model.ouverteId != nil { await model.classe(nil, nouvelle: nom) } else { await model.creeCategorie(nom) }
+                        }
+                    }
+            }
+            .font(.system(size: 13.5))
+            .padding(.horizontal, 10).frame(height: 36)
+            .background(.black.opacity(0.25), in: .rect(cornerRadius: 10))
+            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.08)) }
+            Button {
+                ouvert = false
+                gere = true
+            } label: {
+                Label("Gérer les catégories…", systemImage: "slider.horizontal.3")
+                    .font(.system(size: 13.5))
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(LigneMenu(on: false))
+        }
+        .padding(8)
+        .frame(width: 300)
+    }
+
+    private func titre(_ t: String) -> some View {
+        Text(t.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.text3)
+            .lineLimit(1).padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 3)
+    }
+
+    private func ligne(_ texte: String, couleur: Color?, compte: Int?, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            ouvert = false
+        } label: {
+            HStack(spacing: 10) {
+                Group {
+                    if let couleur, couleur != .clear {
+                        Circle().fill(couleur).shadow(color: couleur, radius: 4)
+                    } else if couleur == .clear {
+                        Circle().strokeBorder(Theme.text3, style: StrokeStyle(lineWidth: 1.4, dash: [2, 2]))
+                    } else {
+                        Circle().fill(AngularGradient(colors: [Theme.violet, Theme.carrier("LP"), Theme.carrier("CHRONO"), Theme.info, Theme.violet], center: .center))
+                    }
+                }
+                .frame(width: 11, height: 11)
+                Text(texte).lineLimit(1)
+                Spacer(minLength: 6)
+                if let compte { Text("\(compte)").foregroundStyle(Theme.text3).monospacedDigit() }
+                if on { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.violetPale) }
+            }
+            .font(.system(size: 13.5))
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .contentShape(.rect)
+        }
+        .buttonStyle(LigneMenu(on: on))
+    }
+}
+
+/// Classer l'etiquette ouverte : une puce par categorie.
+private struct FlowPuces: View {
+    @Bindable var model: BordereauxModel
+
+    var body: some View {
+        let actuelle = model.detail?.categorie?.id
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(model.categories) { c in
+                let couleur = PuceCategorie.couleur(c.couleur)
+                let on = actuelle == c.id
+                Button { Task { await model.classe(on ? nil : c.id) } } label: {
+                    Text(c.nom).lineLimit(1)
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10).frame(height: 26)
+                        .foregroundStyle(on ? Color(red: 0.05, green: 0.04, blue: 0.07) : couleur)
+                        .background(couleur.opacity(on ? 0.9 : 0.14), in: .capsule)
+                        .overlay { Capsule().strokeBorder(couleur.opacity(on ? 0 : 0.4)) }
+                        .shadow(color: on ? couleur.opacity(0.6) : .clear, radius: 7)
+                }
+                .buttonStyle(.plain)
+                .help(on ? "Retirer de « \(c.nom) »" : "Classer dans « \(c.nom) »")
+            }
+        }
+    }
+}
+
+private struct LigneMenu: ButtonStyle {
+    let on: Bool
+    @State private var survol = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background((survol || configuration.isPressed) ? Theme.violet.opacity(0.26) : (on ? Theme.violet.opacity(0.14) : .clear), in: .rect(cornerRadius: 8))
+            .onHover { survol = $0 }
     }
 }
 
@@ -159,11 +385,11 @@ private struct BarreRecherche: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 19, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.violetLight)
-            TextField("Rechercher un numéro de suivi…", text: $model.requete)
+            TextField("Numéro de suivi…", text: $model.requete)
                 .textFieldStyle(.plain)
-                .font(.system(size: 19, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .focused($focus)
                 .onChange(of: model.requete) { model.requeteModifiee() }
                 .onSubmit {
@@ -179,11 +405,11 @@ private struct BarreRecherche: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 18)
-        .frame(height: 56)
-        .glassEffect(.regular.tint(Theme.violet.opacity(0.12)), in: .rect(cornerRadius: 18))
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .glassEffect(.regular.tint(Theme.violet.opacity(0.12)), in: .rect(cornerRadius: 13))
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .strokeBorder(Theme.violetLight.opacity(focus ? 0.55 : 0.22), lineWidth: 1)
         }
         .shadow(color: Theme.violet.opacity(focus ? 0.45 : 0.2), radius: 20, y: 8)
@@ -197,8 +423,19 @@ private struct ColonneGauche: View {
     @Bindable var model: BordereauxModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if model.onglet == .etude { etude } else { resultats }
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("", selection: $model.onglet) {
+                Label("Étiquettes", systemImage: "tray").tag(BordereauxModel.Onglet.etude)
+                Label("Numéro de suivi", systemImage: "magnifyingglass").tag(BordereauxModel.Onglet.recherche)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
+            if model.onglet == .etude { etude } else {
+                BarreRecherche(model: model)
+                resultats
+            }
         }
         .padding(12)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -214,7 +451,7 @@ private struct ColonneGauche: View {
                 .onChange(of: model.texteFiltre) { model.filtreModifie() }
         }
         .padding(.horizontal, 12)
-        .frame(height: 36)
+        .frame(height: 38)
         .background(.black.opacity(0.25), in: .rect(cornerRadius: 11))
         .overlay { RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.08)) }
 
@@ -300,94 +537,92 @@ private struct FlowFiltres: View {
     private let filtres = [("tous", "Toutes"), ("a_imprimer", "À imprimer"), ("imprimes", "Imprimées"), ("deposes", "Déposées")]
 
     var body: some View {
-        // deux par ligne : les quatre tiennent sans etre coupes
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+        // l'etape : un seul controle segmente, les quatre sur une ligne
+        HStack(spacing: 3) {
             ForEach(filtres, id: \.0) { cle, titre in
                 let on = model.filtre == cle
-                Button(titre) { model.changeFiltre(cle) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(on ? Theme.text : Theme.text2)
-                    .padding(.horizontal, 9)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 28)
-                    .contentShape(.capsule)
-                    .background {
-                        Capsule().fill(on ? AnyShapeStyle(LinearGradient(colors: [Theme.violet.opacity(0.32), Theme.violet.opacity(0.14)], startPoint: .top, endPoint: .bottom)) : AnyShapeStyle(Color.white.opacity(0.04)))
-                    }
-                    .overlay { Capsule().strokeBorder(on ? Theme.violetBright.opacity(0.5) : .white.opacity(0.1)) }
+                Button { model.changeFiltre(cle) } label: {
+                    Text(titre)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .foregroundStyle(on ? Theme.text : Theme.text2)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(LinearGradient(colors: [Theme.violet.opacity(0.45), Theme.violet.opacity(0.22)], startPoint: .top, endPoint: .bottom))
+                                    .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.violetLight.opacity(0.35)) }
+                            }
+                        }
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
             }
         }
+        .padding(3)
+        .background(.black.opacity(0.28), in: .rect(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.06)) }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: model.filtre)
     }
 }
 
-/// Transporteur, a partir du, tri, categorie.
+/// Transporteur, tri, « reçues à partir du ». La categorie est dans la barre.
 private struct TrisEtFiltres: View {
     @Bindable var model: BordereauxModel
-    @State private var gereCategories = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Grid(horizontalSpacing: 8, verticalSpacing: 6) {
-                GridRow {
-                    choix("Transporteur") {
-                        Picker("", selection: $model.transporteur) {
-                            Text("Tous").tag("")
-                            ForEach(model.transporteurs) { t in Text("\(t.nom) (\(t.n))").tag(t.code) }
-                        }
-                    }
-                    choix("À partir du") {
-                        HStack(spacing: 4) {
-                            DatePicker("", selection: Binding(get: { model.depuis ?? .now }, set: { model.depuis = $0 }), displayedComponents: .date)
-                                .labelsHidden()
-                                .datePickerStyle(.field)
-                                .opacity(model.depuis == nil ? 0.45 : 1)
-                            if model.depuis != nil {
-                                Button { model.depuis = nil } label: { Image(systemName: "xmark.circle.fill") }
-                                    .buttonStyle(.plain).foregroundStyle(Theme.text3).help("Toutes les dates")
-                            }
-                        }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                choix("Transporteur") {
+                    Picker("", selection: $model.transporteur) {
+                        Text("Tous").tag("")
+                        ForEach(model.transporteurs) { t in Text("\(t.nom) (\(t.n))").tag(t.code) }
                     }
                 }
-                GridRow {
-                    choix("Tri") {
-                        Picker("", selection: $model.tri) {
-                            Text("Plus récentes").tag("recent")
-                            Text("Plus anciennes").tag("ancien")
-                            Text("Par transporteur").tag("transporteur")
-                        }
-                    }
-                    choix("Catégorie") {
-                        Picker("", selection: $model.categorie) {
-                            Text("Toutes").tag("")
-                            Text("Sans catégorie").tag("aucune")
-                            ForEach(model.categories) { c in Text("\(c.nom) (\(c.etiquettes ?? 0))").tag(String(c.id)) }
-                        }
+                choix("Tri") {
+                    Picker("", selection: $model.tri) {
+                        Text("Plus récentes").tag("recent")
+                        Text("Plus anciennes").tag("ancien")
+                        Text("Par transporteur").tag("transporteur")
                     }
                 }
             }
-            HStack(spacing: 10) {
-                Text(Format.count(model.total, "étiquette", "étiquettes")).font(.caption.monospacedDigit()).foregroundStyle(Theme.text3)
+            HStack(spacing: 8) {
+                Toggle(isOn: Binding(get: { model.depuis != nil }, set: { model.depuis = $0 ? Calendar.current.startOfDay(for: .now) : nil })) {
+                    Text("Reçues à partir du").font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.text2)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                Spacer(minLength: 4)
+                if model.depuis != nil {
+                    DatePicker("", selection: Binding(get: { model.depuis ?? .now }, set: { model.depuis = $0 }), displayedComponents: .date)
+                        .labelsHidden()
+                        .datePickerStyle(.field)
+                        .transition(.opacity)
+                }
+            }
+            .frame(height: 26)
+            .animation(.easeOut(duration: 0.2), value: model.depuis != nil)
+            HStack(spacing: 8) {
+                Text(Format.count(model.total, "étiquette", "étiquettes")).font(.system(size: 12).monospacedDigit()).foregroundStyle(Theme.text3)
+                if let c = model.categories.first(where: { String($0.id) == model.categorie }) { PuceCategorie(categorie: c) }
                 Spacer()
                 if model.filtresActifs {
                     Button("Effacer les filtres") { model.effaceFiltres() }
-                        .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(Theme.violetLight)
+                        .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.violetLight)
                 }
-                Button("Catégories…") { gereCategories = true }
-                    .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(Theme.violetLight)
-                    .help("Créer, renommer, recolorer ou supprimer les catégories")
             }
-        }
-        .sheet(isPresented: $gereCategories) {
-            GestionCategories(model: model)
+            .padding(.top, 8)
+            .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
         }
     }
 
     private func choix<Contenu: View>(_ titre: String, @ViewBuilder contenu: () -> Contenu) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(titre.uppercased()).font(.system(size: 9.5, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.text3)
-            contenu().labelsHidden().pickerStyle(.menu).controlSize(.small)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(titre.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(0.7).foregroundStyle(Theme.text3)
+            contenu().labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -533,16 +768,18 @@ private struct LigneEtiquette: View {
                         .foregroundStyle(Theme.text3)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if let c = b.categorie { PuceCategorie(categorie: c) }
                 }
                 Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 3) {
-                    BadgeIndex(index: b.index)
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 5) {
+                        if let c = b.categorie { PuceCategorie(categorie: c).frame(maxWidth: 90) }
+                        BadgeIndex(index: b.index)
+                    }
                     Text(DateBordereau.courte(b.recuLe)).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(Theme.text3)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 56)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(choisie ? AnyShapeStyle(LinearGradient(colors: [Theme.violet.opacity(0.24), Theme.violet.opacity(0.08)], startPoint: .top, endPoint: .bottom)) : AnyShapeStyle(Color.white.opacity(survol ? 0.045 : 0)))
@@ -683,10 +920,14 @@ private struct VisionneuseCadre: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // la barre flottante a sa bande : elle ne cache jamais le bas de l'etiquette
+            .padding(.bottom, model.document != nil ? 64 : 0)
             .clipShape(.rect(cornerRadius: 20))
+        }
+        .overlay(alignment: .bottom) {
             if model.document != nil {
                 BarreOutils(model: model)
-                    .padding(.vertical, 10)
+                    .padding(.bottom, 16)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -810,20 +1051,22 @@ private struct BarreOutils: View {
             outil("plus", aide: "Zoomer (⌘+)", desactive: false) { model.envoie(.zoomPlus) }
                 .keyboardShortcut("=", modifiers: .command)
             separateur
-            bascule("Largeur", actif: model.ajustement == .largeur, aide: "Ajuster à la largeur (⌘0)") {
+            bascule("Page entière", actif: model.ajustement == .page, aide: "L'étiquette entière (⌘0)", symbole: "arrow.down.right.and.arrow.up.left") {
+                model.ajustement = .page
+                model.envoie(.pageEntiere)
+            }
+            .keyboardShortcut("0", modifiers: .command)
+            bascule("Largeur", actif: model.ajustement == .largeur, aide: "Ajuster à la largeur (⌥⌘0)", symbole: "arrow.left.and.right") {
                 model.ajustement = .largeur
                 model.envoie(.largeur)
             }
             .keyboardShortcut("0", modifiers: [.command, .option])
-            bascule("Page", actif: model.ajustement == .page, aide: "Page entière") {
-                model.ajustement = .page
-                model.envoie(.pageEntiere)
-            }
             separateur
             bascule("Zones", actif: model.zonesToutes, aide: "Montrer toutes les zones", symbole: "barcode") { model.zonesToutes.toggle() }
         }
         .padding(5)
         .glassEffect(.regular.tint(.black.opacity(0.3)), in: .capsule)
+        .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
     }
 
     private var separateur: some View {
@@ -871,8 +1114,9 @@ private struct PanneauEtiquette: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let r = model.resume {
                     tete(r)
-                    infos(r)
+                    actions
                     suivi(r)
+                    infos(r)
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
                 }
@@ -882,7 +1126,6 @@ private struct PanneauEtiquette: View {
                     bloc("Note du colis") { Text(n).font(.callout).foregroundStyle(Theme.text2) }
                 }
                 annotation
-                actions
             }
             .padding(16)
         }
@@ -927,7 +1170,7 @@ private struct PanneauEtiquette: View {
             r.deposeLe.map { ("Déposée", DateBordereau.courte($0)) },
             model.detail?.analyse.nombrePages.map { ("Pages", "\($0)") },
         ].compactMap { $0 }
-        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], alignment: .leading, spacing: 8) {
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
             ForEach(lignes, id: \.0) { k, v in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(k.uppercased()).font(.system(size: 9.5, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.text3)
@@ -1078,29 +1321,31 @@ private struct PanneauEtiquette: View {
     }
 
     private var actions: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
             if let id = model.ouverteId {
                 Button {
                     ouvreSurLeSite("/bordereaux/editeur", [URLQueryItem(name: "colis", value: String(id))])
-                } label: { Label("Modifier dans l'éditeur", systemImage: "square.and.pencil") }
+                } label: { Label("Modifier", systemImage: "square.and.pencil").font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity) }
                     .boutonVerreFort()
-                    .help("L'éditeur, dans une fenêtre de l'app : un document de travail par-dessus l'étiquette, jamais l'étiquette elle-même")
+                    .help("L'éditeur : un document de travail par-dessus l'étiquette, jamais l'étiquette elle-même")
                 Button {
                     ouvreSurLeSite("/bordereaux/comparer", [URLQueryItem(name: "a", value: String(id))])
-                } label: { Label("Comparer", systemImage: "rectangle.split.2x1") }
+                } label: { Label("Comparer", systemImage: "rectangle.split.2x1").font(.system(size: 13, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity) }
                     .boutonVerre()
-                    .help("Le comparateur, dans une fenêtre de l'app")
             }
-            Button {
-                Task { await model.lis(force: true) }
-            } label: { Label("Relire les codes", systemImage: "arrow.clockwise") }
-                .boutonVerre()
-                .disabled(model.lectureEnCours)
-            Button {
-                enregistreOriginal()
-            } label: { Label("Fichier d'origine", systemImage: "square.and.arrow.down") }
-                .boutonVerre()
-                .disabled(model.octets == nil)
+            Menu {
+                Button { Task { await model.lis(force: true) } } label: { Label("Relire les codes", systemImage: "arrow.clockwise") }
+                    .disabled(model.lectureEnCours)
+                Button { enregistreOriginal() } label: { Label("Enregistrer le fichier d'origine…", systemImage: "square.and.arrow.down") }
+                    .disabled(model.octets == nil)
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 14, weight: .bold)).frame(width: 34, height: 34)
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(BoutonBarre())
+            .fixedSize()
+            .help("Relire les codes, fichier d'origine")
         }
     }
 
