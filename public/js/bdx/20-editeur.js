@@ -66,7 +66,7 @@ const ed = {
   position: -1,
   codes: new Map(), // "format|valeur" -> { largeur, hauteur, chemin } | promesse
   edition: null, // id du texte en cours d'edition directe
-  sauvegarde: { minuteur: null, enCours: false, sale: false, quand: null, erreur: null },
+  sauvegarde: { minuteur: null, enCours: false, sale: false, quand: null, erreur: null, version: 0 },
   geste: null,
   rendu: null,
   versionPage: 0, // change a chaque nouveau rendu de la page d'origine (les extraits se redessinent)
@@ -140,8 +140,17 @@ const choisis = () => visibles().filter((e) => ed.selection.has(e.id));
 
 // --- Historique (Ctrl/Cmd + Z, Ctrl/Cmd + Maj + Z, Ctrl + Y) ---------------------------------
 
+// Le document tel qu'il s'enregistre, s'exporte et entre dans l'historique :
+// sans les images ajoutees encore en route (leur contenu n'est pas sur le
+// serveur, qui refuserait tout le document ; elles entrent a leur arrivee).
+const enRoute = (e) => e.origine === "ajout" && e.type === "image" && !e.image;
+function modeleEnvoye() {
+  if (!ed.modele.pages.some((p) => p.elements.some(enRoute))) return ed.modele;
+  return { ...ed.modele, pages: ed.modele.pages.map((p) => ({ ...p, elements: p.elements.filter((e) => !enRoute(e)) })) };
+}
+
 function instantane() {
-  return JSON.stringify(ed.modele);
+  return JSON.stringify(modeleEnvoye());
 }
 
 // `initial` : le point de depart (rien a enregistrer)
@@ -232,10 +241,11 @@ function etatSauvegarde(texte, classe) {
 
 function planifieSauvegarde() {
   ed.sauvegarde.sale = true;
+  ed.sauvegarde.version += 1;
   etatSauvegarde("Modifications en cours…", "is-sale");
   // une copie de secours sur cet ordinateur, au cas ou le serveur ne repond pas
   try {
-    localStorage.setItem(`editeur.brouillon.${ed.colisId}`, JSON.stringify({ modele: ed.modele, quand: Date.now() }));
+    localStorage.setItem(`editeur.brouillon.${ed.colisId}`, JSON.stringify({ modele: modeleEnvoye(), quand: Date.now() }));
   } catch {}
   clearTimeout(ed.sauvegarde.minuteur);
   ed.sauvegarde.minuteur = setTimeout(sauvegarde, 1200);
@@ -247,11 +257,18 @@ async function sauvegarde() {
     return;
   }
   ed.sauvegarde.enCours = true;
+  // ce qui part maintenant : une modification faite pendant l'envoi reste a
+  // enregistrer (et sa copie de secours reste sur l'ordinateur)
+  const version = ed.sauvegarde.version;
   etatSauvegarde("Enregistrement…", "is-encours");
   try {
-    const r = await fetchJSON(`/api/bordereaux/${ed.colisId}/travail`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modele: ed.modele }) }, { delai: 20000 });
-    ed.sauvegarde.sale = false;
+    const r = await fetchJSON(`/api/bordereaux/${ed.colisId}/travail`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modele: modeleEnvoye() }) }, { delai: 20000 });
     ed.sauvegarde.quand = new Date(r.modifieLe);
+    if (version !== ed.sauvegarde.version) {
+      etatSauvegarde("Modifications en cours…", "is-sale");
+      return;
+    }
+    ed.sauvegarde.sale = false;
     etatSauvegarde(`Brouillon enregistré à ${ed.sauvegarde.quand.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`, "is-ok");
     try {
       localStorage.removeItem(`editeur.brouillon.${ed.colisId}`);
@@ -273,28 +290,38 @@ window.addEventListener("beforeunload", (e) => {
 
 // --- Les codes (regeneres par le serveur, dessines en SVG) -----------------------------------
 
+// Le cache : le dessin, sa promesse, ou { echec } (redemande a la prochaine
+// saisie, ou quand la page se redessine).
 async function codeDe(format, valeur, codeId = null) {
   const cle = `${format}|${valeur}`;
   const deja = ed.codes.get(cle);
-  if (deja) return deja instanceof Promise ? deja : deja;
+  if (deja && !deja.echec) return deja;
   const promesse = postJSON(`/api/bordereaux/${ed.colisId}/code`, { format, valeur, codeId }, { delai: 20000 })
     .then((c) => {
       ed.codes.set(cle, c);
       return c;
     })
     .catch((err) => {
-      ed.codes.delete(cle);
+      ed.codes.set(cle, { echec: true });
       throw err;
     });
   ed.codes.set(cle, promesse);
   return promesse;
 }
 
+// l'etat du dessin d'un code : 0 en attente, 1 pret, x impossible
+function etatCode(e) {
+  const c = ed.codes.get(`${e.format}|${e.valeur}`);
+  if (!c || c instanceof Promise) return "0";
+  return c.echec ? "x" : "1";
+}
+
 function svgCode(e) {
   const c = ed.codes.get(`${e.format}|${e.valeur}`);
+  if (c?.echec) return '<span class="ed-code-attente">Code impossible</span>';
   if (!c || c instanceof Promise) {
     codeDe(e.format, e.valeur, e.origine === "original" ? e.codeId : null).then(() => rendElements(), () => rendElements());
-    return `<span class="ed-code-attente">${c instanceof Promise ? "…" : "Code impossible"}</span>`;
+    return '<span class="ed-code-attente">…</span>';
   }
   // un code reecrit de l'etiquette garde l'orientation de l'original (comme a l'export)
   const q = codeLu(e)?.orientation || 0;
@@ -421,8 +448,7 @@ function majNoeud(n, e) {
     style += `;--taille:${e.taille};color:${e.couleur};text-align:${aligne};font:${CSS_POLICE[e.police] || CSS_POLICE.Helvetica};font-size:calc(var(--taille) * var(--e) * 1px)`;
     cle = `t|${ed.edition === e.id}|${e.texte}`;
   } else if (e.type === "code") {
-    const c = ed.codes.get(`${e.format}|${e.valeur}`);
-    cle = `c|${e.format}|${e.valeur}|${e.couleur}|${c && !(c instanceof Promise) ? 1 : 0}`;
+    cle = `c|${e.format}|${e.valeur}|${e.couleur}|${etatCode(e)}`;
   } else if (e.type === "image") {
     const src = sourceImage(e);
     cle = `i|${src?.url || ""}|${ed.recadrage === e.id}`;
@@ -506,6 +532,8 @@ function oublieNoeuds() {
   for (const n of ed.noeuds.values()) n.el.remove();
   ed.noeuds.clear();
   ed.masquesRendus = "";
+  // les codes qui n'avaient pas pu etre dessines sont redemandes
+  for (const [cle, c] of ed.codes) if (c?.echec) ed.codes.delete(cle);
 }
 
 function boiteDe(liste) {
@@ -1505,9 +1533,20 @@ async function envoieImage(prepa, fichier) {
   throw err;
 }
 
+// Pendant un envoi, le document peut changer : une page quittee, une
+// annulation (le modele est alors une copie de l'historique, sans l'objet
+// de depart). L'element se retrouve donc par son id, dans SA page.
+const dansPage = (page, id) => pageModele(page).elements.find((x) => x.id === id) || null;
+function retireDePage(page, id) {
+  const liste = pageModele(page).elements;
+  const i = liste.findIndex((x) => x.id === id);
+  if (i >= 0) liste.splice(i, 1);
+}
+
 // Remplace le contenu d'un cadre d'image (ou d'une image de l'etiquette) :
 // montre tout de suite, envoie, puis une seule etape d'historique.
 async function remplaceImage(cible, fichier) {
+  const page = ed.page;
   let e = cible.id ? element(cible.id) : null;
   let prise = false;
   if (!e && cible.cle) {
@@ -1519,7 +1558,7 @@ async function remplaceImage(cible, fichier) {
   try {
     prepa = await prepareImage(fichier);
   } catch (err) {
-    if (prise) elements().splice(elements().indexOf(e), 1);
+    if (prise) retireDePage(page, e.id);
     toast(err.message, "error");
     return;
   }
@@ -1534,16 +1573,27 @@ async function remplaceImage(cible, fichier) {
   try {
     const r = await envoieImage(prepa, fichier);
     ed.urls.set(r.ref, prepa.url);
-    e.image = { ref: r.ref, l: r.l, h: r.h };
     ed.apercus.delete(e.id);
+    let actuel = dansPage(page, e.id);
+    // une image de l'etiquette prise pour l'occasion, retiree par une
+    // annulation pendant l'envoi : elle revient (le depot reste voulu)
+    if (!actuel && prise) {
+      pageModele(page).elements.push(e);
+      actuel = e;
+    }
+    // un cadre supprime entre-temps : rien a remplir
+    if (!actuel) return rendTout();
+    actuel.image = { ref: r.ref, l: r.l, h: r.h };
+    actuel.cadrage = G.cadrage({ mode: G.cadrage(actuel.cadrage).mode });
+    marqueModifie(actuel);
     engage(prise || !avant.modifie ? "Remplacer une image de l'étiquette" : "Remplacer l'image");
     rendTout();
     flash(e.id);
   } catch (err) {
     ed.apercus.delete(e.id);
     URL.revokeObjectURL(prepa.url);
-    if (prise) elements().splice(elements().indexOf(e), 1);
-    else Object.assign(e, avant);
+    if (prise) retireDePage(page, e.id);
+    else if (dansPage(page, e.id) === e) Object.assign(e, avant);
     rendTout();
     refusImage(err);
   }
@@ -1574,6 +1624,7 @@ async function ajouteImage(fichier, point = null) {
     l = h * ratio;
   }
   const c = point || { x: ed.W / 2, y: ed.H / 2 };
+  const page = ed.page;
   const e = { id: uid(), type: "image", origine: "ajout", modifie: true, x: c.x - l / 2, y: c.y - h / 2, l, h, rotation: 0, image: null, cadrage: G.cadrage(), verrou: false };
   elements().push(e);
   ed.apercus.set(e.id, { url: prepa.url, l: prepa.l, h: prepa.h });
@@ -1585,13 +1636,16 @@ async function ajouteImage(fichier, point = null) {
     ed.urls.set(r.ref, prepa.url);
     e.image = { ref: r.ref, l: r.l, h: r.h };
     ed.apercus.delete(e.id);
+    // une annulation pendant l'envoi a repris un document sans elle : l'image
+    // deposee reste voulue, elle s'ajoute a ce document-la
+    if (!dansPage(page, e.id)) pageModele(page).elements.push(e);
     engage("Ajouter une image");
     rendTout();
     flash(e.id);
   } catch (err) {
     ed.apercus.delete(e.id);
     URL.revokeObjectURL(prepa.url);
-    elements().splice(elements().indexOf(e), 1);
+    retireDePage(page, e.id);
     ed.selection.delete(e.id);
     rendTout();
     refusImage(err);
@@ -1704,8 +1758,8 @@ function choisitFichier(quand) {
 // Recadrer : la molette (ou le pincement) zoome le contenu sous le pointeur
 let minuteurZoomContenu = null;
 function zoomeContenu(e, facteur, cx, cy) {
-  const src = sourceImage(e);
-  if (!src) return;
+  const src = e && sourceImage(e);
+  if (!src || !ed.noeuds.has(e.id)) return;
   const avant = G.cadrage(e.cadrage);
   const zoom = borne(avant.zoom * facteur, 1, G.ZOOM_MAX);
   if (zoom === avant.zoom) return;
@@ -2066,6 +2120,8 @@ async function allerPage(n) {
   finEdition(true);
   ed.page = n;
   ed.selection.clear();
+  // le recadrage d'une image de l'autre page s'arrete avec elle
+  ed.recadrage = null;
   if (ed.type === "pdf") {
     const pdfjs = await chargePdfjs();
     ed.pdfPage = await ed.doc.getPage(n);
@@ -2118,6 +2174,7 @@ function codesOriginaux(n) {
 // --- Le panneau : saisies -------------------------------------------------------------------
 
 let minuteurValeur = null;
+let minuteurClavier = null;
 $("ed-proprietes").addEventListener("input", (evt) => {
   const prop = evt.target.dataset.prop;
   const e = choisis()[0];
@@ -2219,10 +2276,17 @@ $("ed-proprietes").addEventListener("change", (evt) => {
 // une nouvelle valeur : le code est regenere par le serveur (qui refuse un
 // numero de suivi ou des donnees d'expedition)
 let minuteurHistoriqueCode = null;
+// la derniere valeur demandee pour chaque code : les reponses du serveur
+// peuvent arriver dans le desordre, seule la derniere saisie compte
+const valeursDemandees = new Map(); // id -> numero
 async function appliqueValeur(e, valeur, libelle = null, { silencieux = false } = {}) {
   const message = $("ed-message-code");
+  const numero = (valeursDemandees.get(e.id) || 0) + 1;
+  valeursDemandees.set(e.id, numero);
+  const depassee = () => valeursDemandees.get(e.id) !== numero;
   try {
     await codeDe(e.format, valeur, e.origine === "original" ? e.codeId : null);
+    if (depassee()) return;
     e.valeur = valeur;
     if (e.origine === "original") marqueReecrit(e);
     if (message) {
@@ -2236,6 +2300,7 @@ async function appliqueValeur(e, valeur, libelle = null, { silencieux = false } 
     if (silencieux) minuteurHistoriqueCode = setTimeout(() => engage(`Contenu du code → ${String(valeur).slice(0, 24)}`), 700);
     else engage(libelle || `Contenu du code → ${String(valeur).slice(0, 24)}`);
   } catch (err) {
+    if (depassee()) return;
     if (message) {
       message.textContent = err.message;
       message.className = "ed-message is-erreur";
@@ -2492,8 +2557,9 @@ document.addEventListener("keydown", (evt) => {
       marqueModifie(e);
     }
     rendElements();
-    clearTimeout(minuteurValeur);
-    minuteurValeur = setTimeout(() => {
+    // son propre minuteur : une saisie du panneau en attente n'est jamais annulee
+    clearTimeout(minuteurClavier);
+    minuteurClavier = setTimeout(() => {
       engage("Déplacer au clavier");
       rendTout();
     }, 400);
@@ -2523,7 +2589,7 @@ $("ed-exporter").addEventListener("click", async (evt) => {
     const res = await fetch(`/api/bordereaux/${ed.colisId}/travail/export`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ modele: ed.modele }),
+      body: JSON.stringify({ modele: modeleEnvoye() }),
     });
     if (!res.ok) {
       const corps = await res.json().catch(() => ({}));

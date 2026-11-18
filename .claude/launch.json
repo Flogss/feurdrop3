@@ -6,6 +6,12 @@
       "runtimeExecutable": "env",
       "runtimeArgs": ["TELEGRAM_BOT_TOKEN=000000:test-local", "SUIVI_BOT_TOKEN=", "node", "src/server.js"],
       "port": 3000
+    },
+    {
+      "name": "editeur-demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/demo-editeur.js"],
+      "port": 3001
     }
   ]
 }
