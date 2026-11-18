@@ -260,6 +260,40 @@ test("4 ter. la fenetre integree de l'app : un code a usage unique, 60 s, pages 
   sessions.horloge.maintenant = () => Date.now();
 });
 
+test("4 quater. la fenetre integree : rouverte, la meme session ; l'app deconnectee, la fenetre aussi", async () => {
+  const jeton = await jetonApp();
+  const code = async (j, chemin = "/bordereaux/editeur?colis=3") =>
+    (await anonyme("/api/auth/pont", { methode: "POST", corps: { chemin }, entetes: { Authorization: `Bearer ${j}` } })).json.url;
+  const ouvertes = () => db.db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE appareil LIKE '%fenêtre intégrée%' AND revoque_le IS NULL").get().n;
+
+  const fenetre = navigateur();
+  assert.equal((await fenetre.va(await code(jeton))).status, 302);
+  const premiere = fenetre.cookies.get("feurdrop_session");
+  // rouverte (le meme magasin de cookies) : la meme session, pas une de plus
+  const r = await fenetre.va(await code(jeton, "/bordereaux/comparer"));
+  assert.equal(r.entetes.get("location"), "/bordereaux/comparer");
+  assert.equal(fenetre.cookies.get("feurdrop_session"), premiere);
+  assert.equal(ouvertes(), 1);
+  assert.equal((await fenetre.va("/api/bordereaux/etat")).status, 200);
+
+  // l'app se deconnecte : la fenetre aussi, meme avec son cookie encore la
+  await anonyme("/api/auth/deconnexion", { methode: "POST", entetes: { Authorization: `Bearer ${jeton}` } });
+  assert.equal((await fenetre.va("/api/bordereaux/etat")).status, 401);
+  assert.equal(ouvertes(), 0);
+
+  // l'app reconnectee : une session neuve pour la fenetre, rattachee a la nouvelle
+  const autre = await jetonApp();
+  await fenetre.va(await code(autre));
+  assert.notEqual(fenetre.cookies.get("feurdrop_session"), premiere);
+  assert.equal((await fenetre.va("/api/bordereaux/etat")).status, 200);
+  assert.equal(ouvertes(), 1);
+  // et une connexion d'ailleurs ne la ferme pas (seule l'app dont elle est nee)
+  const ailleurs = navigateur();
+  await ailleurs.connecte();
+  await ailleurs.va("/api/auth/deconnexion", { methode: "POST" });
+  assert.equal((await fenetre.va("/api/bordereaux/etat")).status, 200);
+});
+
 // --- 5 et 6. 72 h, pas une minute de plus -------------------------------------------------
 
 test("5. 72 h apres la connexion, la session expire meme si le site sert tous les jours", async () => {

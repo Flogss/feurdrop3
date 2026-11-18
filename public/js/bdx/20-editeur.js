@@ -1442,6 +1442,9 @@ function orientationExif(octets) {
 }
 
 const COTE_MAX = 6000;
+// le serveur n'en prend pas plus (un PNG se decompresse en entier pour le
+// PDF : 16 Mpx, c'est deja sept fois une etiquette 10 x 15 a 300 dpi)
+const PIXELS_MAX = 16e6;
 
 // Une image prete (ses dimensions connues). decode() seul peut ne jamais
 // repondre quand la page n'est pas a l'ecran : le chargement suffit aussi.
@@ -1472,10 +1475,10 @@ async function prepareImage(fichier, { forcer = false } = {}) {
   const h = img.naturalHeight;
   const type = fichier.type === "image/png" || fichier.type === "image/jpeg" ? fichier.type : null;
   const droit = type !== "image/jpeg" || orientationExif(octets) === 1;
-  if (!forcer && type && droit && Math.max(l, h) <= COTE_MAX && octets.byteLength <= 14 * 1024 * 1024) {
+  if (!forcer && type && droit && Math.max(l, h) <= COTE_MAX && l * h <= PIXELS_MAX && octets.byteLength <= 14 * 1024 * 1024) {
     return { blob: new Blob([octets], { type }), l, h, url };
   }
-  const k = Math.min(1, COTE_MAX / Math.max(l, h));
+  const k = Math.min(1, COTE_MAX / Math.max(l, h), Math.sqrt(PIXELS_MAX / (l * h)) * 0.999);
   const toile = document.createElement("canvas");
   toile.width = Math.max(1, Math.round(l * k));
   toile.height = Math.max(1, Math.round(h * k));

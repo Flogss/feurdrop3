@@ -32,22 +32,25 @@ function nettoie(t) {
  * Ouvre une session neuve. Renvoie le jeton (a donner a l'appareil, jamais
  * garde). `finAuPlusTard` : une echeance plus proche que 72 h (jamais plus
  * loin) -- la fenetre integree de l'app ne survit pas a la session de l'app.
+ * `parent` : l'identifiant de la session de l'app dont nait celle d'une
+ * fenetre integree -- fermer l'app ferme aussi ses fenetres (voir revoque).
  */
-function cree({ type, appareil = null, finAuPlusTard = null }) {
+function cree({ type, appareil = null, finAuPlusTard = null, parent = null }) {
   if (!TYPES.has(type)) throw new Error("type de session inconnu");
   const jeton = crypto.randomBytes(32).toString("base64url");
   const id = empreinteJeton(jeton);
   const t = horloge.maintenant();
   const fin = Math.min(t + DUREE_MS, Number.isFinite(finAuPlusTard) ? finAuPlusTard : Infinity);
   nettoie(t);
-  db.prepare("INSERT INTO sessions (id, type, appareil, cree_le, expire_le, vu_le, mdp) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+  db.prepare("INSERT INTO sessions (id, type, appareil, cree_le, expire_le, vu_le, mdp, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
     id,
     type,
     appareil ? String(appareil).slice(0, 80) : null,
     t,
     fin,
     t,
-    versionMotDePasse()
+    versionMotDePasse(),
+    parent ? String(parent) : null
   );
   return { jeton, id, expireLe: fin };
 }
@@ -77,10 +80,15 @@ function lis(jeton) {
   return s;
 }
 
-/** Ferme la session d'un jeton (deconnexion). */
+/**
+ * Ferme la session d'un jeton (deconnexion), et celles des fenetres
+ * integrees nees d'elle : se deconnecter de l'app ferme aussi l'editeur et
+ * le comparateur ouverts depuis elle, dont le cookie reste sur le disque.
+ */
 function revoque(jeton) {
   if (typeof jeton !== "string" || !FORME_JETON.test(jeton)) return false;
-  return db.prepare("UPDATE sessions SET revoque_le = ? WHERE id = ? AND revoque_le IS NULL").run(horloge.maintenant(), empreinteJeton(jeton)).changes > 0;
+  const id = empreinteJeton(jeton);
+  return db.prepare("UPDATE sessions SET revoque_le = ? WHERE (id = ? OR parent_id = ?) AND revoque_le IS NULL").run(horloge.maintenant(), id, id).changes > 0;
 }
 
 /** Ferme toutes les sessions ouvertes, sur tous les appareils. Renvoie leur nombre. */

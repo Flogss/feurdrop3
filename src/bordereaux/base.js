@@ -6,8 +6,10 @@ const { cheminBase } = require("../db/connexion");
 // L'index des codes lus sur les etiquettes : une base a part, a cote de la
 // base principale (comme la copie des boites jaunes). Elle ne garde QUE ce qui
 // a ete lu -- formats, valeurs, positions -- jamais le fichier : les PDF et
-// photos restent la ou ils sont deja, sur Telegram (colis.file_id). La perdre
-// ne perd rien : tout se relit.
+// photos restent la ou ils sont deja, sur Telegram (colis.file_id). L'index
+// se relit ; ce que l'utilisateur pose lui-meme (categories, classements,
+// notes, brouillons de l'editeur) part dans la sauvegarde /save -- sauf les
+// images deposees dans l'editeur, a redeposer apres une restauration.
 //
 //   fichiers       un fichier analyse, reconnu a son empreinte SHA-256 (un
 //                  meme fichier n'est jamais relu deux fois, meme partage par
@@ -403,6 +405,30 @@ function gardeImage({ empreinte, type, largeur, hauteur, octets, colisId }) {
     .run(empreinte, type, largeur, hauteur, octets, colisId, maintenant());
 }
 
+/**
+ * Efface les images que plus aucun brouillon ne cite (brouillon efface,
+ * « Repartir de l'original », image retiree ou remplacee), deposees avant
+ * `avant` (date ISO). Le delai couvre l'image a peine deposee, pas encore
+ * dans le brouillon enregistre, et l'historique garde sur l'ordinateur (une
+ * etape annulee peut la citer encore). Une image partagee par plusieurs
+ * brouillons (meme empreinte) reste tant que l'un d'eux la cite. Renvoie le
+ * nombre d'images effacees.
+ */
+function purgeImages({ avant }) {
+  const b = ouvre();
+  const citees = new Set();
+  // (toute empreinte du modele compte : en garder une de trop ne coute rien)
+  for (const { modele } of b.prepare("SELECT modele FROM travaux").all()) {
+    for (const m of String(modele).matchAll(/[0-9a-f]{64}/g)) citees.add(m[0]);
+  }
+  const efface = b.prepare("DELETE FROM images_travail WHERE empreinte = ?");
+  let n = 0;
+  for (const { empreinte } of b.prepare("SELECT empreinte FROM images_travail WHERE cree_le < ?").all(String(avant))) {
+    if (!citees.has(empreinte)) n += efface.run(empreinte).changes;
+  }
+  return n;
+}
+
 /** Une image de document de travail : { type, largeur, hauteur, octets } ou null. */
 function imageTravail(empreinte) {
   const r = ouvre().prepare("SELECT type, largeur, hauteur, octets FROM images_travail WHERE empreinte = ?").get(String(empreinte || ""));
@@ -445,4 +471,5 @@ module.exports = {
   effaceTravail,
   gardeImage,
   imageTravail,
+  purgeImages,
 };

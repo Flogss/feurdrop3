@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { db } = require("./db");
+const bordereaux = require("./bordereaux/base");
 
 // /save : une sauvegarde des donnees de FeurDrop en un seul fichier JSON.
 //
@@ -8,6 +9,9 @@ const { db } = require("./db");
 // special, regles apprises, reglages -- et rien d'autre :
 //   - pas de fichier : les PDF et images vivent chez Telegram, la base ne
 //     garde que leur reference (file_id), qui suffit pour les reimprimer ;
+//   - de la base des bordereaux (bordereaux.db, a cote), ce que l'utilisateur
+//     y a pose lui-meme : categories, classements, notes, brouillons de
+//     l'editeur. L'index des codes lus, lui, se relit ;
 //   - pas de secret : jeton de l'agent d'impression, cles VAPID, secret des
 //     references du portail, liens prives des expediteurs, cles des
 //     abonnements push. Ils se regenerent (voir `exclusions` dans le fichier).
@@ -81,6 +85,11 @@ const CATEGORIES = [
     ordre: "created_at",
     ligne: ({ label, created_at, last_seen_at, seen_at, announced }) => ({ label, created_at, last_seen_at, seen_at, announced }),
   },
+  // --- la base des bordereaux (bordereaux.db) : ce qui ne se relit nulle part
+  { base: "bordereaux", table: "categories", nom: "categoriesBordereaux", libelle: "catégories de bordereaux", ordre: "id" },
+  { base: "bordereaux", table: "colis_categories", nom: "classementsBordereaux", libelle: "étiquettes classées", ordre: "colis_id" },
+  { base: "bordereaux", table: "annotations", nom: "notesBordereaux", libelle: "notes d'étude", ordre: "colis_id" },
+  { base: "bordereaux", table: "travaux", nom: "brouillonsEditeur", libelle: "brouillons de l'éditeur", ordre: "colis_id" },
 ];
 
 // tables internes de SQLite, rien a sauvegarder
@@ -100,6 +109,8 @@ const EXCLUSIONS = [
   "arrivees deja traitees (historique technique)",
   "sqlite_sequence (compteurs internes, recalcules a partir des identifiants)",
   "base du bot de suivi (suivi.db) : resultats de verification, regenerables",
+  "index des codes lus sur les etiquettes (bordereaux.db : fichiers, codes, liens) : relu depuis Telegram",
+  "images deposees dans l'editeur de bordereaux (bordereaux.db : images_travail) : a redeposer apres une restauration",
   "evenements des transporteurs du controle des depots (relus a la prochaine verification), pauses des transporteurs et campagnes « Tout verifier » en cours",
   "variables d'environnement (seuls leurs noms sont listes)",
 ];
@@ -134,12 +145,18 @@ const VARIABLES_CONNUES = [
 
 const sha256 = (texte) => crypto.createHash("sha256").update(texte).digest("hex");
 
-// Lit tout dans une seule transaction de lecture (meme instant pour toutes les
-// tables, aucune ecriture).
+// Lit tout dans une seule transaction de lecture par base (meme instant pour
+// toutes les tables, aucune ecriture).
 function instantane(fn) {
+  const bdx = bordereaux.ouvre();
   db.exec("BEGIN");
   try {
-    return fn();
+    bdx.exec("BEGIN");
+    try {
+      return fn(bdx);
+    } finally {
+      bdx.exec("COMMIT");
+    }
   } finally {
     db.exec("COMMIT");
   }
@@ -161,19 +178,21 @@ function sansBinaire(ligne) {
   return propre;
 }
 
-function lisDonnees() {
+function lisDonnees(bdx) {
   const tables = tablesDeLaBase();
-  const connues = new Set(CATEGORIES.map((c) => c.table));
+  const connues = new Set(CATEGORIES.filter((c) => !c.base).map((c) => c.table));
   const donnees = {};
   const schema = {};
   for (const t of tables) schema[t] = db.prepare(`PRAGMA table_info("${t}")`).all().map((c) => c.name);
 
   for (const cat of CATEGORIES) {
-    if (!tables.includes(cat.table)) {
+    // (la base des bordereaux cree ses tables a l'ouverture : elles sont la)
+    const source = cat.base === "bordereaux" ? bdx : db;
+    if (!cat.base && !tables.includes(cat.table)) {
       donnees[cat.nom] = [];
       continue;
     }
-    const lignes = db.prepare(`SELECT * FROM "${cat.table}" ORDER BY ${cat.ordre}`).all().map((l) => sansBinaire({ ...l }));
+    const lignes = source.prepare(`SELECT * FROM "${cat.table}" ORDER BY ${cat.ordre}`).all().map((l) => sansBinaire({ ...l }));
     donnees[cat.nom] = lignes.filter(cat.garde || (() => true)).map(cat.ligne || ((l) => l));
   }
   // une table ajoutee plus tard et pas encore classee : sauvegardee telle

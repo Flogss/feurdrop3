@@ -21,7 +21,7 @@ function baseTemporaire() {
 
 test("base neuve : toutes les migrations, puis plus rien a faire", () => {
   const db = baseTemporaire();
-  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux }), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
   assert.equal(versionDe(db), VERSION_SCHEMA);
   for (const c of ["type", "file_id", "printed_at", "note", "source_message_id", "price_locked"]) {
     assert.ok(colonnes(db, "colis").includes(c), c);
@@ -170,4 +170,13 @@ test("v12 : redrop et suivi garde ajoutes, rien de ce qui existe ne change ; Mon
   const s = db.prepare("SELECT * FROM controle_suivis").get();
   assert.deepEqual([s.statut, s.garde_le], ["non_confirme", null]);
   assert.equal(db.prepare("SELECT value FROM settings WHERE key = 'controle_lecture_coupee'").get().value, "GLS");
+});
+
+test("v13 : les sessions existantes restent ouvertes ; parent_id ajoute, vide", () => {
+  const db = baseTemporaire();
+  appliqueMigrations(db, { journal: silencieux, jusqua: 12 });
+  db.prepare("INSERT INTO sessions (id, type, appareil, cree_le, expire_le, vu_le, mdp) VALUES ('s1', 'app', 'Mac', 1, 2, 1, 'v')").run();
+  assert.deepEqual(appliqueMigrations(db, { journal: silencieux, jusqua: 13 }), [13]);
+  const s = db.prepare("SELECT * FROM sessions").get();
+  assert.deepEqual([s.id, s.type, s.revoque_le, s.parent_id], ["s1", "app", null, null]);
 });

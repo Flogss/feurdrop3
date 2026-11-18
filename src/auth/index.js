@@ -283,8 +283,9 @@ routesPrivees.post("/deconnexion-partout", (req, res) => {
 // bordereaux) dans sa propre fenetre. Plutot que de redemander le mot de
 // passe : l'app (connectee, jeton Bearer) demande un CODE a usage unique,
 // valable 60 secondes, pour une page de bordereaux precise ; la fenetre
-// l'echange contre sa propre session (cookie), qui ne survit jamais a celle
-// de l'app. Le code n'est garde qu'en empreinte, et ne sert qu'une fois.
+// l'echange contre sa propre session (cookie), rattachee a celle de l'app :
+// elle ne lui survit jamais, ni a son echeance ni a sa deconnexion. Le code
+// n'est garde qu'en empreinte, et ne sert qu'une fois.
 
 const PONT_DUREE_MS = 60 * 1000;
 const PAGES_DU_PONT = /^\/bordereaux(?:\/(?:editeur|comparer))?(?:\?[A-Za-z0-9=&%._-]*)?$/;
@@ -316,7 +317,14 @@ function pont(req, res) {
   codesPont.delete(cle); // une seule fois, meme rate
   const app = demande && demande.fin > t ? sessions.parId(demande.sessionId) : null;
   if (!app) return res.redirect(302, "/connexion");
-  const session = sessions.cree({ type: "web", appareil: `${app.appareil || "App"} · fenêtre intégrée`.slice(0, 80), finAuPlusTard: app.expire_le });
+  // la fenetre a deja sa session, nee de cette meme session de l'app : elle
+  // sert encore (une seule par app, pas une de plus a chaque ouverture)
+  const { jeton: ancien, via } = jetonDe(req);
+  const deja = via === "cookie" ? sessions.lis(ancien) : null;
+  if (deja && deja.parent_id === app.id) return res.redirect(302, demande.chemin);
+  // une ancienne (d'une session de l'app d'avant) : fermee
+  if (ancien) sessions.revoque(ancien);
+  const session = sessions.cree({ type: "web", appareil: `${app.appareil || "App"} · fenêtre intégrée`.slice(0, 80), finAuPlusTard: app.expire_le, parent: app.id });
   console.log(`[auth] fenêtre intégrée ouverte (${app.appareil || "app"})`);
   poseCookies(req, res, session);
   res.redirect(302, demande.chemin);

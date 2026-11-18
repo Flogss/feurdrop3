@@ -144,6 +144,27 @@ test("une base vide se sauvegarde aussi", () => {
   assert.equal(verifieSauvegarde(s.contenu.toString("utf8")).total, s.total);
 });
 
+test("les bordereaux : categories, classements, notes et brouillons sauvegardes ; ni l'index ni les images", () => {
+  const bdx = require("../src/bordereaux/base");
+  const b = bdx.ouvre();
+  for (const t of ["colis_categories", "categories", "annotations", "travaux", "images_travail", "codes", "colis_fichiers", "fichiers"]) b.exec(`DELETE FROM ${t}`);
+  b.prepare("INSERT INTO categories (id, nom, couleur, cree_le) VALUES (1, 'Retours', '#ff0000', '2026-11-18')").run();
+  b.prepare("INSERT INTO colis_categories (colis_id, categorie_id, classe_le) VALUES (7, 1, '2026-11-18')").run();
+  b.prepare("INSERT INTO annotations (colis_id, texte, modifie_le) VALUES (7, 'à revoir', '2026-11-18')").run();
+  b.prepare("INSERT INTO travaux (colis_id, modele, modifie_le) VALUES (7, '{\"pages\":[]}', '2026-11-18')").run();
+  b.prepare("INSERT INTO images_travail (empreinte, type, largeur, hauteur, octets, colis_id, cree_le) VALUES (?, 'png', 1, 1, ?, 7, '2026-11-18')").run("a".repeat(64), new Uint8Array([1, 2, 3]));
+  const s = creeSauvegarde();
+  const json = contenuDe(s);
+  assert.deepEqual(json.donnees.categoriesBordereaux.map((c) => c.nom), ["Retours"]);
+  assert.deepEqual(json.donnees.classementsBordereaux, [{ colis_id: 7, categorie_id: 1, classe_le: "2026-11-18" }]);
+  assert.equal(json.donnees.notesBordereaux[0].texte, "à revoir");
+  assert.equal(json.donnees.brouillonsEditeur[0].modele, '{"pages":[]}');
+  assert.ok(!("autresTables" in json.donnees) || !Object.keys(json.donnees.autresTables).some((t) => /images_travail|codes|fichiers/.test(t)));
+  assert.ok(json.exclusions.some((e) => /images_travail/.test(e)), "les images exclues sont dites");
+  assert.equal(verifieSauvegarde(s.contenu.toString("utf8")).total, s.total);
+  b.exec("DELETE FROM colis_categories; DELETE FROM categories; DELETE FROM annotations; DELETE FROM travaux; DELETE FROM images_travail");
+});
+
 test("une table inconnue (ajoutee plus tard) est sauvegardee plutot qu'oubliee", () => {
   db.db.exec("CREATE TABLE IF NOT EXISTS essai_futur (id INTEGER PRIMARY KEY, valeur TEXT)");
   db.db.prepare("INSERT INTO essai_futur (valeur) VALUES ('x')").run();

@@ -147,8 +147,10 @@ function repondEditeur(res, err) {
     return res.status(err.status).json({ error: err.message, protege: err.protege || false, transporteur: err.transporteur || null, reencoder: err.reencoder || false });
   }
   if (err instanceof ErreurLecteur) return res.status(503).json({ error: err.message });
+  // le detail (message SQL, chemin, pile) reste dans les journaux, comme
+  // pour toute erreur imprevue (voir http.js)
   console.error("[editeur]", err);
-  return res.status(500).json({ error: `Impossible : ${err.message}` });
+  return res.status(500).json({ error: "Erreur interne" });
 }
 
 router.get("/:id/travail", (req, res) => {

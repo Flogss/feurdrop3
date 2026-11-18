@@ -455,7 +455,12 @@ async function exportePdf(octets, modele, { titre = "Bordereau" } = {}) {
 
 const IMAGE_MAX_OCTETS = 15 * 1024 * 1024;
 const IMAGE_MAX_COTE = 12000;
-const IMAGE_MAX_PIXELS = 60e6;
+// Un PNG se decompresse EN ENTIER (pdf-lib, a l'import puis a l'export) et
+// le lecteur de codes decode toute image : la memoire suit les pixels, pas le
+// poids du fichier -- un PNG uni de 225 Ko a 59 Mpx demandait ~470 Mo. 16 Mpx
+// (~130 Mo au pire) suffisent largement (une etiquette 10 x 15 a 300 dpi en
+// fait 2,2) ; au-dela, la page redessine l'image plus petite (reencoder).
+const IMAGE_MAX_PIXELS = 16e6;
 
 // L'orientation EXIF d'un JPEG (1 = droite). Les navigateurs l'appliquent a
 // l'affichage, le PDF non : une photo tournee par EXIF s'afficherait d'une
@@ -502,7 +507,7 @@ async function importeImage(colisId, octets) {
   if (type !== "png" && type !== "jpeg") throw new ErreurEditeur("Format d'image non pris en charge (PNG ou JPEG).", 415, { reencoder: true });
   const d = dimensionsImage(octets);
   if (!d || d.largeur < 1 || d.hauteur < 1) throw new ErreurEditeur("Image illisible.", 422, { reencoder: true });
-  if (d.largeur > IMAGE_MAX_COTE || d.hauteur > IMAGE_MAX_COTE || d.largeur * d.hauteur > IMAGE_MAX_PIXELS) throw new ErreurEditeur("Image trop grande.", 413, { reencoder: true });
+  if (d.largeur > IMAGE_MAX_COTE || d.hauteur > IMAGE_MAX_COTE || d.largeur * d.hauteur > IMAGE_MAX_PIXELS) throw new ErreurEditeur("Image trop grande (16 mégapixels au plus).", 413, { reencoder: true });
   if (type === "jpeg" && orientationJpeg(octets) !== 1) throw new ErreurEditeur("Photo à redresser avant l'envoi.", 422, { reencoder: true });
   try {
     const essai = await PDFDocument.create();
@@ -538,4 +543,4 @@ async function exporte(colisId, modele, { telecharge, codesLus }) {
   return { pdf, nom: `${nom}-modifie.pdf`, modifications };
 }
 
-module.exports = { FORMATS, POLICES, ErreurEditeur, valeurRefusee, codeModifiable, angleDroit, genereCode, valideModele, verifieCodes, brouillon, gardeBrouillon, exporte, exportePdf, rectangles, importeImage, orientationJpeg, extrait };
+module.exports = { FORMATS, POLICES, ErreurEditeur, valeurRefusee, codeModifiable, angleDroit, genereCode, valideModele, verifieCodes, brouillon, gardeBrouillon, exporte, exportePdf, rectangles, importeImage, orientationJpeg, extrait, IMAGE_MAX_PIXELS };

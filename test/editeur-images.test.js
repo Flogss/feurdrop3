@@ -382,3 +382,68 @@ test("un code tourne de l'etiquette, reecrit : il reste tourne", async () => {
   assert.equal(Math.abs(Math.round(c.orientation)), 90, "toujours vertical");
   assert.ok((c.y1 - c.y0) * 432 > (c.x1 - c.x0) * 288 * 2, "dans sa zone verticale, pas ecrase");
 });
+
+test("les images que plus aucun brouillon ne cite s'effacent apres le delai ; les autres restent", () => {
+  const bdx = require("../src/bordereaux/base");
+  const b = bdx.ouvre();
+  b.exec("DELETE FROM travaux; DELETE FROM images_travail");
+  const img = (c, quand) =>
+    b.prepare("INSERT INTO images_travail (empreinte, type, largeur, hauteur, octets, colis_id, cree_le) VALUES (?, 'png', 1, 1, ?, 1, ?)").run(c.repeat(64), new Uint8Array([1]), quand);
+  img("a", "2026-01-01T00:00:00.000Z"); // vieille, citee par un brouillon
+  img("b", "2026-01-01T00:00:00.000Z"); // vieille, citee par plus rien : effacee
+  img("c", "2026-11-17T00:00:00.000Z"); // recente, pas encore citee : gardee
+  img("d", "2026-01-01T00:00:00.000Z"); // vieille, citee par le brouillon d'un AUTRE colis (meme empreinte)
+  bdx.gardeTravail(1, { pages: [{ page: 1, elements: [{ type: "image", image: { ref: "a".repeat(64) } }] }] });
+  bdx.gardeTravail(2, { pages: [{ page: 1, elements: [{ type: "image", image: { ref: "d".repeat(64) } }] }] });
+  assert.equal(bdx.purgeImages({ avant: "2026-10-19T00:00:00.000Z" }), 1);
+  const restent = b.prepare("SELECT substr(empreinte, 1, 1) AS e FROM images_travail ORDER BY e").all().map((r) => r.e);
+  assert.deepEqual(restent, ["a", "c", "d"]);
+  // « Repartir de l'original » : l'image n'est plus citee, effacee au passage suivant
+  bdx.effaceTravail(1);
+  assert.equal(bdx.purgeImages({ avant: "2026-10-19T00:00:00.000Z" }), 1);
+  assert.equal(bdx.imageTravail("a".repeat(64)), null);
+  b.exec("DELETE FROM travaux; DELETE FROM images_travail");
+});
+
+test("une image de plus de 16 Mpx est refusee avant d'etre decompressee : la page la redessine plus petite", async () => {
+  const colis = colisAvecFichier(await etiquettePdf([PAGE]));
+  // l'en-tete d'un PNG de 5000 x 4000 (20 Mpx) : refuse sur ses dimensions,
+  // sans rien decoder (un PNG uni de quelques Ko suffirait a remplir la memoire)
+  const entete = Buffer.alloc(33);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(entete, 0);
+  entete.writeUInt32BE(13, 8);
+  entete.write("IHDR", 12, "latin1");
+  entete.writeUInt32BE(5000, 16);
+  entete.writeUInt32BE(4000, 20);
+  entete[24] = 8;
+  entete[25] = 6;
+  const r = await envoieImage(colis.id, entete);
+  assert.equal(r.status, 413);
+  assert.equal(r.json.reencoder, true);
+  assert.match(r.json.error, /16 mégapixels/);
+  assert.equal(editeur.IMAGE_MAX_PIXELS, 16e6);
+});
+
+test("une erreur imprevue de l'editeur : « Erreur interne », le detail reste dans les journaux", async () => {
+  const colis = colisAvecFichier(await etiquettePdf([PAGE]));
+  const vrai = editeur.exporte;
+  const journal = console.error;
+  const lignes = [];
+  editeur.exporte = async () => {
+    throw new Error("SQLITE_IOERR: /data/bordereaux.db");
+  };
+  console.error = (...a) => lignes.push(a.map(String).join(" "));
+  try {
+    const r = await fetch(`${app.base}/api/bordereaux/${colis.id}/travail/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${app.jeton}` },
+      body: JSON.stringify({ modele: { pages: [] } }),
+    });
+    assert.equal(r.status, 500);
+    assert.deepEqual(await r.json(), { error: "Erreur interne" });
+    assert.ok(lignes.some((l) => l.includes("SQLITE_IOERR")), "le detail est journalise");
+  } finally {
+    editeur.exporte = vrai;
+    console.error = journal;
+  }
+});

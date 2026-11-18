@@ -536,6 +536,18 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 13,
+    nom: "sessions des fenetres integrees de l'app rattachees a sa session",
+    applique(db) {
+      // la session d'une fenetre integree (editeur, comparateur) nait de celle
+      // de l'app : `parent_id` la rattache, et la fermer ferme aussi ses
+      // fenetres (voir auth/sessions.js). Une colonne ajoutee, rien ne change.
+      const colonnes = db.prepare("PRAGMA table_info(sessions)").all().map((c) => c.name);
+      if (!colonnes.includes("parent_id")) db.exec("ALTER TABLE sessions ADD COLUMN parent_id TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_id)");
+    },
+  },
 ];
 
 const VERSION_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1].version;

@@ -508,9 +508,28 @@ function colisAIndexer() {
   });
 }
 
+// Les images de l'editeur que plus aucun brouillon ne cite : effacees apres
+// 30 jours, une fois par jour au plus (voir base.purgeImages).
+const IMAGES_GARDEES_JOURS = 30;
+let dernierePurge = 0;
+
+function purgeImagesOrphelines(t = Date.now()) {
+  if (t - dernierePurge < 24 * 3600 * 1000) return 0;
+  dernierePurge = t;
+  try {
+    const n = base.purgeImages({ avant: new Date(t - IMAGES_GARDEES_JOURS * 24 * 3600 * 1000).toISOString() });
+    if (n) console.log(`[bordereaux] ${n} image(s) de l'éditeur effacée(s) : plus citées par aucun brouillon depuis ${IMAGES_GARDEES_JOURS} jours`);
+    return n;
+  } catch (err) {
+    console.error("[bordereaux] purge des images :", err.message);
+    return 0;
+  }
+}
+
 async function cycleIndexation() {
   minuteurIndexation = null;
   let aFaire = [];
+  purgeImagesOrphelines();
   try {
     aFaire = colisAIndexer();
     indexation = { ...indexation, active: aFaire.length > 0, restants: aFaire.length };
