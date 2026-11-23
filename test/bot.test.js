@@ -69,6 +69,16 @@ test("un membre du groupe en prive : son fichier est pris en charge", async () =
   assert.equal(messagesA(MEMBRE, /réservé/).length, 0);
 });
 
+test("en prive, un PDF legende « MET ylui » part dans special", async () => {
+  const envoi = fichierPrive(ADMIN);
+  envoi.message.caption = "MET ylui";
+  envoi.message.document.file_name = "colis-special.pdf";
+  faux.livre(envoi);
+  const colis = () => db.db.prepare("SELECT type FROM colis WHERE file_name = 'colis-special.pdf'").get();
+  assert.ok(await faux.attends(() => colis()), "colis cree");
+  assert.equal(colis().type, "special");
+});
+
 test("le groupe de travail fonctionne comme avant, sans verification", async () => {
   const avant = faux.appelsDe("getChatMember").length;
   faux.livre({
