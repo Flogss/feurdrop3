@@ -91,7 +91,8 @@ const envoisGroupe = () => faux.appelsDe("sendDocument").filter((a) => Number(a.
 before(async () => {
   process.env.TELEGRAM_API_URL = await faux.demarre();
   process.env.TELEGRAM_ALLOWED_USERS = String(ADMIN);
-  process.env.FILE_REPRISES_MS = "";
+  // une reprise rapide : la coupure en plein decoupage est rejouee
+  process.env.FILE_REPRISES_MS = "50";
   process.env.REPLY_TTL_MS = "20";
   process.env.REPLY_LECTURE_MS = "20";
   process.env.BATCH_DEBOUNCE_MS = "50";
@@ -207,13 +208,46 @@ test("un bordereau pas encore pret n'a pas de page : l'ordre saute la ligne « �
   assert.deepEqual(colisTous().map((c) => [c.file_name, c.carrier]), [["8R50345899099.pdf", "LP"], ["8571271300.pdf", "MR"]]);
 });
 
-test("un nombre de pages qui ne colle pas : rien n'est decoupe au hasard", async () => {
+test("un nombre de pages qui ne colle pas : pas de decoupage au hasard, mais le PDF n'est jamais perdu", async () => {
   faux.livre(texte(LISTE));
   await faux.attends(() => reponses(/Liste PARIS94/).length >= 1);
   faux.fichier("PDF3", await pdfDe(3));
   faux.livre(pdf("PDF3", "PARIS94_2026-10-20.pdf"));
   assert.ok(await faux.attends(() => reponses(/a 3 pages, mais la liste PARIS94 annonce 4 étiquettes pas encore reçues/).length === 1, 8000));
-  assert.equal(colisTous().length, 0);
+  // un colis, ses 3 pages : il s'imprime en entier (avant : 0 colis, tout manquait)
+  assert.ok(await faux.attends(() => colisTous().length === 1, 8000), "le PDF est garde");
+  assert.equal(colisTous()[0].file_id, "PDF3");
+  assert.equal(reponses(/Je le garde en un seul colis : ses 3 pages s'impriment/).length, 1);
+  // l'avertissement reste : une vraie reponse au PDF, pas un message ephemere
+  assert.ok(reponses(/a 3 pages/)[0].params.reply_to_message_id, "en reponse au PDF");
+});
+
+test("une coupure en plein decoupage : la reprise suit le meme plan, aucune page ne manque", async () => {
+  // A est deja recu (les jours d'avant) ; le PDF porte B, C, D
+  faux.fichier("PDFA", await pdfDe(1));
+  faux.livre(pdf("PDFA", "8R50345800001.pdf"));
+  assert.ok(await faux.attends(() => colisTous().length === 1, 8000));
+
+  faux.livre(texte("📋 Mes drops du jour — PARIS94 (4 colis)\n  📄 8R50345800001\n  🆕 8R50345800002\n  🆕 8R50345800003\n  🆕 8R50345800004"));
+  await faux.attends(() => reponses(/3 étiquettes pas encore reçues/).length === 1);
+  // page 1 publiee, page 2 refusee par Telegram : le decoupage s'interrompt
+  faux.forceReponse("sendDocument", 200, {
+    ok: true,
+    result: { message_id: 9001, chat: { id: GROUPE, type: "supergroup" }, date: maintenant(), document: { file_id: "DOCP1", file_unique_id: "uDOCP1", file_name: "8R50345800002.pdf" } },
+  });
+  faux.forceReponse("sendDocument", 400, { ok: false, error_code: 400, description: "Bad Request: coupure simulee" });
+  faux.fichier("PDF3r", await pdfDe(3));
+  faux.livre(pdf("PDF3r", "PARIS94_2026-10-22.pdf"));
+
+  // la reprise : B deja publiee n'est pas recomptee, C et D arrivent (avant :
+  // le plan recalcule ne collait plus et C, D etaient perdues)
+  assert.ok(await faux.attends(() => colisTous().length === 4, 10000), `colis : ${colisTous().map((c) => c.file_name)}`);
+  assert.deepEqual(colisTous().map((c) => c.file_name), ["8R50345800001.pdf", "8R50345800002.pdf", "8R50345800003.pdf", "8R50345800004.pdf"]);
+  const pages = await Promise.all(
+    envoisGroupe().filter((e) => /8R5034580000[34]/.test(e.params._fichiers?.document?.nom || "")).map((e) => largeurs(e.params._fichiers.document.octets))
+  );
+  assert.deepEqual(pages.slice(-2), [[201], [202]], "C = page 2, D = page 3");
+  assert.equal(reponses(/n'a pas pu etre enregistre/).length, 0);
 });
 
 test("l'annonce arrivee apres le PDF pose la note sur l'etiquette deja recue", async () => {

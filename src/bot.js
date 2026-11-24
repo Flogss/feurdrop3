@@ -1097,10 +1097,25 @@ async function telechargeFichier(bot, fileId) {
 // Un numero deja recu n'est jamais recompte : un PDF renvoye, ou repris apres
 // une coupure, ne double rien.
 // Renvoie null quand ce PDF n'est pas celui de la liste (chemin habituel).
+function lisPlanDecoupe(cle) {
+  try {
+    const plan = JSON.parse(getSetting(cle, "null"));
+    return plan && Array.isArray(plan.entrees) && plan.entrees.length ? plan : null;
+  } catch {
+    return null;
+  }
+}
+
 async function decoupeSelonListe(bot, msg, attachment, batches) {
   if (attachment.kind !== "pdf") return null;
-  const liste = listeEnAttente(msg.chat.id);
-  if (!liste) return null;
+  // Le decoupage d'un PDF est decide UNE fois, a son premier essai, et garde :
+  // repris apres une coupure (un 429 a la page 5 sur 10), il suit le meme
+  // plan. Recalcule, il voyait les pages deja publiees comme « deja recues »,
+  // le compte ne collait plus, et les pages restantes etaient perdues.
+  const clePlan = `decoupe_pdf:${msg.chat.id}:${msg.message_id}`;
+  let plan = lisPlanDecoupe(clePlan);
+  const liste = plan ? null : listeEnAttente(msg.chat.id);
+  if (!plan && !liste) return null;
 
   const octets = await telechargeFichier(bot, attachment.fileId);
   let source;
@@ -1110,23 +1125,33 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
     return null; // illisible : le chemin habituel le garde tel quel
   }
   const pages = source.getPageCount();
-  const { concerne, complet, entrees, attendues } = pdfDeLaListe(liste, { fileName: attachment.fileName, pages }, dejaRecu);
-  if (!concerne) return null;
-  if (!complet) {
-    // l'ordre ne colle plus : decouper au hasard donnerait de faux numeros
-    replyEphemeral(
-      bot,
-      msg,
-      `⚠️ ${attachment.fileName || "Ce PDF"} a ${pages} page${pages > 1 ? "s" : ""}, mais la liste${liste.nom ? ` ${liste.nom}` : ""} annonce ` +
-        `${attendues.length} étiquette${attendues.length > 1 ? "s" : ""} pas encore reçue${attendues.length > 1 ? "s" : ""} : je ne le découpe pas. Renvoie la liste à jour, puis le PDF.`,
-      {},
-      2 * LECTURE_MS
-    );
-    return {};
+  if (plan && plan.entrees.length !== pages) plan = null;
+  if (!plan) {
+    if (!liste) return null;
+    const { concerne, complet, entrees, attendues } = pdfDeLaListe(liste, { fileName: attachment.fileName, pages }, dejaRecu);
+    if (!concerne) return null;
+    if (!complet) {
+      // L'ordre ne colle plus : decouper au hasard donnerait de faux numeros.
+      // Mais le PDF n'est jamais jete : il suit le chemin habituel, un colis
+      // dont toutes les pages s'impriment. Avant, il etait ecarte en entier
+      // -- toutes ses etiquettes manquaient a l'impression -- avec pour seul
+      // signe un message qui s'effacait au bout d'une minute.
+      bot
+        .sendMessage(
+          msg.chat.id,
+          `⚠️ ${attachment.fileName || "Ce PDF"} a ${pages} page${pages > 1 ? "s" : ""}, mais la liste${liste.nom ? ` ${liste.nom}` : ""} annonce ` +
+            `${attendues.length} étiquette${attendues.length > 1 ? "s" : ""} pas encore reçue${attendues.length > 1 ? "s" : ""} : je ne peux pas dire quelle page porte quel numéro.\n` +
+            `Je le garde en un seul colis : ses ${pages} pages s'impriment. Pour l'avoir découpé, /del en réponse à sa copie, puis renvoie la liste à jour et le PDF.`,
+          { ...threadOpts(msg), reply_to_message_id: msg.message_id, allow_sending_without_reply: true }
+        )
+        .catch((err) => console.error("[bot] avertissement decoupe", err.message));
+      return null;
+    }
+    // les poids de l'annonce, quand elle est la legende du PDF
+    plan = { entrees, poids: fusionnePoids(liste.poids, lisAnnoncePdf(msg.caption)?.poids) };
+    setSetting(clePlan, JSON.stringify(plan));
   }
-
-  // les poids de l'annonce, quand elle est la legende du PDF
-  const poids = fusionnePoids(liste.poids, lisAnnoncePdf(msg.caption)?.poids);
+  const { entrees, poids } = plan;
   const senderName = extractSenderName(msg);
   const crees = [];
   const doublons = [];
@@ -1183,6 +1208,7 @@ async function decoupeSelonListe(bot, msg, attachment, batches) {
   }
 
   oublieListe(msg.chat.id);
+  setSetting(clePlan, "null");
   queueReaction(bot, msg.chat.id, msg.message_id, REACTION_RECEIVED);
   const lignes = [
     `✂️ ${attachment.fileName || "PDF"} découpé : ${crees.length} étiquette${crees.length > 1 ? "s" : ""}` +
